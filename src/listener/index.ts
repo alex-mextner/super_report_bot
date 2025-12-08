@@ -28,6 +28,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const HISTORY_LIMIT = 1000;
 const RATE_LIMIT_DELAY = 2000; // 2 seconds between groups
+const RETRY_ATTEMPTS = 3;
+const RETRY_BASE_DELAY = 1000; // 1s -> 2s -> 4s exponential backoff
 
 export const mtClient = new TelegramClient({
   apiId: API_ID,
@@ -316,7 +318,7 @@ async function loadAllGroupsHistory(): Promise<void> {
   listenerLog.info({ ...getCacheStats() }, "All groups history loaded");
 }
 
-// Load history for a single group
+// Load history for a single group with retry logic
 async function loadGroupHistory(groupId: number, limit: number): Promise<void> {
   let groupTitle = "Unknown";
 
@@ -327,31 +329,47 @@ async function loadGroupHistory(groupId: number, limit: number): Promise<void> {
     // Ignore - use default title
   }
 
-  try {
-    let count = 0;
-    for await (const msg of mtClient.iterHistory(groupId, { limit })) {
-      if (msg.text) {
-        addMessage({
-          id: msg.id,
-          groupId,
-          groupTitle,
-          text: msg.text,
-          senderId: msg.sender?.id,
-          senderName: msg.sender?.displayName,
-          date: Math.floor(msg.date.getTime() / 1000),
-        });
-        count++;
+  for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
+    try {
+      let count = 0;
+      for await (const msg of mtClient.iterHistory(groupId, { limit })) {
+        if (msg.text) {
+          addMessage({
+            id: msg.id,
+            groupId,
+            groupTitle,
+            text: msg.text,
+            senderId: msg.sender?.id,
+            senderName: msg.sender?.displayName,
+            date: Math.floor(msg.date.getTime() / 1000),
+          });
+          count++;
+        }
       }
+      listenerLog.debug({ groupId, messagesLoaded: count }, "History loaded");
+      return; // success
+    } catch (e) {
+      if (tl.RpcError.is(e, "FLOOD_WAIT_%d")) {
+        const seconds = (e as tl.RpcError & { seconds: number }).seconds;
+        listenerLog.warn({ seconds, groupId }, "FloodWait, waiting...");
+        await sleep(seconds * 1000);
+        continue;
+      }
+
+      // Retry for CHANNEL_INVALID and network errors
+      const isRetryable =
+        tl.RpcError.is(e, "CHANNEL_INVALID") ||
+        (e instanceof Error && e.message.includes("network"));
+
+      if (isRetryable && attempt < RETRY_ATTEMPTS) {
+        const delay = RETRY_BASE_DELAY * Math.pow(2, attempt - 1);
+        listenerLog.warn({ groupId, attempt, delay, err: e }, "Retrying history load...");
+        await sleep(delay);
+        continue;
+      }
+
+      throw e;
     }
-    listenerLog.debug({ groupId, messagesLoaded: count }, "History loaded");
-  } catch (e) {
-    if (tl.RpcError.is(e, "FLOOD_WAIT_%d")) {
-      const seconds = (e as tl.RpcError & { seconds: number }).seconds;
-      listenerLog.warn({ seconds, groupId }, "FloodWait, waiting...");
-      await sleep(seconds * 1000);
-      return loadGroupHistory(groupId, limit); // retry
-    }
-    throw e;
   }
 }
 
