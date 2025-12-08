@@ -1,10 +1,21 @@
 import { TelegramClient, Message } from "@mtcute/bun";
+import { tl } from "@mtcute/bun";
 import { queries } from "../db/index.ts";
 import { matchMessageAgainstAll } from "../matcher/index.ts";
 import { verifyMatch } from "../llm/verify.ts";
 import { notifyUser } from "../bot/index.ts";
 import { listenerLog } from "../logger.ts";
 import type { IncomingMessage, Subscription } from "../types.ts";
+import {
+  addMessage,
+  updateMessage,
+  deleteMessage,
+  getMessages,
+  isCacheReady,
+  setCacheReady,
+  getCacheStats,
+  type CachedMessage,
+} from "../cache/messages.ts";
 
 const API_ID = Number(process.env.API_ID);
 const API_HASH = process.env.API_HASH;
@@ -12,6 +23,11 @@ const API_HASH = process.env.API_HASH;
 if (!API_ID || !API_HASH) {
   throw new Error("API_ID and API_HASH are required for MTProto");
 }
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const HISTORY_LIMIT = 1000;
+const RATE_LIMIT_DELAY = 2000; // 2 seconds between groups
 
 export const mtClient = new TelegramClient({
   apiId: API_ID,
@@ -192,15 +208,65 @@ async function getUserTelegramId(userId: number): Promise<number | null> {
 
 // Setup message handler
 export function setupMessageHandler(): void {
+  // Handle new messages
   mtClient.onNewMessage.add(async (msg) => {
     try {
+      // Add to cache
+      const cached = messageToCached(msg);
+      if (cached) {
+        addMessage(cached);
+      }
+
+      // Process for subscriptions
       await processMessage(msg);
     } catch (error) {
       listenerLog.error({ err: error }, "Error processing message");
     }
   });
 
-  listenerLog.info("Message handler registered");
+  // Handle edited messages
+  mtClient.onEditMessage.add((msg) => {
+    try {
+      if (msg.chat.type === "chat" && msg.chat.isGroup && msg.text) {
+        updateMessage(msg.chat.id, msg.id, msg.text);
+      }
+    } catch (error) {
+      listenerLog.error({ err: error }, "Error handling edit");
+    }
+  });
+
+  // Handle deleted messages
+  mtClient.onDeleteMessage.add((upd) => {
+    try {
+      // upd contains messageIds and optionally channelId
+      const chatId = upd.channelId ?? 0;
+      for (const msgId of upd.messageIds) {
+        deleteMessage(chatId, msgId);
+      }
+    } catch (error) {
+      listenerLog.error({ err: error }, "Error handling delete");
+    }
+  });
+
+  listenerLog.info("Message handlers registered");
+}
+
+// Convert Message to CachedMessage
+function messageToCached(msg: Message): CachedMessage | null {
+  if (!msg.text) return null;
+
+  const chat = msg.chat;
+  if (chat.type !== "chat" || !chat.isGroup) return null;
+
+  return {
+    id: msg.id,
+    groupId: chat.id,
+    groupTitle: chat.title || "Unknown",
+    text: msg.text,
+    senderId: msg.sender?.id,
+    senderName: msg.sender?.displayName,
+    date: Math.floor(msg.date.getTime() / 1000),
+  };
 }
 
 // Start the MTProto client
@@ -215,7 +281,75 @@ export async function startListener(): Promise<void> {
 
   listenerLog.info({ userId: user.id, name: user.displayName }, "Logged in");
 
+  // Setup handlers immediately - bot is ready
   setupMessageHandler();
+
+  // Load history in background (non-blocking)
+  loadAllGroupsHistory().catch((e) => listenerLog.error({ err: e }, "Failed to load history"));
+}
+
+// Load history for all monitored groups
+async function loadAllGroupsHistory(): Promise<void> {
+  // Get all unique groups from subscriptions
+  const groupIds = queries.getAllSubscriptionGroupIds();
+
+  listenerLog.info({ groupCount: groupIds.length }, "Starting history load for groups");
+
+  for (const groupId of groupIds) {
+    try {
+      await loadGroupHistory(groupId, HISTORY_LIMIT);
+      setCacheReady(groupId, true);
+      listenerLog.info({ groupId, ...getCacheStats() }, "Group history loaded");
+    } catch (error) {
+      listenerLog.error({ err: error, groupId }, "Failed to load group history");
+    }
+
+    // Rate limit delay between groups
+    if (groupIds.indexOf(groupId) < groupIds.length - 1) {
+      await sleep(RATE_LIMIT_DELAY);
+    }
+  }
+
+  listenerLog.info({ ...getCacheStats() }, "All groups history loaded");
+}
+
+// Load history for a single group
+async function loadGroupHistory(groupId: number, limit: number): Promise<void> {
+  let groupTitle = "Unknown";
+
+  try {
+    const chat = await mtClient.getChat(groupId);
+    groupTitle = chat.title || "Unknown";
+  } catch {
+    // Ignore - use default title
+  }
+
+  try {
+    let count = 0;
+    for await (const msg of mtClient.iterHistory(groupId, { limit })) {
+      if (msg.text) {
+        addMessage({
+          id: msg.id,
+          groupId,
+          groupTitle,
+          text: msg.text,
+          senderId: msg.sender?.id,
+          senderName: msg.sender?.displayName,
+          date: Math.floor(msg.date.getTime() / 1000),
+        });
+        count++;
+      }
+    }
+    listenerLog.debug({ groupId, messagesLoaded: count }, "History loaded");
+  } catch (e) {
+    if (tl.RpcError.is(e, "FLOOD_WAIT_%d")) {
+      const seconds = (e as tl.RpcError & { seconds: number }).seconds;
+      listenerLog.warn({ seconds, groupId }, "FloodWait, waiting...");
+      await sleep(seconds * 1000);
+      return loadGroupHistory(groupId, limit); // retry
+    }
+    throw e;
+  }
 }
 
 // Stop the client
@@ -363,6 +497,113 @@ export async function scanGroupHistory(
   listenerLog.info(
     { processed: processedCount, candidates: candidateCount, matches: matchCount },
     "Scan complete"
+  );
+  return matchCount;
+}
+
+// Scan messages from in-memory cache (no Telegram API calls)
+export async function scanFromCache(
+  groupIds: number[],
+  subscriptionId: number
+): Promise<number> {
+  listenerLog.info({ groupIds, subscriptionId }, "Scanning from cache");
+
+  const subscription = getSubscriptions().find((s) => s.id === subscriptionId);
+  if (!subscription) {
+    listenerLog.warn({ subscriptionId }, "Subscription not found for cache scan");
+    return 0;
+  }
+
+  // Wait for cache to be ready for all groups
+  for (const groupId of groupIds) {
+    let waitCount = 0;
+    while (!isCacheReady(groupId)) {
+      waitCount++;
+      if (waitCount === 1) {
+        listenerLog.info({ groupId }, "Waiting for cache to be ready...");
+      }
+      await sleep(1000);
+
+      // Timeout after 5 minutes
+      if (waitCount > 300) {
+        listenerLog.warn({ groupId }, "Cache wait timeout, skipping group");
+        break;
+      }
+    }
+  }
+
+  let matchCount = 0;
+  let processedCount = 0;
+
+  for (const groupId of groupIds) {
+    if (!isCacheReady(groupId)) continue;
+
+    const messages = getMessages(groupId);
+    listenerLog.debug({ groupId, messageCount: messages.length }, "Scanning cached messages");
+
+    for (const msg of messages) {
+      processedCount++;
+
+      // Check deduplication
+      if (queries.isMessageMatched(subscriptionId, msg.id, groupId)) {
+        continue;
+      }
+
+      // Convert to IncomingMessage format
+      const incomingMsg: IncomingMessage = {
+        id: msg.id,
+        group_id: msg.groupId,
+        group_title: msg.groupTitle,
+        text: msg.text,
+        sender_name: msg.senderName || "Unknown",
+        timestamp: new Date(msg.date * 1000),
+      };
+
+      // N-gram filter
+      const candidates = matchMessageAgainstAll(incomingMsg, [subscription]);
+      if (candidates.length === 0) continue;
+
+      // LLM verification
+      try {
+        const verification = await verifyMatch(incomingMsg, subscription);
+
+        if (verification.isMatch) {
+          matchCount++;
+          queries.markMessageMatched(subscriptionId, msg.id, groupId);
+
+          const userTelegramId = await getUserTelegramId(subscription.user_id);
+          if (userTelegramId) {
+            await notifyUser(
+              userTelegramId,
+              msg.groupTitle,
+              msg.text,
+              subscription.original_query
+            );
+          }
+        }
+      } catch (error) {
+        // On LLM error, use score threshold
+        const candidate = candidates[0];
+        if (candidate && candidate.score > 0.7) {
+          matchCount++;
+          queries.markMessageMatched(subscriptionId, msg.id, groupId);
+          const userTelegramId = await getUserTelegramId(subscription.user_id);
+          if (userTelegramId) {
+            await notifyUser(
+              userTelegramId,
+              msg.groupTitle,
+              msg.text,
+              subscription.original_query
+            );
+          }
+        }
+      }
+    }
+  }
+
+  listenerLog.info(
+    { processed: processedCount, matches: matchCount, subscriptionId },
+    "Cache scan complete"
   );
   return matchCount;
 }

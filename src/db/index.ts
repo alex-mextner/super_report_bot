@@ -104,6 +104,13 @@ const stmts = {
      SET negative_keywords = ?, disabled_negative_keywords = ?
      WHERE id = ? AND user_id = (SELECT id FROM users WHERE telegram_id = ?)`
   ),
+
+  // Get all unique group IDs from active subscription groups
+  getAllSubscriptionGroupIds: db.prepare<{ group_id: number }, []>(
+    `SELECT DISTINCT sg.group_id FROM subscription_groups sg
+     JOIN subscriptions s ON sg.subscription_id = s.id
+     WHERE s.is_active = 1`
+  ),
 };
 
 // Helper to parse JSON fields from subscription
@@ -289,6 +296,11 @@ export const queries = {
         telegramId
       );
     }
+  },
+
+  // Get all unique group IDs from active subscriptions
+  getAllSubscriptionGroupIds(): number[] {
+    return stmts.getAllSubscriptionGroupIds.all().map((row) => row.group_id);
   },
 };
 

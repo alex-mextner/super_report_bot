@@ -13,6 +13,7 @@ import {
   invalidateSubscriptionsCache,
   isUserbotMember,
   ensureUserbotInGroup,
+  scanFromCache,
 } from "../listener/index.ts";
 import { botLog } from "../logger.ts";
 import type { UserState, KeywordGenerationResult, PendingGroup } from "../types.ts";
@@ -892,7 +893,17 @@ ${bold("Выбери группы для мониторинга:")}
 
       if (selectedGroups.length > 0) {
         const groupNames = selectedGroups.map((g) => g.title).join(", ");
-        await context.editText(`Подписка создана! Мониторинг групп: ${groupNames}`);
+        await context.editText(
+          `Подписка создана! Мониторинг групп: ${groupNames}\n\n⏳ Сканирую историю сообщений...`
+        );
+
+        // Scan cache in background
+        const groupIds = selectedGroups.map((g) => g.id);
+        scanFromCache(groupIds, subscriptionId)
+          .then((count) => {
+            botLog.info({ count, subscriptionId }, "Cache scan complete");
+          })
+          .catch((e) => botLog.error(e, "Cache scan failed"));
       } else {
         await context.editText(
           "Подписка создана! Группы не выбраны, мониторинг будет по всем доступным."
