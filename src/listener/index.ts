@@ -32,7 +32,7 @@ const RETRY_ATTEMPTS = 10;
 const RETRY_BASE_DELAY = 2000; // 2s -> 4s -> 8s -> ... exponential backoff
 const RETRY_MAX_DELAY = 120000; // cap at 2 minutes
 
-export const mtClient = new TelegramClient({
+export let mtClient = new TelegramClient({
   apiId: API_ID,
   apiHash: API_HASH,
   storage: "userbot.session",
@@ -266,6 +266,13 @@ async function reconnectClient(): Promise<void> {
   } catch (e) {
     listenerLog.warn({ err: e }, "Error destroying client (continuing anyway)");
   }
+
+  // Create NEW client instance (destroyed client cannot be restarted)
+  mtClient = new TelegramClient({
+    apiId: API_ID,
+    apiHash: API_HASH!,
+    storage: "userbot.session",
+  });
 
   const user = await mtClient.start({
     phone: () => mtClient.input("Phone number: "),
