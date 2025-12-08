@@ -1,4 +1,5 @@
 import { generateNgrams, generateWordShingles } from "./normalize.ts";
+import { matcherLog } from "../logger.ts";
 
 /**
  * Calculate Jaccard similarity between two sets
@@ -46,6 +47,15 @@ export function calculateNgramSimilarity(
 
   // Combined score: word shingles weighted higher as they capture meaning better
   const combinedScore = charNgramScore * 0.3 + wordShingleScore * 0.7;
+
+  matcherLog.trace(
+    {
+      charNgramScore: charNgramScore.toFixed(3),
+      wordShingleScore: wordShingleScore.toFixed(3),
+      combinedScore: combinedScore.toFixed(3),
+    },
+    "N-gram similarity breakdown"
+  );
 
   return {
     charNgramScore,
@@ -100,8 +110,21 @@ export function calculateKeywordNgramSimilarity(
   // 2. Soft coverage: average coverage across all keywords
   const softCoverage = totalCoverage / positiveKeywords.length;
 
+  const score = binaryCoverage * 0.7 + softCoverage * 0.3;
+
+  matcherLog.trace(
+    {
+      keywordsFound: keywordsCovered,
+      totalKeywords: positiveKeywords.length,
+      binaryCoverage: binaryCoverage.toFixed(3),
+      softCoverage: softCoverage.toFixed(3),
+      score: score.toFixed(3),
+    },
+    "Keyword coverage breakdown"
+  );
+
   // Combine: binary is more important (you either found the keyword or not)
-  return binaryCoverage * 0.7 + softCoverage * 0.3;
+  return score;
 }
 
 /**

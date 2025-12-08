@@ -1,10 +1,17 @@
 import { hf, MODELS, withRetry } from "./index.ts";
+import { llmLog } from "../logger.ts";
 import type { Subscription, IncomingMessage } from "../types.ts";
 
 export interface VerificationResult {
   isMatch: boolean;
   confidence: number;
   label: string;
+}
+
+interface ZeroShotResult {
+  labels: string[];
+  scores: number[];
+  sequence: string;
 }
 
 /**
@@ -33,16 +40,27 @@ export async function verifyMatch(
   });
 
   // Result is array of { labels: string[], scores: number[], sequence: string }
-  const result = results[0];
+  const result = (results as unknown as ZeroShotResult[])[0];
   if (!result) {
     return { isMatch: false, confidence: 0, label: "no_result" };
   }
 
-  const matchIndex = result.labels.findIndex((l: string) => l.includes("matches"));
+  const matchIndex = result.labels.findIndex((l) => l.includes("matches"));
   const matchScore = matchIndex >= 0 ? result.scores[matchIndex] ?? 0 : 0;
+  const isMatch = matchScore > 0.6;
+
+  llmLog.debug(
+    {
+      subscriptionId: subscription.id,
+      confidence: matchScore.toFixed(3),
+      isMatch,
+      textPreview: text.slice(0, 50),
+    },
+    isMatch ? "LLM match" : "LLM no match"
+  );
 
   return {
-    isMatch: matchScore > 0.6,
+    isMatch,
     confidence: matchScore,
     label: result.labels[0] ?? "unknown",
   };
@@ -64,7 +82,7 @@ export async function verifyMatches(
       const result = await verifyMatch(message, subscription);
       results.set(subscription.id, result);
     } catch (error) {
-      console.error(`Failed to verify match for subscription ${subscription.id}:`, error);
+      llmLog.error({ err: error, subscriptionId: subscription.id }, "Failed to verify match");
       // On error, assume no match
       results.set(subscription.id, {
         isMatch: false,

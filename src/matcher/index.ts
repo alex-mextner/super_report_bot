@@ -1,5 +1,6 @@
 import { passesNgramFilter } from "./ngram.ts";
 import { tokenize } from "./normalize.ts";
+import { matcherLog } from "../logger.ts";
 import type { Subscription, MatchResult, IncomingMessage } from "../types.ts";
 
 export interface MatcherConfig {
@@ -29,6 +30,10 @@ export function matchMessage(
     for (const negKw of subscription.negative_keywords) {
       const negTokens = tokenize(negKw);
       if (negTokens.some((t) => textTokens.has(t))) {
+        matcherLog.debug(
+          { subscriptionId: subscription.id, negativeKeyword: negKw },
+          "Negative keyword hit"
+        );
         return null; // Negative keyword found, skip
       }
     }
@@ -40,6 +45,16 @@ export function matchMessage(
     subscription.positive_keywords,
     subscription.llm_description,
     config.ngramThreshold
+  );
+
+  matcherLog.debug(
+    {
+      subscriptionId: subscription.id,
+      score: ngram.score.toFixed(3),
+      passed: ngram.passed,
+      threshold: config.ngramThreshold,
+    },
+    ngram.passed ? "N-gram passed" : "N-gram rejected"
   );
 
   if (!ngram.passed) {

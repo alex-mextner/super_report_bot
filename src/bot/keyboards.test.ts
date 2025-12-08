@@ -17,15 +17,15 @@ describe("confirmKeyboard", () => {
     expect(json.inline_keyboard.length).toBe(2); // Two rows
 
     // First row: Confirm and Edit
-    const firstRow = json.inline_keyboard[0];
+    const firstRow = json.inline_keyboard[0]!;
     expect(firstRow.length).toBe(2);
-    expect(firstRow[0].text).toBe("Подтвердить");
-    expect(firstRow[1].text).toBe("Изменить");
+    expect(firstRow[0]!.text).toBe("Подтвердить");
+    expect(firstRow[1]!.text).toBe("Изменить");
 
     // Second row: Cancel
-    const secondRow = json.inline_keyboard[1];
+    const secondRow = json.inline_keyboard[1]!;
     expect(secondRow.length).toBe(1);
-    expect(secondRow[0].text).toBe("Отмена");
+    expect(secondRow[0]!.text).toBe("Отмена");
   });
 
   test("includes query ID in callback data", () => {
@@ -33,8 +33,8 @@ describe("confirmKeyboard", () => {
     const keyboard = confirmKeyboard(queryId);
     const json = keyboard.toJSON();
 
-    const confirmButton = json.inline_keyboard[0][0];
-    const confirmData = JSON.parse(confirmButton.callback_data);
+    const confirmButton = json.inline_keyboard[0]![0]!;
+    const confirmData = JSON.parse((confirmButton as { callback_data: string }).callback_data);
 
     expect(confirmData.action).toBe("confirm");
     expect(confirmData.id).toBe(queryId);
@@ -46,7 +46,7 @@ describe("confirmKeyboard", () => {
 
     for (const row of json.inline_keyboard) {
       for (const button of row) {
-        expect(() => JSON.parse(button.callback_data)).not.toThrow();
+        expect(() => JSON.parse((button as { callback_data: string }).callback_data)).not.toThrow();
       }
     }
   });
@@ -58,8 +58,8 @@ describe("subscriptionKeyboard", () => {
     const json = keyboard.toJSON();
 
     expect(json.inline_keyboard.length).toBe(1);
-    expect(json.inline_keyboard[0].length).toBe(1);
-    expect(json.inline_keyboard[0][0].text).toBe("Отключить");
+    expect(json.inline_keyboard[0]!.length).toBe(1);
+    expect(json.inline_keyboard[0]![0]!.text).toBe("Отключить");
   });
 
   test("includes subscription ID in callback data", () => {
@@ -67,8 +67,8 @@ describe("subscriptionKeyboard", () => {
     const keyboard = subscriptionKeyboard(subscriptionId);
     const json = keyboard.toJSON();
 
-    const disableButton = json.inline_keyboard[0][0];
-    const data = JSON.parse(disableButton.callback_data);
+    const disableButton = json.inline_keyboard[0]![0]!;
+    const data = JSON.parse((disableButton as { callback_data: string }).callback_data);
 
     expect(data.action).toBe("disable");
     expect(data.id).toBe(subscriptionId);
@@ -81,15 +81,15 @@ describe("backKeyboard", () => {
     const json = keyboard.toJSON();
 
     expect(json.inline_keyboard.length).toBe(1);
-    expect(json.inline_keyboard[0].length).toBe(1);
-    expect(json.inline_keyboard[0][0].text).toBe("Назад");
+    expect(json.inline_keyboard[0]!.length).toBe(1);
+    expect(json.inline_keyboard[0]![0]!.text).toBe("Назад");
   });
 
   test("has back action in callback data", () => {
     const keyboard = backKeyboard();
     const json = keyboard.toJSON();
 
-    const data = JSON.parse(json.inline_keyboard[0][0].callback_data);
+    const data = JSON.parse((json.inline_keyboard[0]![0]! as { callback_data: string }).callback_data);
     expect(data.action).toBe("back");
   });
 });
@@ -118,9 +118,9 @@ describe("groupsKeyboard", () => {
     const json = keyboard.toJSON();
 
     // First group should have checkmark
-    expect(json.inline_keyboard[0][0].text).toBe("✅ Group 1");
+    expect(json.inline_keyboard[0]![0]!.text).toBe("✅ Group 1");
     // Second group should not
-    expect(json.inline_keyboard[1][0].text).toBe("Group 2");
+    expect(json.inline_keyboard[1]![0]!.text).toBe("Group 2");
   });
 
   test("includes toggle_group action with group ID", () => {
@@ -128,7 +128,7 @@ describe("groupsKeyboard", () => {
     const keyboard = groupsKeyboard(groups, new Set());
     const json = keyboard.toJSON();
 
-    const data = JSON.parse(json.inline_keyboard[0][0].callback_data);
+    const data = JSON.parse((json.inline_keyboard[0]![0]! as { callback_data: string }).callback_data);
     expect(data.action).toBe("toggle_group");
     expect(data.id).toBe(42);
   });
@@ -140,13 +140,13 @@ describe("groupsKeyboard", () => {
 
     // Find the row with select/deselect all buttons
     const controlRow = json.inline_keyboard.find(
-      (row: any[]) =>
-        row.some((btn: any) => btn.text === "Выбрать все") &&
-        row.some((btn: any) => btn.text === "Снять все")
+      (row) =>
+        row.some((btn) => btn.text === "Выбрать все") &&
+        row.some((btn) => btn.text === "Снять все")
     );
 
     expect(controlRow).toBeDefined();
-    expect(controlRow.length).toBe(2);
+    expect(controlRow!.length).toBe(2);
   });
 
   test("shows 'Готово' when groups selected", () => {
@@ -158,12 +158,12 @@ describe("groupsKeyboard", () => {
     // Find confirm button
     const confirmButton = json.inline_keyboard
       .flat()
-      .find((btn: any) => btn.text.includes("Готово"));
+      .find((btn) => btn.text?.includes("Готово"));
 
     expect(confirmButton).toBeDefined();
-    expect(confirmButton.text).toBe("Готово (1)");
+    expect(confirmButton!.text).toBe("Готово (1)");
 
-    const data = JSON.parse(confirmButton.callback_data);
+    const data = JSON.parse((confirmButton as { callback_data: string }).callback_data);
     expect(data.action).toBe("confirm_groups");
   });
 
@@ -175,11 +175,11 @@ describe("groupsKeyboard", () => {
     // Find skip button
     const skipButton = json.inline_keyboard
       .flat()
-      .find((btn: any) => btn.text === "Пропустить");
+      .find((btn) => btn.text === "Пропустить");
 
     expect(skipButton).toBeDefined();
 
-    const data = JSON.parse(skipButton.callback_data);
+    const data = JSON.parse((skipButton as { callback_data: string }).callback_data);
     expect(data.action).toBe("skip_groups");
   });
 
@@ -191,11 +191,11 @@ describe("groupsKeyboard", () => {
     // Find cancel button
     const cancelButton = json.inline_keyboard
       .flat()
-      .find((btn: any) => btn.text === "Отмена");
+      .find((btn) => btn.text === "Отмена");
 
     expect(cancelButton).toBeDefined();
 
-    const data = JSON.parse(cancelButton.callback_data);
+    const data = JSON.parse((cancelButton as { callback_data: string }).callback_data);
     expect(data.action).toBe("cancel");
   });
 
@@ -235,8 +235,8 @@ describe("groupsKeyboard", () => {
 
     const confirmButton = json.inline_keyboard
       .flat()
-      .find((btn: any) => btn.text.includes("Готово"));
+      .find((btn) => btn.text?.includes("Готово"));
 
-    expect(confirmButton.text).toBe("Готово (3)");
+    expect(confirmButton!.text).toBe("Готово (3)");
   });
 });

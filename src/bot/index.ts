@@ -3,6 +3,7 @@ import { queries } from "../db/index.ts";
 import { generateKeywords, generateKeywordsFallback } from "../llm/keywords.ts";
 import { confirmKeyboard, subscriptionKeyboard, groupsKeyboard } from "./keyboards.ts";
 import { getUserGroups, invalidateSubscriptionsCache } from "../listener/index.ts";
+import { botLog } from "../logger.ts";
 import type { UserState, KeywordGenerationResult } from "../types.ts";
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -173,7 +174,7 @@ ${code(updated.negative_keywords.join(", ") || "нет")}
   try {
     result = await generateKeywords(query);
   } catch (error) {
-    console.error("LLM error:", error);
+    botLog.error({ err: error, userId }, "LLM keyword generation failed");
     result = generateKeywordsFallback(query);
     await context.send("Не удалось использовать AI, использую простой алгоритм.");
   }
@@ -242,7 +243,7 @@ bot.on("callback_query", async (context) => {
         const userGroups = await getUserGroups();
         groups = userGroups.map((g) => ({ id: g.id, title: g.title }));
       } catch (error) {
-        console.error("Failed to get groups:", error);
+        botLog.error({ err: error, userId }, "Failed to get groups");
         // If can't get groups, create subscription without them
         const { original_query, positive_keywords, negative_keywords, llm_description } =
           state.pending_subscription;
@@ -469,7 +470,7 @@ ${bold("Выбери группы для мониторинга:")}
 
 // Error handler
 bot.onError(({ context, error }) => {
-  console.error("Bot error:", error);
+  botLog.error({ err: error }, "Bot error");
 });
 
 /**
@@ -486,7 +487,8 @@ export async function notifyUser(
       chat_id: telegramId,
       text: `🔔 Найдено совпадение!\n\nГруппа: ${groupTitle}\n\nЗапрос: ${subscriptionQuery}\n\nСообщение:\n${messageText.slice(0, 500)}${messageText.length > 500 ? "..." : ""}`,
     });
+    botLog.debug({ userId: telegramId, groupTitle }, "Notification sent");
   } catch (error) {
-    console.error(`Failed to notify user ${telegramId}:`, error);
+    botLog.error({ err: error, userId: telegramId }, "Failed to notify user");
   }
 }

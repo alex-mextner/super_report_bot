@@ -12,47 +12,47 @@
 
 import { bot } from "./bot/index.ts";
 import { startListener, stopListener, invalidateSubscriptionsCache } from "./listener/index.ts";
+import { logger } from "./logger.ts";
 
 // Re-export for external use
 export { invalidateSubscriptionsCache };
 
 async function main() {
-  console.log("Starting Super Report Bot...\n");
+  logger.info("Starting Super Report Bot...");
 
   // Check required env vars
   const requiredEnvVars = ["BOT_TOKEN", "API_ID", "API_HASH"];
   const missing = requiredEnvVars.filter((v) => !process.env[v]);
 
   if (missing.length > 0) {
-    console.error(`Missing required environment variables: ${missing.join(", ")}`);
-    console.error("Copy .env.example to .env and fill in the values.");
+    logger.fatal({ missing }, "Missing required environment variables");
+    logger.fatal("Copy .env.example to .env and fill in the values.");
     process.exit(1);
   }
 
   if (!process.env.HF_TOKEN) {
-    console.warn("Warning: HF_TOKEN not set. LLM features will be disabled.");
+    logger.warn("HF_TOKEN not set. LLM features will be disabled.");
   }
 
   // Start gramio bot
-  console.log("[bot] Starting gramio bot...");
+  logger.info({ component: "bot" }, "Starting gramio bot...");
   bot.start();
-  console.log("[bot] Bot started");
+  logger.info({ component: "bot" }, "Bot started");
 
   // Start MTProto listener
   try {
     await startListener();
   } catch (error) {
-    console.error("[listener] Failed to start MTProto client:", error);
-    console.error("Run 'bun run auth' first to authenticate the userbot.");
+    logger.error({ err: error, component: "listener" }, "Failed to start MTProto client");
+    logger.error("Run 'bun run auth' first to authenticate the userbot.");
     // Continue running the bot even if listener fails
   }
 
-  console.log("\n✓ Super Report Bot is running");
-  console.log("Press Ctrl+C to stop\n");
+  logger.info("Super Report Bot is running. Press Ctrl+C to stop.");
 
   // Graceful shutdown
   const shutdown = async () => {
-    console.log("\nShutting down...");
+    logger.info("Shutting down...");
 
     try {
       await stopListener();
@@ -74,6 +74,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("Fatal error:", error);
+  logger.fatal({ err: error }, "Fatal error");
   process.exit(1);
 });

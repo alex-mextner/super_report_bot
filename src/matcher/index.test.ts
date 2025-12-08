@@ -238,7 +238,7 @@ describe("matchMessageAgainstAll", () => {
 
     // Check that results are sorted by score descending
     for (let i = 1; i < results.length; i++) {
-      expect(results[i - 1].score).toBeGreaterThanOrEqual(results[i].score);
+      expect(results[i - 1]!.score).toBeGreaterThanOrEqual(results[i]!.score);
     }
   });
 

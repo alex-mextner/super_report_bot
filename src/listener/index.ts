@@ -3,6 +3,7 @@ import { queries } from "../db/index.ts";
 import { matchMessageAgainstAll } from "../matcher/index.ts";
 import { verifyMatch } from "../llm/verify.ts";
 import { notifyUser } from "../bot/index.ts";
+import { listenerLog } from "../logger.ts";
 import type { IncomingMessage, Subscription } from "../types.ts";
 
 const API_ID = Number(process.env.API_ID);
@@ -28,7 +29,7 @@ function getSubscriptions(): Subscription[] {
   if (now - cacheLastUpdate > CACHE_TTL) {
     subscriptionsCache = queries.getActiveSubscriptions();
     cacheLastUpdate = now;
-    console.log(`[listener] Loaded ${subscriptionsCache.length} active subscriptions`);
+    listenerLog.debug({ count: subscriptionsCache.length }, "Cache refreshed");
   }
   return subscriptionsCache;
 }
@@ -68,6 +69,17 @@ async function processMessage(msg: Message): Promise<void> {
   const incomingMsg = toIncomingMessage(msg);
   if (!incomingMsg) return;
 
+  listenerLog.debug(
+    {
+      event: "message_received",
+      groupId: incomingMsg.group_id,
+      groupTitle: incomingMsg.group_title,
+      textPreview: incomingMsg.text.slice(0, 60),
+      sender: incomingMsg.sender_name,
+    },
+    "New message"
+  );
+
   const subscriptions = getSubscriptions();
   if (subscriptions.length === 0) return;
 
@@ -75,8 +87,14 @@ async function processMessage(msg: Message): Promise<void> {
   const candidates = matchMessageAgainstAll(incomingMsg, subscriptions);
   if (candidates.length === 0) return;
 
-  console.log(
-    `[listener] Message "${incomingMsg.text.slice(0, 50)}..." matched ${candidates.length} subscriptions`
+  listenerLog.info(
+    {
+      event: "candidates_found",
+      count: candidates.length,
+      topScore: candidates[0]?.score.toFixed(3),
+      textPreview: incomingMsg.text.slice(0, 50),
+    },
+    "Candidates found"
   );
 
   // Stage 3: LLM verification for each candidate
@@ -85,6 +103,10 @@ async function processMessage(msg: Message): Promise<void> {
 
     // Check deduplication
     if (queries.isMessageMatched(subscription.id, incomingMsg.id, incomingMsg.group_id)) {
+      listenerLog.debug(
+        { subscriptionId: subscription.id, messageId: incomingMsg.id },
+        "Duplicate skipped"
+      );
       continue;
     }
 
@@ -92,15 +114,20 @@ async function processMessage(msg: Message): Promise<void> {
       const verification = await verifyMatch(incomingMsg, subscription);
 
       if (verification.isMatch) {
-        console.log(
-          `[listener] LLM verified match (confidence: ${verification.confidence.toFixed(2)}) for subscription ${subscription.id}`
+        listenerLog.info(
+          {
+            event: "llm_verified",
+            subscriptionId: subscription.id,
+            confidence: verification.confidence.toFixed(3),
+            ngramScore: candidate.score.toFixed(3),
+          },
+          "Match verified"
         );
 
         // Mark as matched
         queries.markMessageMatched(subscription.id, incomingMsg.id, incomingMsg.group_id);
 
         // Get user telegram_id from subscription
-        // Note: We need to add a query to get user telegram_id by subscription
         const userTelegramId = await getUserTelegramId(subscription.user_id);
         if (userTelegramId) {
           await notifyUser(
@@ -109,12 +136,34 @@ async function processMessage(msg: Message): Promise<void> {
             incomingMsg.text,
             subscription.original_query
           );
+          listenerLog.info(
+            {
+              event: "notification_sent",
+              userId: userTelegramId,
+              subscriptionId: subscription.id,
+              groupTitle: incomingMsg.group_title,
+            },
+            "User notified"
+          );
         }
+      } else {
+        listenerLog.debug(
+          {
+            event: "llm_rejected",
+            subscriptionId: subscription.id,
+            confidence: verification.confidence.toFixed(3),
+          },
+          "LLM rejected"
+        );
       }
     } catch (error) {
-      console.error(`[listener] LLM verification failed:`, error);
+      listenerLog.error({ err: error, subscriptionId: subscription.id }, "LLM verification failed");
       // On LLM error, skip verification and notify anyway if score is high enough
       if (candidate.score > 0.7) {
+        listenerLog.warn(
+          { subscriptionId: subscription.id, score: candidate.score.toFixed(3) },
+          "Fallback: notifying due to high score"
+        );
         queries.markMessageMatched(subscription.id, incomingMsg.id, incomingMsg.group_id);
         const userTelegramId = await getUserTelegramId(subscription.user_id);
         if (userTelegramId) {
@@ -147,16 +196,16 @@ export function setupMessageHandler(): void {
     try {
       await processMessage(msg);
     } catch (error) {
-      console.error("[listener] Error processing message:", error);
+      listenerLog.error({ err: error }, "Error processing message");
     }
   });
 
-  console.log("[listener] Message handler registered");
+  listenerLog.info("Message handler registered");
 }
 
 // Start the MTProto client
 export async function startListener(): Promise<void> {
-  console.log("[listener] Starting MTProto client...");
+  listenerLog.info("Starting MTProto client...");
 
   const user = await mtClient.start({
     phone: () => mtClient.input("Phone number: "),
@@ -164,14 +213,14 @@ export async function startListener(): Promise<void> {
     password: () => mtClient.input("2FA Password: "),
   });
 
-  console.log(`[listener] Logged in as ${user.displayName} (${user.id})`);
+  listenerLog.info({ userId: user.id, name: user.displayName }, "Logged in");
 
   setupMessageHandler();
 }
 
 // Stop the client
 export async function stopListener(): Promise<void> {
-  console.log("[listener] Stopping MTProto client...");
+  listenerLog.info("Stopping MTProto client...");
   await mtClient.destroy();
 }
 
@@ -209,15 +258,23 @@ export async function scanGroupHistory(
   subscriptionId: number,
   limit: number = 100
 ): Promise<number> {
-  console.log(`[listener] Scanning history for group ${groupId}, subscription ${subscriptionId}`);
+  listenerLog.info({ groupId, subscriptionId, limit }, "Scanning history");
 
-  const subscriptions = getSubscriptions().filter((s) => s.id === subscriptionId);
-  if (subscriptions.length === 0) {
-    console.log(`[listener] Subscription ${subscriptionId} not found`);
+  const subscription = getSubscriptions().find((s) => s.id === subscriptionId);
+  if (!subscription) {
+    listenerLog.warn({ subscriptionId }, "Subscription not found");
     return 0;
   }
 
-  console.log(`[listener] Subscription keywords: +[${subscriptions[0].positive_keywords.join(", ")}] -[${subscriptions[0].negative_keywords.join(", ")}]`);
+  const subscriptions = [subscription];
+
+  listenerLog.debug(
+    {
+      positiveKw: subscription.positive_keywords,
+      negativeKw: subscription.negative_keywords,
+    },
+    "Subscription keywords"
+  );
 
   let matchCount = 0;
   let processedCount = 0;
@@ -234,7 +291,10 @@ export async function scanGroupHistory(
 
       // Debug: show first few messages
       if (processedCount <= 3) {
-        console.log(`[listener] Sample msg #${processedCount}: "${incomingMsg.text.slice(0, 100)}..."`);
+        listenerLog.debug(
+          { n: processedCount, textPreview: incomingMsg.text.slice(0, 100) },
+          "Sample message"
+        );
       }
 
       // Check against the specific subscription
@@ -242,7 +302,16 @@ export async function scanGroupHistory(
       if (candidates.length === 0) continue;
 
       candidateCount++;
-      console.log(`[listener] Candidate found: "${incomingMsg.text.slice(0, 80)}..." (score: ${candidates[0].score.toFixed(2)})`);
+      const topCandidate = candidates[0];
+      if (topCandidate) {
+        listenerLog.info(
+          {
+            textPreview: incomingMsg.text.slice(0, 60),
+            score: topCandidate.score.toFixed(3),
+          },
+          "Candidate found"
+        );
+      }
 
       for (const candidate of candidates) {
         const { subscription } = candidate;
@@ -288,9 +357,12 @@ export async function scanGroupHistory(
       }
     }
   } catch (error) {
-    console.error(`[listener] Error scanning group ${groupId}:`, error);
+    listenerLog.error({ err: error, groupId }, "Error scanning group");
   }
 
-  console.log(`[listener] Scan complete: processed=${processedCount}, candidates=${candidateCount}, matches=${matchCount}`);
+  listenerLog.info(
+    { processed: processedCount, candidates: candidateCount, matches: matchCount },
+    "Scan complete"
+  );
   return matchCount;
 }

@@ -1,9 +1,10 @@
 import { InferenceClient } from "@huggingface/inference";
+import { llmLog } from "../logger.ts";
 
 const HF_TOKEN = process.env.HF_TOKEN;
 
 if (!HF_TOKEN) {
-  console.warn("Warning: HF_TOKEN not set. LLM features will not work.");
+  llmLog.warn("HF_TOKEN not set. LLM features will not work.");
 }
 
 export const hf = new InferenceClient(HF_TOKEN);
@@ -49,13 +50,19 @@ export async function withRetry<T>(
       return await withRateLimit(fn);
     } catch (error) {
       lastError = error as Error;
-      const isRateLimit =
-        error instanceof Error &&
-        (error.message.includes("rate limit") || error.message.includes("429"));
+      const errorMsg = error instanceof Error ? error.message : String(error);
 
-      if (isRateLimit) {
+      const isRetryable =
+        errorMsg.includes("rate limit") ||
+        errorMsg.includes("429") ||
+        errorMsg.includes("502") ||
+        errorMsg.includes("503") ||
+        errorMsg.includes("504") ||
+        errorMsg.includes("timeout");
+
+      if (isRetryable && i < maxRetries - 1) {
         const delay = baseDelay * Math.pow(2, i);
-        console.log(`Rate limited, retrying in ${delay}ms...`);
+        llmLog.debug({ delay, attempt: i + 1, error: errorMsg.slice(0, 100) }, "Retryable error, retrying");
         await new Promise((resolve) => setTimeout(resolve, delay));
       } else {
         throw error;
