@@ -11,7 +11,7 @@ import {
 import type { PendingGroup } from "../types.ts";
 
 describe("confirmKeyboard", () => {
-  test("creates keyboard with confirm, edit, regenerate and cancel buttons", () => {
+  test("creates keyboard with confirm, regenerate, edit and cancel buttons", () => {
     const keyboard = confirmKeyboard("test_query_id");
 
     // InlineKeyboard has a .toJSON() method that returns the keyboard structure
@@ -20,16 +20,17 @@ describe("confirmKeyboard", () => {
     expect(json.inline_keyboard).toBeDefined();
     expect(json.inline_keyboard.length).toBe(3); // Three rows
 
-    // First row: Confirm and Edit
+    // First row: Confirm and Regenerate
     const firstRow = json.inline_keyboard[0]!;
     expect(firstRow.length).toBe(2);
     expect(firstRow[0]!.text).toBe("Подтвердить");
-    expect(firstRow[1]!.text).toBe("Изменить");
+    expect(firstRow[1]!.text).toBe("🤖 Перегенерировать");
 
-    // Second row: Regenerate
+    // Second row: Edit positive and negative
     const secondRow = json.inline_keyboard[1]!;
-    expect(secondRow.length).toBe(1);
-    expect(secondRow[0]!.text).toBe("🤖 Перегенерировать");
+    expect(secondRow.length).toBe(2);
+    expect(secondRow[0]!.text).toBe("✏️ + слова");
+    expect(secondRow[1]!.text).toBe("✏️ − слова");
 
     // Third row: Cancel
     const thirdRow = json.inline_keyboard[2]!;
