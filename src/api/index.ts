@@ -6,6 +6,7 @@ import { validateInitData, parseInitDataUser } from "./auth.ts";
 import { apiLog } from "../logger.ts";
 import { getMessages, getAllCachedMessages, getCachedGroups, getCachedMessageById } from "../cache/messages.ts";
 import { analyzeMessage, analyzeMessagesBatch, type BatchItem } from "../llm/analyze.ts";
+import { generateNgrams, generateWordShingles } from "../matcher/normalize.ts";
 
 const ADMIN_ID = Number(process.env.ADMIN_ID) || 0;
 
@@ -208,12 +209,37 @@ function getProductsFromCache(search?: string, groupId?: number, offset = 0, lim
   // Sort by date descending
   allMessages.sort((a, b) => b.message_date - a.message_date);
 
-  // Filter by search
+  // Fuzzy search with n-gram similarity
   if (search) {
-    const searchLower = search.toLowerCase();
-    allMessages = allMessages.filter((m) =>
-      m.text.toLowerCase().includes(searchLower)
-    );
+    const results = fuzzySearch(allMessages, search, 0.15); // min threshold to filter garbage
+
+    // Add score and matchType to items
+    const scoredItems = results.map((r) => ({
+      ...r.item,
+      _score: r.score,
+      _matchType: r.score >= 0.8 ? "exact" : r.score >= 0.5 ? "good" : "partial",
+    }));
+
+    const total = scoredItems.length;
+    const items = scoredItems.slice(offset, offset + limit);
+
+    // Count by match type
+    const exactCount = results.filter((r) => r.score >= 0.8).length;
+    const goodCount = results.filter((r) => r.score >= 0.5 && r.score < 0.8).length;
+    const partialCount = results.filter((r) => r.score < 0.5).length;
+
+    return {
+      items,
+      offset,
+      limit,
+      total,
+      hasMore: offset + items.length < total,
+      searchStats: {
+        exactCount,
+        goodCount,
+        partialCount,
+      },
+    };
   }
 
   const total = allMessages.length;
@@ -226,6 +252,79 @@ function getProductsFromCache(search?: string, groupId?: number, offset = 0, lim
     total,
     hasMore: offset + items.length < total,
   };
+}
+
+/**
+ * Jaccard similarity between two sets
+ */
+export function jaccardSimilarity<T>(setA: Set<T>, setB: Set<T>): number {
+  if (setA.size === 0 && setB.size === 0) return 1;
+  if (setA.size === 0 || setB.size === 0) return 0;
+
+  let intersection = 0;
+  for (const item of setA) {
+    if (setB.has(item)) intersection++;
+  }
+  return intersection / (setA.size + setB.size - intersection);
+}
+
+export interface FuzzySearchResult<T> {
+  item: T;
+  score: number;
+}
+
+/**
+ * Calculate what fraction of query n-grams are found in text
+ * Asymmetric: checks if query is IN text, not symmetric similarity
+ */
+function queryCoverage(textNgrams: Set<string>, queryNgrams: Set<string>): number {
+  if (queryNgrams.size === 0) return 1;
+
+  let found = 0;
+  for (const ng of queryNgrams) {
+    if (textNgrams.has(ng)) found++;
+  }
+  return found / queryNgrams.size;
+}
+
+/**
+ * Fuzzy search with n-gram similarity
+ * Uses asymmetric coverage: what fraction of query is found in text
+ * Returns items sorted by relevance score
+ */
+export function fuzzySearch<T extends { text: string }>(
+  items: T[],
+  query: string,
+  threshold: number = 0.3
+): FuzzySearchResult<T>[] {
+  if (!query || query.trim().length === 0) {
+    return items.map((item) => ({ item, score: 1 }));
+  }
+
+  const queryNgrams = generateNgrams(query, 3);
+  const queryShingles = generateWordShingles(query, 2);
+  const isSingleWord = queryShingles.size === 1;
+
+  const scored = items.map((item) => {
+    const textNgrams = generateNgrams(item.text, 3);
+    const textShingles = generateWordShingles(item.text, 2);
+
+    // Asymmetric: how much of the query is found in the text
+    const charCoverage = queryCoverage(textNgrams, queryNgrams);
+    const wordCoverage = queryCoverage(textShingles, queryShingles);
+
+    // For single-word queries, rely more on character n-grams
+    // (word shingles won't match because text has bigrams like "word1 word2")
+    const score = isSingleWord
+      ? charCoverage
+      : charCoverage * 0.4 + wordCoverage * 0.6;
+
+    return { item, score };
+  });
+
+  return scored
+    .filter((r) => r.score >= threshold)
+    .sort((a, b) => b.score - a.score);
 }
 
 /**

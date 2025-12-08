@@ -10,7 +10,7 @@ export function HomePage() {
   const [search, setSearch] = useState("");
 
   const { groups } = useGroups();
-  const { products, loading, hasMore, loadMore } = useProducts(
+  const { products, loading, hasMore, loadMore, total, searchStats } = useProducts(
     groupId ?? undefined,
     search || undefined
   );
@@ -24,6 +24,9 @@ export function HomePage() {
         loading={loading}
         hasMore={hasMore}
         onLoadMore={loadMore}
+        total={total}
+        searchStats={searchStats}
+        isSearching={!!search}
       />
     </div>
   );

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { apiClient } from "../api/client";
-import type { Product, ProductsResponse, ProductWithContacts, SimilarResponse } from "../types";
+import type { Product, ProductsResponse, ProductWithContacts, SimilarResponse, SearchStats } from "../types";
 
 export function useProducts(groupId?: number, search?: string) {
   const [products, setProducts] = useState<Product[]>([]);
@@ -8,6 +8,8 @@ export function useProducts(groupId?: number, search?: string) {
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [searchStats, setSearchStats] = useState<SearchStats | null>(null);
 
   const fetchProducts = useCallback(
     async (reset = false) => {
@@ -26,7 +28,7 @@ export function useProducts(groupId?: number, search?: string) {
           `/api/products?${params.toString()}`
         );
 
-        console.log("[useProducts] fetched", { itemsCount: data.items.length, total: data.total, hasMore: data.hasMore });
+        console.log("[useProducts] fetched", { itemsCount: data.items.length, total: data.total, hasMore: data.hasMore, searchStats: data.searchStats });
 
         if (reset) {
           setProducts(data.items);
@@ -34,8 +36,10 @@ export function useProducts(groupId?: number, search?: string) {
           setProducts((prev) => [...prev, ...data.items]);
         }
 
+        setTotal(data.total);
         setHasMore(data.hasMore);
         setOffset(currentOffset + data.items.length);
+        setSearchStats(data.searchStats ?? null);
         setError(null);
       } catch (e) {
         console.error("[useProducts] error", e);
@@ -49,6 +53,7 @@ export function useProducts(groupId?: number, search?: string) {
 
   useEffect(() => {
     setOffset(0);
+    setSearchStats(null);
     fetchProducts(true);
   }, [groupId, search]);
 
@@ -58,7 +63,7 @@ export function useProducts(groupId?: number, search?: string) {
     }
   };
 
-  return { products, loading, error, hasMore, loadMore };
+  return { products, loading, error, hasMore, loadMore, total, searchStats };
 }
 
 export function useProduct(id: number) {

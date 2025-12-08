@@ -17,6 +17,9 @@ export interface Product {
   sender_name: string | null;
   message_date: number;
   messageLink: string;
+  // Search-related fields (only present when searching)
+  _score?: number;
+  _matchType?: "exact" | "good" | "partial";
 }
 
 export interface SellerContact {
@@ -30,12 +33,19 @@ export interface ProductWithContacts extends Product {
   contacts: SellerContact[];
 }
 
+export interface SearchStats {
+  exactCount: number;
+  goodCount: number;
+  partialCount: number;
+}
+
 export interface ProductsResponse {
   items: Product[];
   offset: number;
   limit: number;
   total: number;
   hasMore: boolean;
+  searchStats?: SearchStats;
 }
 
 export interface SimilarProduct extends Product {

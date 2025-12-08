@@ -4,6 +4,7 @@ import "./ProductCard.css";
 
 interface Props {
   product: Product;
+  showScore?: boolean;
 }
 
 function formatDate(timestamp: number): string {
@@ -22,7 +23,7 @@ function formatDate(timestamp: number): string {
   return date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
 }
 
-export function ProductCard({ product }: Props) {
+export function ProductCard({ product, showScore }: Props) {
   const navigate = useNavigate();
 
   return (
@@ -30,6 +31,11 @@ export function ProductCard({ product }: Props) {
       <div className="product-header">
         <span className="product-group">{product.group_title}</span>
         <span className="product-date">{formatDate(product.message_date)}</span>
+        {showScore && product._score !== undefined && (
+          <span className={`product-score score-${product._matchType}`}>
+            {Math.round(product._score * 100)}%
+          </span>
+        )}
       </div>
 
       <p className="product-text">

@@ -13,3 +13,47 @@
   padding: 20px;
   color: var(--tg-theme-hint-color, #999);
 }
+
+/* Search stats */
+.search-stats {
+  padding: 8px 16px;
+  font-size: 13px;
+  color: var(--tg-theme-hint-color, #999);
+  background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+  border-radius: 8px;
+  margin: 8px 12px;
+}
+
+.search-stats .stat-exact {
+  color: #22c55e;
+}
+
+.search-stats .stat-good {
+  color: #3b82f6;
+}
+
+.search-stats .stat-partial {
+  color: var(--tg-theme-hint-color, #999);
+}
+
+/* Product groups */
+.product-group-header {
+  padding: 12px 16px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--tg-theme-hint-color, #999);
+}
+
+.product-group-exact .product-group-header {
+  color: #22c55e;
+}
+
+.product-group-good .product-group-header {
+  color: #3b82f6;
+}
+
+.product-group-partial .product-group-header {
+  color: var(--tg-theme-hint-color, #999);
+}
