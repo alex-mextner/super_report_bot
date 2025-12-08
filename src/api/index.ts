@@ -2,13 +2,20 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { queries } from "../db/index.ts";
-import { validateInitData } from "./auth.ts";
+import { validateInitData, parseInitDataUser } from "./auth.ts";
 import { apiLog } from "../logger.ts";
-import { getMessages } from "../cache/messages.ts";
-import { extractPrice } from "../utils/price.ts";
+import { getMessages, getAllCachedMessages, getCachedGroups } from "../cache/messages.ts";
+import { analyzeMessage, analyzeMessagesBatch, type BatchItem } from "../llm/analyze.ts";
+
+const ADMIN_ID = Number(process.env.ADMIN_ID) || 0;
+
+type Variables = {
+  userId: number | null;
+  isAdmin: boolean;
+};
 
 const app = new Hono();
-const api = new Hono();
+const api = new Hono<{ Variables: Variables }>();
 
 // CORS for WebApp
 api.use(
@@ -22,8 +29,10 @@ api.use(
 api.use("/*", async (c, next) => {
   const initData = c.req.header("X-Telegram-Init-Data");
 
-  // Skip auth in development
+  // Skip auth in development (use ADMIN_ID as default user)
   if (process.env.NODE_ENV === "development") {
+    c.set("userId", ADMIN_ID);
+    c.set("isAdmin", true);
     await next();
     return;
   }
@@ -32,43 +41,41 @@ api.use("/*", async (c, next) => {
     return c.json({ error: "Unauthorized" }, 401);
   }
 
+  // Parse user from initData
+  const user = parseInitDataUser(initData);
+  const userId = user?.id ?? null;
+  c.set("userId", userId);
+  c.set("isAdmin", userId === ADMIN_ID);
+
   await next();
 });
 
-// GET /api/categories
-api.get("/categories", (c) => {
-  const categories = queries.getCategories();
-  return c.json(categories);
+// GET /api/me - current user info
+api.get("/me", (c) => {
+  return c.json({
+    userId: c.get("userId"),
+    isAdmin: c.get("isAdmin"),
+  });
+});
+
+// GET /api/groups - list of groups with cached messages
+api.get("/groups", (c) => {
+  const groups = getCachedGroups();
+  apiLog.debug({ count: groups.length }, "GET /api/groups");
+  return c.json(groups);
 });
 
 // GET /api/products
 api.get("/products", (c) => {
-  const category = c.req.query("category");
   const search = c.req.query("search");
+  const groupId = c.req.query("group_id");
   const offset = Number(c.req.query("offset")) || 0;
   const limit = Math.min(Number(c.req.query("limit")) || 20, 100);
 
-  // Check if we have classified products
-  const totalClassified = queries.getProductsCount();
-
-  // If no classified products yet, return raw messages from cache
-  if (totalClassified === 0) {
-    return c.json(getProductsFromCache(search, offset, limit));
-  }
-
-  const products = queries.getProducts({ category, search, offset, limit });
-  const total = queries.getProductsCount(category);
-
-  return c.json({
-    items: products.map((p) => ({
-      ...p,
-      messageLink: buildTelegramLink(p.group_id, p.message_id),
-    })),
-    offset,
-    limit,
-    total,
-    hasMore: offset + products.length < total,
-  });
+  const groupIdNum = groupId ? Number(groupId) : undefined;
+  const result = getProductsFromCache(search, groupIdNum, offset, limit);
+  apiLog.debug({ total: result.total, itemsCount: result.items.length }, "GET /api/products");
+  return c.json(result);
 });
 
 // GET /api/products/:id
@@ -112,51 +119,99 @@ api.get("/products/:id/similar", (c) => {
   });
 });
 
+// POST /api/analyze - analyze single message with AI (admin only)
+api.post("/analyze", async (c) => {
+  const isAdmin = c.get("isAdmin");
+
+  if (!isAdmin) {
+    return c.json({ error: "Premium feature" }, 403);
+  }
+
+  const body = await c.req.json<{ text: string }>();
+  if (!body.text) {
+    return c.json({ error: "Text required" }, 400);
+  }
+
+  try {
+    const result = await analyzeMessage(body.text);
+    return c.json(result);
+  } catch (error) {
+    apiLog.error({ err: error }, "AI analysis failed");
+    return c.json({ error: "Analysis failed" }, 500);
+  }
+});
+
+// POST /api/analyze-batch - analyze all cached messages (admin only)
+api.post("/analyze-batch", async (c) => {
+  const isAdmin = c.get("isAdmin");
+
+  if (!isAdmin) {
+    return c.json({ error: "Premium feature" }, 403);
+  }
+
+  const body = await c.req.json<{ group_id?: number; limit?: number }>();
+  const groupId = body.group_id;
+  const limit = Math.min(body.limit ?? 50, 100);
+
+  // Get messages from cache
+  let messages = getAllCachedMessages();
+
+  if (groupId !== undefined) {
+    messages = messages.filter((m) => m.groupId === groupId);
+  }
+
+  // Sort by date and limit
+  messages.sort((a, b) => b.date - a.date);
+  messages = messages.slice(0, limit);
+
+  if (messages.length === 0) {
+    return c.json({ results: [] });
+  }
+
+  const items: BatchItem[] = messages.map((m) => ({
+    id: m.id,
+    text: m.text,
+  }));
+
+  try {
+    apiLog.info({ count: items.length, groupId }, "Starting batch analysis");
+    const results = await analyzeMessagesBatch(items);
+    return c.json({ results });
+  } catch (error) {
+    apiLog.error({ err: error }, "Batch AI analysis failed");
+    return c.json({ error: "Analysis failed" }, 500);
+  }
+});
+
 // Health check
 api.get("/health", (c) => {
   return c.json({ status: "ok" });
 });
 
 /**
- * Get products from cache (fallback when classification not done)
+ * Get products from cache
  */
-function getProductsFromCache(search?: string, offset = 0, limit = 20) {
-  const groupIds = queries.getAllSubscriptionGroupIds();
-  let allMessages: Array<{
-    id: number;
-    message_id: number;
-    group_id: number;
-    group_title: string;
-    text: string;
-    price_raw: string | null;
-    price_normalized: number | null;
-    sender_id: number | null;
-    sender_name: string | null;
-    message_date: number;
-    category_code: null;
-    messageLink: string;
-  }> = [];
+function getProductsFromCache(search?: string, groupId?: number, offset = 0, limit = 20) {
+  // Get all messages from cache
+  let messages = getAllCachedMessages();
 
-  for (const groupId of groupIds) {
-    const messages = getMessages(groupId);
-    for (const msg of messages) {
-      const { raw, normalized } = extractPrice(msg.text);
-      allMessages.push({
-        id: msg.id, // use message_id as id for cache items
-        message_id: msg.id,
-        group_id: msg.groupId,
-        group_title: msg.groupTitle,
-        text: msg.text,
-        price_raw: raw,
-        price_normalized: normalized,
-        sender_id: msg.senderId ?? null,
-        sender_name: msg.senderName ?? null,
-        message_date: msg.date,
-        category_code: null,
-        messageLink: buildTelegramLink(msg.groupId, msg.id),
-      });
-    }
+  // Filter by group
+  if (groupId !== undefined) {
+    messages = messages.filter((m) => m.groupId === groupId);
   }
+
+  // Map to product format
+  let allMessages = messages.map((msg) => ({
+    id: msg.id,
+    message_id: msg.id,
+    group_id: msg.groupId,
+    group_title: msg.groupTitle,
+    text: msg.text,
+    sender_id: msg.senderId ?? null,
+    sender_name: msg.senderName ?? null,
+    message_date: msg.date,
+    messageLink: buildTelegramLink(msg.groupId, msg.id),
+  }));
 
   // Sort by date descending
   allMessages.sort((a, b) => b.message_date - a.message_date);

@@ -83,6 +83,31 @@ export function getCacheStats(): { groups: number; totalMessages: number } {
   return { groups: messageCache.size, totalMessages };
 }
 
+export function getAllCachedGroupIds(): number[] {
+  return Array.from(messageCache.keys());
+}
+
+export function getAllCachedMessages(): CachedMessage[] {
+  const all: CachedMessage[] = [];
+  for (const groupCache of messageCache.values()) {
+    all.push(...groupCache.values());
+  }
+  return all;
+}
+
+export function getCachedGroups(): Array<{ id: number; title: string; count: number }> {
+  const groups: Array<{ id: number; title: string; count: number }> = [];
+  for (const [groupId, groupCache] of messageCache.entries()) {
+    const firstMsg = groupCache.values().next().value;
+    groups.push({
+      id: groupId,
+      title: firstMsg?.groupTitle ?? `Group ${groupId}`,
+      count: groupCache.size,
+    });
+  }
+  return groups;
+}
+
 // Remove oldest messages when over limit
 function trimOldMessages(groupId: number): void {
   const groupCache = messageCache.get(groupId);

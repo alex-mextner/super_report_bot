@@ -1,5 +1,5 @@
 import { useRef, useCallback } from "react";
-import { ProductCard } from "./ProductCard";
+import { ProductCard, type AnalysisResult } from "./ProductCard";
 import type { Product } from "../types";
 import "./ProductList.css";
 
@@ -8,9 +8,10 @@ interface Props {
   loading: boolean;
   hasMore: boolean;
   onLoadMore: () => void;
+  getAnalysis?: (id: number) => AnalysisResult | undefined;
 }
 
-export function ProductList({ products, loading, hasMore, onLoadMore }: Props) {
+export function ProductList({ products, loading, hasMore, onLoadMore, getAnalysis }: Props) {
   const observerRef = useRef<IntersectionObserver | null>(null);
 
   const lastElementRef = useCallback(
@@ -45,7 +46,7 @@ export function ProductList({ products, loading, hasMore, onLoadMore }: Props) {
           key={product.id}
           ref={index === products.length - 1 ? lastElementRef : null}
         >
-          <ProductCard product={product} />
+          <ProductCard product={product} analysis={getAnalysis?.(product.id)} />
         </div>
       ))}
       {loading && <div className="product-list-loading">Загрузка...</div>}

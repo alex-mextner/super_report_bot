@@ -42,3 +42,32 @@
   font-weight: 600;
   color: var(--tg-theme-text-color, #000);
 }
+
+.analysis-result {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+  border-radius: 8px;
+}
+
+.analysis-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.analysis-row:last-child {
+  margin-bottom: 0;
+}
+
+.analysis-label {
+  font-size: 12px;
+  color: var(--tg-theme-hint-color, #999);
+  flex-shrink: 0;
+}
+
+.analysis-value {
+  font-size: 12px;
+  color: var(--tg-theme-text-color, #000);
+  word-break: break-word;
+}

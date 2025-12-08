@@ -14,7 +14,6 @@
 import { bot } from "./bot/index.ts";
 import { startListener, stopListener, invalidateSubscriptionsCache } from "./listener/index.ts";
 import { startApiServer } from "./api/index.ts";
-import { startClassificationScheduler } from "./classifier/index.ts";
 import { logger } from "./logger.ts";
 
 // Re-export for external use
@@ -22,6 +21,19 @@ export { invalidateSubscriptionsCache };
 
 async function main() {
   logger.info("Starting Super Report Bot...");
+
+  // Build webapp
+  logger.info("Building webapp...");
+  const buildResult = Bun.spawnSync(["bun", "run", "webapp:build"], {
+    cwd: import.meta.dir + "/..",
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  if (buildResult.exitCode !== 0) {
+    logger.warn("Webapp build failed, continuing without webapp");
+  } else {
+    logger.info("Webapp built successfully");
+  }
 
   // Check required env vars
   const requiredEnvVars = ["BOT_TOKEN", "API_ID", "API_HASH"];
@@ -54,13 +66,6 @@ async function main() {
   // Start API server for WebApp
   const apiPort = Number(process.env.API_PORT) || 3000;
   startApiServer(apiPort);
-
-  // Start classification scheduler
-  if (process.env.HF_TOKEN) {
-    startClassificationScheduler();
-  } else {
-    logger.warn("Classification disabled (no HF_TOKEN)");
-  }
 
   logger.info("Super Report Bot is running. Press Ctrl+C to stop.");
 

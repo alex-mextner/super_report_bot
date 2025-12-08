@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { apiClient } from "../api/client";
 import type { Product, ProductsResponse, ProductWithContacts, SimilarResponse } from "../types";
 
-export function useProducts(category?: string, search?: string) {
+export function useProducts(groupId?: number, search?: string) {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -16,7 +16,7 @@ export function useProducts(category?: string, search?: string) {
         const currentOffset = reset ? 0 : offset;
 
         const params = new URLSearchParams();
-        if (category) params.set("category", category);
+        if (groupId !== undefined) params.set("group_id", String(groupId));
         if (search) params.set("search", search);
         params.set("offset", String(currentOffset));
         params.set("limit", "20");
@@ -40,13 +40,13 @@ export function useProducts(category?: string, search?: string) {
         setLoading(false);
       }
     },
-    [category, search, offset]
+    [groupId, search, offset]
   );
 
   useEffect(() => {
     setOffset(0);
     fetchProducts(true);
-  }, [category, search]);
+  }, [groupId, search]);
 
   const loadMore = () => {
     if (!loading && hasMore) {

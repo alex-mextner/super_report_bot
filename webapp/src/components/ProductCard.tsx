@@ -2,8 +2,16 @@ import { useNavigate } from "react-router-dom";
 import type { Product } from "../types";
 import "./ProductCard.css";
 
+export interface AnalysisResult {
+  category: string;
+  price: string | null;
+  currency: string | null;
+  contacts: string[];
+}
+
 interface Props {
   product: Product;
+  analysis?: AnalysisResult;
 }
 
 function formatDate(timestamp: number): string {
@@ -22,7 +30,7 @@ function formatDate(timestamp: number): string {
   return date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
 }
 
-export function ProductCard({ product }: Props) {
+export function ProductCard({ product, analysis }: Props) {
   const navigate = useNavigate();
 
   return (
@@ -36,7 +44,28 @@ export function ProductCard({ product }: Props) {
         {product.text.length > 200 ? product.text.slice(0, 200) + "..." : product.text}
       </p>
 
-      {product.price_raw && <div className="product-price">{product.price_raw}</div>}
+      {analysis && (
+        <div className="analysis-result">
+          <div className="analysis-row">
+            <span className="analysis-label">Категория:</span>
+            <span className="analysis-value">{analysis.category}</span>
+          </div>
+          {analysis.price && (
+            <div className="analysis-row">
+              <span className="analysis-label">Цена:</span>
+              <span className="analysis-value">
+                {analysis.price} {analysis.currency}
+              </span>
+            </div>
+          )}
+          {analysis.contacts.length > 0 && (
+            <div className="analysis-row">
+              <span className="analysis-label">Контакты:</span>
+              <span className="analysis-value">{analysis.contacts.join(", ")}</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
