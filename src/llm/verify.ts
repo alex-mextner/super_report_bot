@@ -43,8 +43,9 @@ export async function verifyMatch(
   const result = Array.isArray(results)
     ? (results as unknown as ZeroShotResult[])[0]
     : (results as unknown as ZeroShotResult);
-  if (!result) {
-    return { isMatch: false, confidence: 0, label: "no_result" };
+  if (!result || !Array.isArray(result.labels) || !Array.isArray(result.scores)) {
+    llmLog.warn({ result }, "Invalid zero-shot result structure");
+    return { isMatch: false, confidence: 0, label: "invalid_response" };
   }
 
   const matchIndex = result.labels.findIndex((l) => l.includes("matches"));
