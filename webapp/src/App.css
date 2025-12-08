@@ -1,0 +1,39 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+  color: var(--tg-theme-text-color, #000);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Telegram WebApp CSS variables fallback */
+:root {
+  --tg-theme-bg-color: #fff;
+  --tg-theme-text-color: #000;
+  --tg-theme-hint-color: #999;
+  --tg-theme-link-color: #3390ec;
+  --tg-theme-button-color: #3390ec;
+  --tg-theme-button-text-color: #fff;
+  --tg-theme-secondary-bg-color: #f0f0f0;
+}
+
+[data-theme="dark"] {
+  --tg-theme-bg-color: #212121;
+  --tg-theme-text-color: #fff;
+  --tg-theme-hint-color: #aaa;
+  --tg-theme-link-color: #5eb5ff;
+  --tg-theme-button-color: #5eb5ff;
+  --tg-theme-button-text-color: #fff;
+  --tg-theme-secondary-bg-color: #303030;
+}

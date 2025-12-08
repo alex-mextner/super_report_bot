@@ -6,12 +6,15 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun --hot run src/index.ts",
-    "auth": "bun run src/listener/auth.ts"
+    "auth": "bun run src/listener/auth.ts",
+    "webapp:dev": "cd webapp && bun run dev",
+    "webapp:build": "cd webapp && bun run build"
   },
   "dependencies": {
     "@huggingface/inference": "^4.13.4",
     "@mtcute/bun": "^0.26.0",
     "gramio": "^0.0.50",
+    "hono": "^4.10.7",
     "pino": "^10.1.0",
     "pino-pretty": "^13.1.3"
   },

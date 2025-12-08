@@ -1,0 +1,146 @@
+import { hf, MODELS, withRetry } from "./index.ts";
+import { llmLog } from "../logger.ts";
+
+const SYSTEM_PROMPT = `Ты помощник для классификации товаров из сообщений в Telegram группах.
+
+## Задача
+Получаешь массив сообщений, для каждого определи:
+1. Категорию товара (code)
+2. Контакт продавца если есть в тексте
+
+## Категории (используй только эти коды или предложи новые)
+- electronics: Электроника (телефоны, компьютеры, ТВ, наушники)
+- clothing: Одежда и обувь
+- auto: Авто (машины, мото, запчасти)
+- realty: Недвижимость (квартиры, дома, аренда)
+- furniture: Мебель
+- appliances: Бытовая техника (холодильник, стиралка)
+- kids: Детские товары
+- sports: Спорт и отдых
+- beauty: Красота и здоровье
+- pets: Животные и товары для них
+- services: Услуги
+- jobs: Работа, вакансии
+- other: Прочее
+
+## Контакты
+Ищи в тексте:
+- Телефоны: +7, 8, форматы типа 89001234567
+- Telegram: @username, t.me/xxx
+- WhatsApp: wa.me/xxx
+
+## Формат ответа
+JSON без дополнительного текста:
+{
+  "items": [
+    {
+      "id": 123,
+      "category": "electronics",
+      "contacts": [
+        { "type": "phone", "value": "+79001234567" },
+        { "type": "username", "value": "@seller" }
+      ]
+    }
+  ],
+  "new_categories": [
+    { "code": "new_code", "name_ru": "Название" }
+  ]
+}
+
+Если сообщение НЕ товар (чат, вопрос, спам, приветствие) — пропусти его (не включай в items).
+Будь строгим: только реальные объявления о продаже/услугах.`;
+
+export interface ClassificationInput {
+  id: number;
+  text: string;
+}
+
+export interface ClassifiedItem {
+  id: number;
+  category: string;
+  contacts: Array<{ type: string; value: string }>;
+}
+
+export interface ClassificationResult {
+  items: ClassifiedItem[];
+  new_categories: Array<{ code: string; name_ru: string }>;
+}
+
+/**
+ * Classify a batch of messages using LLM
+ * @param messages - Array of messages with id and text
+ * @returns Classification results
+ */
+export async function classifyBatch(
+  messages: ClassificationInput[]
+): Promise<ClassificationResult> {
+  if (messages.length === 0) {
+    return { items: [], new_categories: [] };
+  }
+
+  // Format messages for LLM (truncate long texts)
+  const userMessage = messages
+    .map((m) => `[ID:${m.id}]\n${m.text.slice(0, 500)}`)
+    .join("\n\n---\n\n");
+
+  llmLog.debug({ count: messages.length }, "Classifying batch");
+
+  const response = await withRetry(async () => {
+    const result = await hf.chatCompletion({
+      model: MODELS.DEEPSEEK_R1,
+      provider: "novita",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: userMessage },
+      ],
+      max_tokens: 4000,
+      temperature: 0.3,
+    });
+    return result.choices[0]?.message?.content || "";
+  });
+
+  // Strip DeepSeek R1 thinking blocks
+  const cleanedResponse = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+
+  // Parse JSON from response
+  const jsonMatch = cleanedResponse.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    llmLog.error({ response: cleanedResponse.slice(0, 200) }, "Failed to parse classification response");
+    return { items: [], new_categories: [] };
+  }
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    const result: ClassificationResult = {
+      items: Array.isArray(parsed.items) ? parsed.items : [],
+      new_categories: Array.isArray(parsed.new_categories) ? parsed.new_categories : [],
+    };
+
+    llmLog.debug(
+      { classified: result.items.length, newCategories: result.new_categories.length },
+      "Batch classified"
+    );
+
+    return result;
+  } catch (e) {
+    llmLog.error({ json: jsonMatch[0].slice(0, 200) }, "Invalid JSON in classification response");
+    return { items: [], new_categories: [] };
+  }
+}
+
+// Default categories to seed the database
+export const DEFAULT_CATEGORIES = [
+  { code: "electronics", name_ru: "Электроника" },
+  { code: "clothing", name_ru: "Одежда и обувь" },
+  { code: "auto", name_ru: "Авто" },
+  { code: "realty", name_ru: "Недвижимость" },
+  { code: "furniture", name_ru: "Мебель" },
+  { code: "appliances", name_ru: "Бытовая техника" },
+  { code: "kids", name_ru: "Детские товары" },
+  { code: "sports", name_ru: "Спорт и отдых" },
+  { code: "beauty", name_ru: "Красота и здоровье" },
+  { code: "pets", name_ru: "Животные" },
+  { code: "services", name_ru: "Услуги" },
+  { code: "jobs", name_ru: "Работа" },
+  { code: "other", name_ru: "Прочее" },
+];

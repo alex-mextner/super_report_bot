@@ -63,3 +63,49 @@ CREATE INDEX IF NOT EXISTS idx_matched_messages_sub ON matched_messages(subscrip
 CREATE INDEX IF NOT EXISTS idx_subscription_groups_sub ON subscription_groups(subscription_id);
 CREATE INDEX IF NOT EXISTS idx_subscription_groups_group ON subscription_groups(group_id);
 CREATE INDEX IF NOT EXISTS idx_user_groups_user ON user_groups(user_id);
+
+-- ===========================================
+-- WebApp: Categories and Products
+-- ===========================================
+
+-- Product categories (populated by LLM)
+CREATE TABLE IF NOT EXISTS categories (
+  id INTEGER PRIMARY KEY,
+  code TEXT UNIQUE NOT NULL,        -- "electronics", "clothing", "auto"
+  name_ru TEXT NOT NULL,            -- "Электроника", "Одежда", "Авто"
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Classified products from messages
+CREATE TABLE IF NOT EXISTS products (
+  id INTEGER PRIMARY KEY,
+  message_id INTEGER NOT NULL,
+  group_id INTEGER NOT NULL,
+  group_title TEXT NOT NULL,
+  text TEXT NOT NULL,
+  category_code TEXT REFERENCES categories(code),
+  price_raw TEXT,                   -- "50000 руб", "50к", "$500"
+  price_normalized INTEGER,         -- normalized price in RUB for comparison
+  sender_id INTEGER,
+  sender_name TEXT,
+  message_date INTEGER NOT NULL,    -- unix timestamp
+  classified_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(message_id, group_id)
+);
+
+-- Seller contacts (extracted from text or sender profile)
+CREATE TABLE IF NOT EXISTS seller_contacts (
+  id INTEGER PRIMARY KEY,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  contact_type TEXT NOT NULL,       -- "phone", "username", "telegram_link", "whatsapp", "profile"
+  contact_value TEXT NOT NULL,
+  source TEXT NOT NULL,             -- "text_parse" | "sender_profile"
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Product indexes
+CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_code);
+CREATE INDEX IF NOT EXISTS idx_products_group ON products(group_id);
+CREATE INDEX IF NOT EXISTS idx_products_date ON products(message_date DESC);
+CREATE INDEX IF NOT EXISTS idx_products_price ON products(price_normalized);
+CREATE INDEX IF NOT EXISTS idx_seller_contacts_product ON seller_contacts(product_id);

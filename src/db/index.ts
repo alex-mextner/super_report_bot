@@ -1,5 +1,13 @@
 import { Database } from "bun:sqlite";
-import type { User, Subscription, MonitoredGroup, MatchedMessage } from "../types.ts";
+import type {
+  User,
+  Subscription,
+  MonitoredGroup,
+  MatchedMessage,
+  Category,
+  Product,
+  SellerContact,
+} from "../types.ts";
 import { runMigrations } from "./migrations.ts";
 
 const db = new Database("data.db", { create: true });
@@ -118,6 +126,40 @@ const stmts = {
     `SELECT DISTINCT sg.group_id FROM subscription_groups sg
      JOIN subscriptions s ON sg.subscription_id = s.id
      WHERE s.is_active = 1`
+  ),
+
+  // Categories
+  getCategories: db.prepare<Category, []>("SELECT * FROM categories ORDER BY name_ru"),
+  upsertCategory: db.prepare<void, [string, string]>(
+    "INSERT OR REPLACE INTO categories (code, name_ru) VALUES (?, ?)"
+  ),
+
+  // Products
+  isProductClassified: db.prepare<{ found: number }, [number, number]>(
+    "SELECT 1 as found FROM products WHERE message_id = ? AND group_id = ? LIMIT 1"
+  ),
+  createProduct: db.prepare<void, [number, number, string, string, string | null, string | null, number | null, number | null, string | null, number]>(
+    `INSERT INTO products (message_id, group_id, group_title, text, category_code, price_raw, price_normalized, sender_id, sender_name, message_date)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ),
+  getProducts: db.prepare<Product, []>("SELECT * FROM products ORDER BY message_date DESC"),
+  getProductsByCategory: db.prepare<Product, [string]>(
+    "SELECT * FROM products WHERE category_code = ? ORDER BY message_date DESC"
+  ),
+  getProductById: db.prepare<Product, [number]>("SELECT * FROM products WHERE id = ?"),
+  searchProducts: db.prepare<Product, [string]>(
+    "SELECT * FROM products WHERE text LIKE ? ORDER BY message_date DESC LIMIT 100"
+  ),
+  getProductsByCategoryWithPrice: db.prepare<Product, [string]>(
+    "SELECT * FROM products WHERE category_code = ? AND price_normalized IS NOT NULL ORDER BY price_normalized"
+  ),
+
+  // Seller contacts
+  addSellerContact: db.prepare<void, [number, string, string, string]>(
+    "INSERT INTO seller_contacts (product_id, contact_type, contact_value, source) VALUES (?, ?, ?, ?)"
+  ),
+  getProductContacts: db.prepare<SellerContact, [number]>(
+    "SELECT * FROM seller_contacts WHERE product_id = ?"
   ),
 };
 
@@ -318,6 +360,114 @@ export const queries = {
   // Get all unique group IDs from active subscriptions
   getAllSubscriptionGroupIds(): number[] {
     return stmts.getAllSubscriptionGroupIds.all().map((row) => row.group_id);
+  },
+
+  // === WebApp: Categories ===
+  getCategories(): Category[] {
+    return stmts.getCategories.all();
+  },
+
+  upsertCategory(code: string, nameRu: string): void {
+    stmts.upsertCategory.run(code, nameRu);
+  },
+
+  // === WebApp: Products ===
+  isProductClassified(messageId: number, groupId: number): boolean {
+    return stmts.isProductClassified.get(messageId, groupId) !== null;
+  },
+
+  createProduct(data: {
+    message_id: number;
+    group_id: number;
+    group_title: string;
+    text: string;
+    category_code: string | null;
+    price_raw: string | null;
+    price_normalized: number | null;
+    sender_id: number | null;
+    sender_name: string | null;
+    message_date: number;
+  }): number {
+    stmts.createProduct.run(
+      data.message_id,
+      data.group_id,
+      data.group_title,
+      data.text,
+      data.category_code,
+      data.price_raw,
+      data.price_normalized,
+      data.sender_id,
+      data.sender_name,
+      data.message_date
+    );
+    const result = db.prepare<{ id: number }, []>("SELECT last_insert_rowid() as id").get();
+    return result!.id;
+  },
+
+  getProducts(opts?: {
+    category?: string;
+    search?: string;
+    offset?: number;
+    limit?: number;
+  }): Product[] {
+    const { category, search, offset = 0, limit = 20 } = opts || {};
+
+    let sql = "SELECT * FROM products WHERE 1=1";
+    const params: (string | number)[] = [];
+
+    if (category) {
+      sql += " AND category_code = ?";
+      params.push(category);
+    }
+    if (search) {
+      sql += " AND text LIKE ?";
+      params.push(`%${search}%`);
+    }
+
+    sql += " ORDER BY message_date DESC LIMIT ? OFFSET ?";
+    params.push(limit, offset);
+
+    return db.prepare<Product, (string | number)[]>(sql).all(...params);
+  },
+
+  getProductById(id: number): Product | null {
+    return stmts.getProductById.get(id) || null;
+  },
+
+  getProductContacts(productId: number): SellerContact[] {
+    return stmts.getProductContacts.all(productId);
+  },
+
+  addSellerContact(
+    productId: number,
+    contactType: string,
+    contactValue: string,
+    source: string
+  ): void {
+    stmts.addSellerContact.run(productId, contactType, contactValue, source);
+  },
+
+  getSimilarProducts(productId: number, categoryCode: string | null, limit: number = 5): Product[] {
+    if (!categoryCode) return [];
+    return db
+      .prepare<Product, [string, number, number]>(
+        `SELECT * FROM products
+         WHERE category_code = ? AND id != ?
+         ORDER BY message_date DESC
+         LIMIT ?`
+      )
+      .all(categoryCode, productId, limit);
+  },
+
+  getProductsCount(category?: string): number {
+    if (category) {
+      const result = db
+        .prepare<{ count: number }, [string]>("SELECT COUNT(*) as count FROM products WHERE category_code = ?")
+        .get(category);
+      return result?.count || 0;
+    }
+    const result = db.prepare<{ count: number }, []>("SELECT COUNT(*) as count FROM products").get();
+    return result?.count || 0;
   },
 };
 

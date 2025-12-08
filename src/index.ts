@@ -8,10 +8,13 @@
  * - mtcute: MTProto for listening to group messages (userbot)
  * - BM25 + N-gram: Fast text matching
  * - HuggingFace: LLM for keyword generation and match verification
+ * - Hono: API server for WebApp
  */
 
 import { bot } from "./bot/index.ts";
 import { startListener, stopListener, invalidateSubscriptionsCache } from "./listener/index.ts";
+import { startApiServer } from "./api/index.ts";
+import { startClassificationScheduler } from "./classifier/index.ts";
 import { logger } from "./logger.ts";
 
 // Re-export for external use
@@ -46,6 +49,17 @@ async function main() {
     logger.error({ err: error, component: "listener" }, "Failed to start MTProto client");
     logger.error("Run 'bun run auth' first to authenticate the userbot.");
     // Continue running the bot even if listener fails
+  }
+
+  // Start API server for WebApp
+  const apiPort = Number(process.env.API_PORT) || 3000;
+  startApiServer(apiPort);
+
+  // Start classification scheduler
+  if (process.env.HF_TOKEN) {
+    startClassificationScheduler();
+  } else {
+    logger.warn("Classification disabled (no HF_TOKEN)");
   }
 
   logger.info("Super Report Bot is running. Press Ctrl+C to stop.");

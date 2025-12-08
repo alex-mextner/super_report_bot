@@ -1,0 +1,78 @@
+.product-page {
+  min-height: 100vh;
+}
+
+.product-page-loading,
+.product-page-error {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--tg-theme-hint-color, #999);
+}
+
+.product-detail {
+  padding: 16px;
+}
+
+.product-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.product-group {
+  font-size: 14px;
+  color: var(--tg-theme-link-color, #3390ec);
+  font-weight: 500;
+}
+
+.product-date {
+  font-size: 14px;
+  color: var(--tg-theme-hint-color, #999);
+}
+
+.product-full-text {
+  margin: 0 0 16px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--tg-theme-text-color, #000);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.product-price-block {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
+
+.price-label {
+  font-size: 14px;
+  color: var(--tg-theme-hint-color, #999);
+}
+
+.price-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--tg-theme-text-color, #000);
+}
+
+.goto-message-btn {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 12px;
+  background: var(--tg-theme-button-color, #3390ec);
+  color: var(--tg-theme-button-text-color, #fff);
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.goto-message-btn:active {
+  opacity: 0.8;
+}

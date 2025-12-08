@@ -21,3 +21,4 @@ export const listenerLog = logger.child({ component: "listener" });
 export const matcherLog = logger.child({ component: "matcher" });
 export const llmLog = logger.child({ component: "llm" });
 export const botLog = logger.child({ component: "bot" });
+export const apiLog = logger.child({ component: "api" });

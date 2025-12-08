@@ -1,0 +1,32 @@
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { useEffect } from "react";
+import { useTelegram } from "./hooks/useTelegram";
+import { setInitData } from "./api/client";
+import { HomePage } from "./pages/HomePage";
+import { ProductPage } from "./pages/ProductPage";
+import "./App.css";
+
+export function App() {
+  const { initData, colorScheme } = useTelegram();
+
+  // Set initData for API client
+  useEffect(() => {
+    if (initData) {
+      setInitData(initData);
+    }
+  }, [initData]);
+
+  // Apply theme
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", colorScheme);
+  }, [colorScheme]);
+
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/product/:id" element={<ProductPage />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}

@@ -1,0 +1,58 @@
+.seller-contacts {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--tg-theme-secondary-bg-color, #f0f0f0);
+}
+
+.contacts-title {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--tg-theme-text-color, #000);
+}
+
+.contacts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.contact-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 12px;
+  background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+  cursor: pointer;
+  text-align: left;
+}
+
+.contact-label {
+  font-size: 12px;
+  color: var(--tg-theme-hint-color, #999);
+  margin-bottom: 2px;
+}
+
+.contact-value {
+  font-size: 14px;
+  color: var(--tg-theme-link-color, #3390ec);
+  word-break: break-all;
+}
+
+.contact-tg {
+  background: rgba(51, 144, 236, 0.1);
+}
+
+.contact-wa {
+  background: rgba(37, 211, 102, 0.1);
+}
+
+.contact-wa .contact-value {
+  color: #25d366;
+}
+
+.contact-tel .contact-value {
+  color: var(--tg-theme-text-color, #000);
+}

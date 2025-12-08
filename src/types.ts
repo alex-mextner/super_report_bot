@@ -121,3 +121,35 @@ export interface IncomingMessage {
   sender_name: string;
   timestamp: Date;
 }
+
+// WebApp types
+export interface Category {
+  id: number;
+  code: string;
+  name_ru: string;
+  created_at: string;
+}
+
+export interface Product {
+  id: number;
+  message_id: number;
+  group_id: number;
+  group_title: string;
+  text: string;
+  category_code: string | null;
+  price_raw: string | null;
+  price_normalized: number | null;
+  sender_id: number | null;
+  sender_name: string | null;
+  message_date: number;
+  classified_at: string;
+}
+
+export interface SellerContact {
+  id: number;
+  product_id: number;
+  contact_type: string;
+  contact_value: string;
+  source: string;
+  created_at: string;
+}

@@ -171,7 +171,31 @@ ${bold("Команды:")}
 /addgroup - добавить группу/канал
 /groups - список добавленных групп
 /list - мои подписки
+/catalog - каталог товаров
   `);
+});
+
+// /catalog command - open webapp
+bot.command("catalog", async (context) => {
+  const webappUrl = process.env.WEBAPP_URL;
+
+  if (!webappUrl) {
+    await context.send("WebApp не настроен. Добавь WEBAPP_URL в .env");
+    return;
+  }
+
+  await context.send("Открой каталог товаров:", {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          {
+            text: "Открыть каталог",
+            web_app: { url: webappUrl },
+          },
+        ],
+      ],
+    },
+  });
 });
 
 // /addgroup command - add a new group for monitoring
