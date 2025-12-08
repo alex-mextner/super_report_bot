@@ -70,7 +70,12 @@ export interface UserState {
     | "editing_sub_positive"
     | "editing_sub_negative"
     | "editing_sub_description"
-    | "editing_sub_ai";
+    | "editing_sub_ai"
+    // States for add/remove keywords flow
+    | "adding_positive"
+    | "adding_negative"
+    | "removing_positive"
+    | "removing_negative";
   // Clarification flow data
   clarification?: {
     original_query: string;

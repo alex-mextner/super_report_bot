@@ -14,6 +14,9 @@ import {
   skipQuestionKeyboard,
   aiEditKeyboard,
   nextRequestId,
+  keywordEditSubmenu,
+  keywordEditSubmenuPending,
+  removeKeywordsKeyboard,
 } from "./keyboards.ts";
 import { interpretEditCommand } from "../llm/edit.ts";
 import { getExamplesForSubscription } from "./examples.ts";
@@ -413,6 +416,230 @@ bot.on("message", async (context) => {
     return;
   }
 
+  // Handle adding positive keywords
+  if (state.step === "adding_positive") {
+    const newKeywords = text
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (newKeywords.length === 0) {
+      await context.send("Нужно указать хотя бы одно слово.");
+      return;
+    }
+
+    // Pending subscription (during confirmation)
+    if (state.pending_subscription) {
+      const combined = [...state.pending_subscription.positive_keywords, ...newKeywords];
+      const unique = [...new Set(combined)];
+      const updated = { ...state.pending_subscription, positive_keywords: unique };
+      const queryId = `${userId}_${Date.now()}`;
+
+      setUserState(userId, { ...state, pending_subscription: updated, step: "awaiting_confirmation" });
+      await context.send(
+        format`✅ Добавлено: ${newKeywords.join(", ")}
+
+${bold("Позитивные:")}
+${code(unique.join(", "))}
+
+${bold("Негативные:")}
+${code(updated.negative_keywords.join(", ") || "нет")}
+        `,
+        { reply_markup: confirmKeyboard(queryId) }
+      );
+      return;
+    }
+
+    // Existing subscription
+    if (state.editing_subscription_id) {
+      const sub = queries.getSubscriptionById(state.editing_subscription_id, userId);
+      if (!sub) {
+        setUserState(userId, { step: "idle" });
+        await context.send("Подписка не найдена.");
+        return;
+      }
+
+      const combined = [...sub.positive_keywords, ...newKeywords];
+      const unique = [...new Set(combined)];
+      queries.updatePositiveKeywords(state.editing_subscription_id, userId, unique);
+      invalidateSubscriptionsCache();
+
+      setUserState(userId, { step: "idle" });
+      await context.send(`✅ Добавлено: ${newKeywords.join(", ")}\nТекущие: ${unique.join(", ")}`);
+      return;
+    }
+
+    setUserState(userId, { step: "idle" });
+    return;
+  }
+
+  // Handle adding negative keywords
+  if (state.step === "adding_negative") {
+    const newKeywords = text
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (newKeywords.length === 0) {
+      await context.send("Нужно указать хотя бы одно слово.");
+      return;
+    }
+
+    // Pending subscription (during confirmation)
+    if (state.pending_subscription) {
+      const combined = [...state.pending_subscription.negative_keywords, ...newKeywords];
+      const unique = [...new Set(combined)];
+      const updated = { ...state.pending_subscription, negative_keywords: unique };
+      const queryId = `${userId}_${Date.now()}`;
+
+      setUserState(userId, { ...state, pending_subscription: updated, step: "awaiting_confirmation" });
+      await context.send(
+        format`✅ Добавлено: ${newKeywords.join(", ")}
+
+${bold("Позитивные:")}
+${code(updated.positive_keywords.join(", "))}
+
+${bold("Негативные:")}
+${code(unique.join(", "))}
+        `,
+        { reply_markup: confirmKeyboard(queryId) }
+      );
+      return;
+    }
+
+    // Existing subscription
+    if (state.editing_subscription_id) {
+      const sub = queries.getSubscriptionById(state.editing_subscription_id, userId);
+      if (!sub) {
+        setUserState(userId, { step: "idle" });
+        await context.send("Подписка не найдена.");
+        return;
+      }
+
+      const combined = [...sub.negative_keywords, ...newKeywords];
+      const unique = [...new Set(combined)];
+      queries.updateNegativeKeywords(state.editing_subscription_id, userId, unique);
+      invalidateSubscriptionsCache();
+
+      setUserState(userId, { step: "idle" });
+      await context.send(`✅ Добавлено: ${newKeywords.join(", ")}\nТекущие: ${unique.join(", ")}`);
+      return;
+    }
+
+    setUserState(userId, { step: "idle" });
+    return;
+  }
+
+  // Handle removing keywords by numbers
+  if (state.step === "removing_positive" || state.step === "removing_negative") {
+    const type = state.step === "removing_positive" ? "positive" : "negative";
+
+    // Parse numbers from text (e.g., "1, 3, 5" or "1 3 5")
+    const indices = text
+      .split(/[,\s]+/)
+      .map((s) => parseInt(s.trim(), 10) - 1) // Convert to 0-indexed
+      .filter((n) => !isNaN(n) && n >= 0);
+
+    if (indices.length === 0) {
+      await context.send("Отправь номера слов через запятую (например: 1, 3)");
+      return;
+    }
+
+    // Pending subscription (during confirmation)
+    if (state.pending_subscription) {
+      const keywords =
+        type === "positive"
+          ? [...state.pending_subscription.positive_keywords]
+          : [...state.pending_subscription.negative_keywords];
+      const removed: string[] = [];
+
+      const sortedIndices = [...new Set(indices)].sort((a, b) => b - a);
+      for (const idx of sortedIndices) {
+        if (idx >= 0 && idx < keywords.length) {
+          const [word] = keywords.splice(idx, 1);
+          if (word) removed.unshift(word);
+        }
+      }
+
+      if (removed.length === 0) {
+        await context.send("Неверные номера.");
+        return;
+      }
+
+      if (type === "positive" && keywords.length === 0) {
+        await context.send("Нельзя удалить все позитивные слова.");
+        return;
+      }
+
+      const updated = {
+        ...state.pending_subscription,
+        [type === "positive" ? "positive_keywords" : "negative_keywords"]: keywords,
+      };
+      const queryId = `${userId}_${Date.now()}`;
+
+      setUserState(userId, { ...state, pending_subscription: updated, step: "awaiting_confirmation" });
+      await context.send(
+        format`✅ Удалено: ${removed.join(", ")}
+
+${bold("Позитивные:")}
+${code(updated.positive_keywords.join(", "))}
+
+${bold("Негативные:")}
+${code(updated.negative_keywords.join(", ") || "нет")}
+        `,
+        { reply_markup: confirmKeyboard(queryId) }
+      );
+      return;
+    }
+
+    // Existing subscription
+    if (state.editing_subscription_id) {
+      const sub = queries.getSubscriptionById(state.editing_subscription_id, userId);
+      if (!sub) {
+        setUserState(userId, { step: "idle" });
+        await context.send("Подписка не найдена.");
+        return;
+      }
+
+      const keywords = type === "positive" ? [...sub.positive_keywords] : [...sub.negative_keywords];
+      const removed: string[] = [];
+
+      const sortedIndices = [...new Set(indices)].sort((a, b) => b - a);
+      for (const idx of sortedIndices) {
+        if (idx >= 0 && idx < keywords.length) {
+          const [word] = keywords.splice(idx, 1);
+          if (word) removed.unshift(word);
+        }
+      }
+
+      if (removed.length === 0) {
+        await context.send("Неверные номера.");
+        return;
+      }
+
+      if (type === "positive" && keywords.length === 0) {
+        await context.send("Нельзя удалить все позитивные слова.");
+        return;
+      }
+
+      if (type === "positive") {
+        queries.updatePositiveKeywords(state.editing_subscription_id, userId, keywords);
+      } else {
+        queries.updateNegativeKeywords(state.editing_subscription_id, userId, keywords);
+      }
+      invalidateSubscriptionsCache();
+
+      setUserState(userId, { step: "idle" });
+      await context.send(
+        `✅ Удалено: ${removed.join(", ")}` + (keywords.length > 0 ? `\nОсталось: ${keywords.join(", ")}` : "")
+      );
+      return;
+    }
+
+    setUserState(userId, { step: "idle" });
+    return;
+  }
+
   // Handle AI editing flow
   if (state.step === "editing_sub_ai" && state.pending_ai_edit) {
     const { current, conversation, subscription_id } = state.pending_ai_edit;
@@ -624,7 +851,7 @@ bot.on("callback_query", async (context) => {
   const userId = context.from?.id;
   if (!userId) return;
 
-  let data: { action: string; id: string | number };
+  let data: { action: string; id?: string | number; type?: string; idx?: number };
   try {
     data = JSON.parse(context.data || "{}");
   } catch {
@@ -689,12 +916,205 @@ ${bold("Выбери группы для мониторинга:")}
     }
 
     case "edit": {
-      setUserState(userId, { ...state, step: "editing_keywords" });
-      await context.answer({ text: "Отправь исправленные ключевые слова" });
+      // Legacy - redirect to positive keywords submenu
+      if (!state.pending_subscription) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+      await context.answer({ text: "Выбери действие" });
       await context.editText(
-        "Отправь исправленные ключевые слова в формате:\n" +
-          "позитивные: слово1, слово2\n" +
-          "негативные: слово1, слово2"
+        `Позитивные слова: ${state.pending_subscription.positive_keywords.join(", ")}\n\nЧто сделать?`,
+        { reply_markup: keywordEditSubmenuPending("positive") }
+      );
+      break;
+    }
+
+    // Pending subscription: show submenu for positive keywords
+    case "edit_positive_pending": {
+      if (!state.pending_subscription) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+      await context.answer({ text: "Выбери действие" });
+      await context.editText(
+        `Позитивные слова: ${state.pending_subscription.positive_keywords.join(", ")}\n\nЧто сделать?`,
+        { reply_markup: keywordEditSubmenuPending("positive") }
+      );
+      break;
+    }
+
+    // Pending subscription: show submenu for negative keywords
+    case "edit_negative_pending": {
+      if (!state.pending_subscription) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+      await context.answer({ text: "Выбери действие" });
+      await context.editText(
+        `Негативные слова: ${state.pending_subscription.negative_keywords.join(", ") || "нет"}\n\nЧто сделать?`,
+        { reply_markup: keywordEditSubmenuPending("negative") }
+      );
+      break;
+    }
+
+    // Pending: add positive keywords
+    case "add_positive_pending": {
+      if (!state.pending_subscription) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+      setUserState(userId, { ...state, step: "adding_positive" });
+      await context.answer({ text: "Отправь слова" });
+      await context.editText(
+        `Текущие: ${state.pending_subscription.positive_keywords.join(", ")}\n\nОтправь слова для добавления через запятую:`
+      );
+      break;
+    }
+
+    // Pending: add negative keywords
+    case "add_negative_pending": {
+      if (!state.pending_subscription) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+      setUserState(userId, { ...state, step: "adding_negative" });
+      await context.answer({ text: "Отправь слова" });
+      await context.editText(
+        `Текущие: ${state.pending_subscription.negative_keywords.join(", ") || "нет"}\n\nОтправь слова для добавления через запятую:`
+      );
+      break;
+    }
+
+    // Pending: remove positive keywords (show UI)
+    case "remove_positive_pending": {
+      if (!state.pending_subscription) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+      const keywords = state.pending_subscription.positive_keywords;
+      if (keywords.length === 0) {
+        await context.answer({ text: "Нет слов для удаления" });
+        return;
+      }
+      setUserState(userId, { ...state, step: "removing_positive" });
+      const list = keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
+      await context.answer({ text: "Выбери слова" });
+      await context.editText(
+        `Позитивные слова:\n${list}\n\nНажми на слово или отправь номера через запятую:`,
+        { reply_markup: removeKeywordsKeyboard(keywords, "positive", null) }
+      );
+      break;
+    }
+
+    // Pending: remove negative keywords (show UI)
+    case "remove_negative_pending": {
+      if (!state.pending_subscription) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+      const keywords = state.pending_subscription.negative_keywords;
+      if (keywords.length === 0) {
+        await context.answer({ text: "Нет слов для удаления" });
+        return;
+      }
+      setUserState(userId, { ...state, step: "removing_negative" });
+      const list = keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
+      await context.answer({ text: "Выбери слова" });
+      await context.editText(
+        `Негативные слова:\n${list}\n\nНажми на слово или отправь номера через запятую:`,
+        { reply_markup: removeKeywordsKeyboard(keywords, "negative", null) }
+      );
+      break;
+    }
+
+    // Pending: remove keyword by clicking button
+    case "rm_kw_pending": {
+      if (!state.pending_subscription) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+      const type = data.type as "positive" | "negative";
+      const idx = Number(data.idx);
+
+      const keywords =
+        type === "positive"
+          ? [...state.pending_subscription.positive_keywords]
+          : [...state.pending_subscription.negative_keywords];
+      const removed = keywords[idx];
+      if (!removed) {
+        await context.answer({ text: "Слово не найдено" });
+        return;
+      }
+
+      keywords.splice(idx, 1);
+
+      if (type === "positive" && keywords.length === 0) {
+        await context.answer({ text: "Нельзя удалить последнее слово" });
+        return;
+      }
+
+      // Update pending subscription
+      const updated = {
+        ...state.pending_subscription,
+        [type === "positive" ? "positive_keywords" : "negative_keywords"]: keywords,
+      };
+      setUserState(userId, { ...state, pending_subscription: updated });
+
+      await context.answer({ text: `Удалено: ${removed}` });
+
+      if (keywords.length === 0) {
+        // No more keywords, go back to confirm
+        const queryId = `${userId}_${Date.now()}`;
+        await context.editText(
+          format`
+${bold("Ключевые слова:")}
+
+${bold("Позитивные:")}
+${code(updated.positive_keywords.join(", "))}
+
+${bold("Негативные:")}
+${code(updated.negative_keywords.join(", ") || "нет")}
+
+${bold("Описание для LLM:")}
+${updated.llm_description}
+          `,
+          { reply_markup: confirmKeyboard(queryId) }
+        );
+        setUserState(userId, { ...state, pending_subscription: updated, step: "awaiting_confirmation" });
+      } else {
+        const list = keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
+        const label = type === "positive" ? "Позитивные" : "Негативные";
+        await context.editText(
+          `${label} слова:\n${list}\n\nНажми на слово или отправь номера через запятую:`,
+          { reply_markup: removeKeywordsKeyboard(keywords, type, null) }
+        );
+      }
+      break;
+    }
+
+    // Pending: back to confirmation screen
+    case "back_to_confirm": {
+      if (!state.pending_subscription) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+      const queryId = `${userId}_${Date.now()}`;
+      setUserState(userId, { ...state, step: "awaiting_confirmation" });
+      await context.answer({ text: "OK" });
+      await context.editText(
+        format`
+${bold("Ключевые слова:")}
+
+${bold("Позитивные:")}
+${code(state.pending_subscription.positive_keywords.join(", "))}
+
+${bold("Негативные:")}
+${code(state.pending_subscription.negative_keywords.join(", ") || "нет")}
+
+${bold("Описание для LLM:")}
+${state.pending_subscription.llm_description}
+        `,
+        { reply_markup: confirmKeyboard(queryId) }
       );
       break;
     }
@@ -763,14 +1183,11 @@ ${bold("Выбери группы для мониторинга:")}
         return;
       }
 
-      setUserState(userId, {
-        step: "editing_sub_positive",
-        editing_subscription_id: subscriptionId,
-      });
-      await context.answer({ text: "Отправь новые слова" });
-      await context.send(
-        `Текущие позитивные слова: ${sub.positive_keywords.join(", ")}\n\n` +
-          "Отправь новые позитивные ключевые слова через запятую:"
+      setUserState(userId, { step: "idle", editing_subscription_id: subscriptionId });
+      await context.answer({ text: "Выбери действие" });
+      await context.editText(
+        `Позитивные слова: ${sub.positive_keywords.join(", ")}\n\nЧто сделать?`,
+        { reply_markup: keywordEditSubmenu("positive", subscriptionId) }
       );
       break;
     }
@@ -783,14 +1200,11 @@ ${bold("Выбери группы для мониторинга:")}
         return;
       }
 
-      setUserState(userId, {
-        step: "editing_sub_negative",
-        editing_subscription_id: subscriptionId,
-      });
-      await context.answer({ text: "Отправь новые слова" });
-      await context.send(
-        `Текущие негативные слова: ${sub.negative_keywords.join(", ") || "нет"}\n\n` +
-          'Отправь новые негативные ключевые слова через запятую (или "нет" для очистки):'
+      setUserState(userId, { step: "idle", editing_subscription_id: subscriptionId });
+      await context.answer({ text: "Выбери действие" });
+      await context.editText(
+        `Негативные слова: ${sub.negative_keywords.join(", ") || "нет"}\n\nЧто сделать?`,
+        { reply_markup: keywordEditSubmenu("negative", subscriptionId) }
       );
       break;
     }
@@ -988,6 +1402,208 @@ ${bold("Описание:")} ${sub.llm_description}
     case "back": {
       setUserState(userId, { step: "idle" });
       await context.answer({ text: "OK" });
+      break;
+    }
+
+    // Submenu: back to subscription view
+    case "back_to_sub": {
+      const subscriptionId = Number(data.id);
+      const sub = queries.getSubscriptionById(subscriptionId, userId);
+      if (!sub) {
+        await context.answer({ text: "Подписка не найдена" });
+        return;
+      }
+
+      setUserState(userId, { step: "idle" });
+
+      let exclusionsText = "нет";
+      if (sub.negative_keywords.length > 0) {
+        exclusionsText = sub.negative_keywords.join(", ");
+      } else if ((sub.disabled_negative_keywords?.length ?? 0) > 0) {
+        exclusionsText = `(отключены: ${sub.disabled_negative_keywords!.join(", ")})`;
+      }
+
+      await context.answer({ text: "OK" });
+      await context.editText(
+        format`
+${bold("Подписка #" + sub.id)}
+${bold("Запрос:")} ${sub.original_query}
+${bold("Ключевые слова:")} ${code(sub.positive_keywords.join(", "))}
+${bold("Исключения:")} ${code(exclusionsText)}
+        `,
+        {
+          reply_markup: subscriptionKeyboard(
+            sub.id,
+            sub.negative_keywords.length > 0,
+            (sub.disabled_negative_keywords?.length ?? 0) > 0
+          ),
+        }
+      );
+      break;
+    }
+
+    // Add positive keywords to existing subscription
+    case "add_positive": {
+      const subscriptionId = Number(data.id);
+      const sub = queries.getSubscriptionById(subscriptionId, userId);
+      if (!sub) {
+        await context.answer({ text: "Подписка не найдена" });
+        return;
+      }
+
+      setUserState(userId, {
+        step: "adding_positive",
+        editing_subscription_id: subscriptionId,
+      });
+      await context.answer({ text: "Отправь слова" });
+      await context.editText(
+        `Текущие: ${sub.positive_keywords.join(", ")}\n\nОтправь слова для добавления через запятую:`
+      );
+      break;
+    }
+
+    // Add negative keywords to existing subscription
+    case "add_negative": {
+      const subscriptionId = Number(data.id);
+      const sub = queries.getSubscriptionById(subscriptionId, userId);
+      if (!sub) {
+        await context.answer({ text: "Подписка не найдена" });
+        return;
+      }
+
+      setUserState(userId, {
+        step: "adding_negative",
+        editing_subscription_id: subscriptionId,
+      });
+      await context.answer({ text: "Отправь слова" });
+      await context.editText(
+        `Текущие: ${sub.negative_keywords.join(", ") || "нет"}\n\nОтправь слова для добавления через запятую:`
+      );
+      break;
+    }
+
+    // Show remove keywords UI for existing subscription
+    case "remove_positive": {
+      const subscriptionId = Number(data.id);
+      const sub = queries.getSubscriptionById(subscriptionId, userId);
+      if (!sub) {
+        await context.answer({ text: "Подписка не найдена" });
+        return;
+      }
+
+      if (sub.positive_keywords.length === 0) {
+        await context.answer({ text: "Нет слов для удаления" });
+        return;
+      }
+
+      setUserState(userId, {
+        step: "removing_positive",
+        editing_subscription_id: subscriptionId,
+      });
+
+      const list = sub.positive_keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
+      await context.answer({ text: "Выбери слова" });
+      await context.editText(
+        `Позитивные слова:\n${list}\n\nНажми на слово или отправь номера через запятую:`,
+        { reply_markup: removeKeywordsKeyboard(sub.positive_keywords, "positive", subscriptionId) }
+      );
+      break;
+    }
+
+    // Show remove keywords UI for existing subscription (negative)
+    case "remove_negative": {
+      const subscriptionId = Number(data.id);
+      const sub = queries.getSubscriptionById(subscriptionId, userId);
+      if (!sub) {
+        await context.answer({ text: "Подписка не найдена" });
+        return;
+      }
+
+      if (sub.negative_keywords.length === 0) {
+        await context.answer({ text: "Нет слов для удаления" });
+        return;
+      }
+
+      setUserState(userId, {
+        step: "removing_negative",
+        editing_subscription_id: subscriptionId,
+      });
+
+      const list = sub.negative_keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
+      await context.answer({ text: "Выбери слова" });
+      await context.editText(
+        `Негативные слова:\n${list}\n\nНажми на слово или отправь номера через запятую:`,
+        { reply_markup: removeKeywordsKeyboard(sub.negative_keywords, "negative", subscriptionId) }
+      );
+      break;
+    }
+
+    // Remove keyword by clicking button (existing subscription)
+    case "rm_kw": {
+      const subscriptionId = Number(data.id);
+      const type = data.type as "positive" | "negative";
+      const idx = Number(data.idx);
+
+      const sub = queries.getSubscriptionById(subscriptionId, userId);
+      if (!sub) {
+        await context.answer({ text: "Подписка не найдена" });
+        return;
+      }
+
+      const keywords = type === "positive" ? [...sub.positive_keywords] : [...sub.negative_keywords];
+      const removed = keywords[idx];
+      if (!removed) {
+        await context.answer({ text: "Слово не найдено" });
+        return;
+      }
+
+      keywords.splice(idx, 1);
+
+      if (type === "positive") {
+        if (keywords.length === 0) {
+          await context.answer({ text: "Нельзя удалить последнее слово" });
+          return;
+        }
+        queries.updatePositiveKeywords(subscriptionId, userId, keywords);
+      } else {
+        queries.updateNegativeKeywords(subscriptionId, userId, keywords);
+      }
+      invalidateSubscriptionsCache();
+
+      await context.answer({ text: `Удалено: ${removed}` });
+
+      if (keywords.length === 0) {
+        // No more keywords to remove, go back to subscription
+        const updated = queries.getSubscriptionById(subscriptionId, userId)!;
+        let exclusionsText = "нет";
+        if (updated.negative_keywords.length > 0) {
+          exclusionsText = updated.negative_keywords.join(", ");
+        }
+        await context.editText(
+          format`
+${bold("Подписка #" + updated.id)}
+${bold("Запрос:")} ${updated.original_query}
+${bold("Ключевые слова:")} ${code(updated.positive_keywords.join(", "))}
+${bold("Исключения:")} ${code(exclusionsText)}
+          `,
+          {
+            reply_markup: subscriptionKeyboard(
+              updated.id,
+              updated.negative_keywords.length > 0,
+              (updated.disabled_negative_keywords?.length ?? 0) > 0
+            ),
+          }
+        );
+        setUserState(userId, { step: "idle" });
+      } else {
+        // Update the keyboard with remaining keywords
+        const list = keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
+        const label = type === "positive" ? "Позитивные" : "Негативные";
+        await context.editText(
+          `${label} слова:\n${list}\n\nНажми на слово или отправь номера через запятую:`,
+          { reply_markup: removeKeywordsKeyboard(keywords, type, subscriptionId) }
+        );
+      }
       break;
     }
 

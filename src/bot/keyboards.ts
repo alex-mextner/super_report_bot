@@ -54,12 +54,10 @@ export function pendingGroupsKeyboard(groups: PendingGroup[]): InlineKeyboard {
 export const confirmKeyboard = (queryId: string) =>
   new InlineKeyboard()
     .text("Подтвердить", JSON.stringify({ action: "confirm", id: queryId }))
-    .text("Изменить", JSON.stringify({ action: "edit", id: queryId }))
+    .text("🤖 Перегенерировать", JSON.stringify({ action: "regenerate", id: queryId }))
     .row()
-    .text(
-      "🤖 Перегенерировать",
-      JSON.stringify({ action: "regenerate", id: queryId })
-    )
+    .text("✏️ + слова", JSON.stringify({ action: "edit_positive_pending" }))
+    .text("✏️ − слова", JSON.stringify({ action: "edit_negative_pending" }))
     .row()
     .text("Отмена", JSON.stringify({ action: "cancel", id: queryId }));
 
@@ -159,4 +157,59 @@ export function aiEditKeyboard(subscriptionId: number): InlineKeyboard {
       "Отмена",
       JSON.stringify({ action: "cancel_ai_edit", id: subscriptionId })
     );
+}
+
+// Submenu for editing positive/negative keywords (add/remove choice)
+export function keywordEditSubmenu(
+  type: "positive" | "negative",
+  subscriptionId: number
+): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("Добавить", JSON.stringify({ action: `add_${type}`, id: subscriptionId }))
+    .text("Удалить", JSON.stringify({ action: `remove_${type}`, id: subscriptionId }))
+    .row()
+    .text("↩️ Назад", JSON.stringify({ action: "back_to_sub", id: subscriptionId }));
+}
+
+// Submenu for editing keywords during confirmation (pending subscription)
+export function keywordEditSubmenuPending(
+  type: "positive" | "negative"
+): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("Добавить", JSON.stringify({ action: `add_${type}_pending` }))
+    .text("Удалить", JSON.stringify({ action: `remove_${type}_pending` }))
+    .row()
+    .text("↩️ Назад", JSON.stringify({ action: "back_to_confirm" }));
+}
+
+// Keyboard for removing keywords (shows each keyword as a button)
+export function removeKeywordsKeyboard(
+  keywords: string[],
+  type: "positive" | "negative",
+  subscriptionId: number | null // null for pending subscription
+): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  const isPending = subscriptionId === null;
+
+  // Show keywords as buttons (max 3 per row for readability)
+  for (let i = 0; i < keywords.length; i++) {
+    const keyword = keywords[i];
+    if (!keyword) continue;
+    const action = isPending
+      ? { action: "rm_kw_pending", type, idx: i }
+      : { action: "rm_kw", type, id: subscriptionId, idx: i };
+    kb.text(`❌ ${keyword}`, JSON.stringify(action));
+    // New row every 2 keywords
+    if ((i + 1) % 2 === 0) kb.row();
+  }
+
+  // Ensure we're on a new row before adding control buttons
+  if (keywords.length % 2 !== 0) kb.row();
+
+  const backAction = isPending
+    ? { action: "back_to_confirm" }
+    : { action: "back_to_sub", id: subscriptionId };
+  kb.text("✅ Готово", JSON.stringify(backAction));
+
+  return kb;
 }
