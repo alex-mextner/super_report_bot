@@ -28,8 +28,9 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const HISTORY_LIMIT = 1000;
 const RATE_LIMIT_DELAY = 2000; // 2 seconds between groups
-const RETRY_ATTEMPTS = 3;
-const RETRY_BASE_DELAY = 1000; // 1s -> 2s -> 4s exponential backoff
+const RETRY_ATTEMPTS = 10;
+const RETRY_BASE_DELAY = 2000; // 2s -> 4s -> 8s -> ... exponential backoff
+const RETRY_MAX_DELAY = 120000; // cap at 2 minutes
 
 export const mtClient = new TelegramClient({
   apiId: API_ID,
@@ -256,6 +257,26 @@ export function setupMessageHandler(): void {
   listenerLog.info("Message handlers registered");
 }
 
+// Reconnect MTProto client (for retry logic)
+async function reconnectClient(): Promise<void> {
+  listenerLog.info("Reconnecting MTProto client...");
+
+  try {
+    await mtClient.destroy();
+  } catch (e) {
+    listenerLog.warn({ err: e }, "Error destroying client (continuing anyway)");
+  }
+
+  const user = await mtClient.start({
+    phone: () => mtClient.input("Phone number: "),
+    code: () => mtClient.input("Code: "),
+    password: () => mtClient.input("2FA Password: "),
+  });
+
+  setupMessageHandler();
+  listenerLog.info({ userId: user.id, name: user.displayName }, "MTProto client reconnected");
+}
+
 // Convert Message to CachedMessage
 function messageToCached(msg: Message): CachedMessage | null {
   if (!msg.text) return null;
@@ -318,19 +339,20 @@ async function loadAllGroupsHistory(): Promise<void> {
   listenerLog.info({ ...getCacheStats() }, "All groups history loaded");
 }
 
-// Load history for a single group with retry logic
+// Load history for a single group with retry logic and client reconnection
 async function loadGroupHistory(groupId: number, limit: number): Promise<void> {
   let groupTitle = "Unknown";
 
-  try {
-    const chat = await mtClient.getChat(groupId);
-    groupTitle = chat.title || "Unknown";
-  } catch {
-    // Ignore - use default title
-  }
-
   for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
     try {
+      // Try to get group title on each attempt (may succeed after reconnect)
+      try {
+        const chat = await mtClient.getChat(groupId);
+        groupTitle = chat.title || "Unknown";
+      } catch {
+        // Ignore - use default title
+      }
+
       let count = 0;
       for await (const msg of mtClient.iterHistory(groupId, { limit })) {
         if (msg.text) {
@@ -346,12 +368,13 @@ async function loadGroupHistory(groupId: number, limit: number): Promise<void> {
           count++;
         }
       }
-      listenerLog.debug({ groupId, messagesLoaded: count }, "History loaded");
+      listenerLog.debug({ groupId, groupTitle, messagesLoaded: count }, "History loaded");
       return; // success
     } catch (e) {
+      // FloodWait — wait the specified time
       if (tl.RpcError.is(e, "FLOOD_WAIT_%d")) {
         const seconds = (e as tl.RpcError & { seconds: number }).seconds;
-        listenerLog.warn({ seconds, groupId }, "FloodWait, waiting...");
+        listenerLog.warn({ seconds, groupId, groupTitle }, "FloodWait, waiting...");
         await sleep(seconds * 1000);
         continue;
       }
@@ -362,12 +385,44 @@ async function loadGroupHistory(groupId: number, limit: number): Promise<void> {
         (e instanceof Error && e.message.includes("network"));
 
       if (isRetryable && attempt < RETRY_ATTEMPTS) {
-        const delay = RETRY_BASE_DELAY * Math.pow(2, attempt - 1);
-        listenerLog.warn({ groupId, attempt, delay, err: e }, "Retrying history load...");
+        const delay = Math.min(RETRY_BASE_DELAY * Math.pow(2, attempt - 1), RETRY_MAX_DELAY);
+
+        listenerLog.warn(
+          {
+            groupId,
+            groupTitle,
+            attempt: `${attempt}/${RETRY_ATTEMPTS}`,
+            delayMs: delay,
+            errorCode: e instanceof tl.RpcError ? e.code : null,
+            errorText: e instanceof tl.RpcError ? e.text : null,
+            errorMessage: e instanceof Error ? e.message : String(e),
+          },
+          `Retrying in ${delay / 1000}s with client reconnect...`
+        );
+
         await sleep(delay);
+
+        // Reconnect client before next attempt
+        try {
+          await reconnectClient();
+        } catch (reconnectErr) {
+          listenerLog.error({ err: reconnectErr }, "Failed to reconnect client");
+        }
         continue;
       }
 
+      // All attempts exhausted or non-retryable error
+      listenerLog.error(
+        {
+          groupId,
+          groupTitle,
+          attemptsExhausted: attempt,
+          errorCode: e instanceof tl.RpcError ? e.code : null,
+          errorText: e instanceof tl.RpcError ? e.text : null,
+          errorMessage: e instanceof Error ? e.message : String(e),
+        },
+        "Failed to load group history after all retries"
+      );
       throw e;
     }
   }
