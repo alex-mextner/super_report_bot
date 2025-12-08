@@ -60,19 +60,49 @@
   color: var(--tg-theme-text-color, #000);
 }
 
-.goto-message-btn {
-  width: 100%;
+.product-actions {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.goto-message-btn,
+.analyze-btn {
+  flex: 1;
   padding: 14px;
   border: none;
   border-radius: 12px;
-  background: var(--tg-theme-button-color, #3390ec);
-  color: var(--tg-theme-button-text-color, #fff);
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
   transition: opacity 0.2s;
 }
 
-.goto-message-btn:active {
+.goto-message-btn {
+  background: var(--tg-theme-button-color, #3390ec);
+  color: var(--tg-theme-button-text-color, #fff);
+}
+
+.analyze-btn {
+  background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+  color: var(--tg-theme-text-color, #000);
+}
+
+.analyze-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.goto-message-btn:active,
+.analyze-btn:active {
   opacity: 0.8;
+}
+
+.analysis-error {
+  padding: 12px;
+  background: #fee2e2;
+  border-radius: 8px;
+  color: #ef4444;
+  font-size: 13px;
+  margin-bottom: 16px;
 }

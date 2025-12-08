@@ -14,6 +14,7 @@ import {
   isCacheReady,
   setCacheReady,
   getCacheStats,
+  saveTopic,
   type CachedMessage,
 } from "../cache/messages.ts";
 
@@ -156,7 +157,9 @@ async function processMessage(msg: Message): Promise<void> {
             userTelegramId,
             incomingMsg.group_title,
             incomingMsg.text,
-            subscription.original_query
+            subscription.original_query,
+            incomingMsg.id,
+            incomingMsg.group_id
           );
           listenerLog.info(
             {
@@ -193,7 +196,9 @@ async function processMessage(msg: Message): Promise<void> {
             userTelegramId,
             incomingMsg.group_title,
             incomingMsg.text,
-            subscription.original_query
+            subscription.original_query,
+            incomingMsg.id,
+            incomingMsg.group_id
           );
         }
       }
@@ -284,6 +289,21 @@ async function reconnectClient(): Promise<void> {
   listenerLog.info({ userId: user.id, name: user.displayName }, "MTProto client reconnected");
 }
 
+// Extract topic ID from message reply info (for forum groups)
+function extractTopicId(msg: Message): number | undefined {
+  // In forum groups, messages have replyTo.topMsgId pointing to the topic
+  const replyTo = msg.replyToMessage;
+  if (replyTo && "topMsgId" in replyTo) {
+    return (replyTo as { topMsgId?: number }).topMsgId;
+  }
+  // Also check raw if available
+  const raw = msg.raw as { reply_to?: { reply_to_top_id?: number } };
+  if (raw?.reply_to?.reply_to_top_id) {
+    return raw.reply_to.reply_to_top_id;
+  }
+  return undefined;
+}
+
 // Convert Message to CachedMessage
 function messageToCached(msg: Message): CachedMessage | null {
   if (!msg.text) return null;
@@ -291,10 +311,13 @@ function messageToCached(msg: Message): CachedMessage | null {
   const chat = msg.chat;
   if (chat.type !== "chat" || !chat.isGroup) return null;
 
+  const topicId = extractTopicId(msg);
+
   return {
     id: msg.id,
     groupId: chat.id,
     groupTitle: chat.title || "Unknown",
+    topicId,
     text: msg.text,
     senderId: msg.sender?.id,
     senderName: msg.sender?.displayName,
@@ -363,10 +386,12 @@ async function loadGroupHistory(groupId: number, limit: number): Promise<void> {
       let count = 0;
       for await (const msg of mtClient.iterHistory(groupId, { limit })) {
         if (msg.text) {
+          const topicId = extractTopicId(msg);
           addMessage({
             id: msg.id,
             groupId,
             groupTitle,
+            topicId,
             text: msg.text,
             senderId: msg.sender?.id,
             senderName: msg.sender?.displayName,
@@ -549,7 +574,9 @@ export async function scanGroupHistory(
                 userTelegramId,
                 incomingMsg.group_title,
                 incomingMsg.text,
-                subscription.original_query
+                subscription.original_query,
+                incomingMsg.id,
+                incomingMsg.group_id
               );
             }
           }
@@ -564,7 +591,9 @@ export async function scanGroupHistory(
                 userTelegramId,
                 incomingMsg.group_title,
                 incomingMsg.text,
-                subscription.original_query
+                subscription.original_query,
+                incomingMsg.id,
+                incomingMsg.group_id
               );
             }
           }
@@ -626,6 +655,7 @@ export async function scanFromCache(
     const DEBUG_LIMIT = 5;
     for (let i = 0; i < Math.min(DEBUG_LIMIT, messages.length); i++) {
       const debugMsg = messages[i];
+      if (!debugMsg) continue;
       const debugResult = passesNgramFilter(
         debugMsg.text,
         subscription.positive_keywords,
@@ -676,7 +706,9 @@ export async function scanFromCache(
               userTelegramId,
               msg.groupTitle,
               msg.text,
-              subscription.original_query
+              subscription.original_query,
+              msg.id,
+              msg.groupId
             );
           }
         }
@@ -692,7 +724,9 @@ export async function scanFromCache(
               userTelegramId,
               msg.groupTitle,
               msg.text,
-              subscription.original_query
+              subscription.original_query,
+              msg.id,
+              msg.groupId
             );
           }
         }

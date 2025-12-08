@@ -57,6 +57,34 @@ CREATE TABLE IF NOT EXISTS user_groups (
   UNIQUE(user_id, group_id)
 );
 
+-- Message history (persistent storage, replaces in-memory cache)
+CREATE TABLE IF NOT EXISTS messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id INTEGER NOT NULL,
+  group_id INTEGER NOT NULL,
+  group_title TEXT,
+  topic_id INTEGER,              -- for forum topics
+  topic_title TEXT,              -- topic name
+  text TEXT NOT NULL,
+  sender_id INTEGER,
+  sender_name TEXT,
+  timestamp INTEGER NOT NULL,    -- unix timestamp
+  is_deleted INTEGER DEFAULT 0,  -- soft delete
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(message_id, group_id)
+);
+
+-- Topics cache (for forum groups)
+CREATE TABLE IF NOT EXISTS topics (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  group_id INTEGER NOT NULL,
+  topic_id INTEGER NOT NULL,
+  title TEXT,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(group_id, topic_id)
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_active ON subscriptions(is_active);
@@ -64,6 +92,10 @@ CREATE INDEX IF NOT EXISTS idx_matched_messages_sub ON matched_messages(subscrip
 CREATE INDEX IF NOT EXISTS idx_subscription_groups_sub ON subscription_groups(subscription_id);
 CREATE INDEX IF NOT EXISTS idx_subscription_groups_group ON subscription_groups(group_id);
 CREATE INDEX IF NOT EXISTS idx_user_groups_user ON user_groups(user_id);
+CREATE INDEX IF NOT EXISTS idx_messages_group ON messages(group_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_topic ON messages(group_id, topic_id);
+CREATE INDEX IF NOT EXISTS idx_messages_deleted ON messages(is_deleted);
+CREATE INDEX IF NOT EXISTS idx_topics_group ON topics(group_id);
 
 -- ===========================================
 -- WebApp: Categories and Products

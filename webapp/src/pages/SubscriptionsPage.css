@@ -1,0 +1,4 @@
+.subscriptions-page {
+  min-height: 100vh;
+  background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+}

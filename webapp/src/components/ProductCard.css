@@ -52,6 +52,14 @@
   font-weight: 500;
 }
 
+.product-topic {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+  color: var(--tg-theme-hint-color, #999);
+}
+
 .product-text {
   margin: 0;
   font-size: 14px;

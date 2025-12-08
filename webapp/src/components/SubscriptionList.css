@@ -1,0 +1,36 @@
+.subscription-list {
+  padding-bottom: 20px;
+}
+
+.subscription-list-loading,
+.subscription-list-error {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--tg-theme-hint-color, #999);
+}
+
+.subscription-list-error {
+  color: #ef4444;
+}
+
+.subscription-list-empty {
+  text-align: center;
+  padding: 60px 20px;
+}
+
+.empty-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.empty-text {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--tg-theme-text-color, #000);
+  margin-bottom: 8px;
+}
+
+.empty-hint {
+  font-size: 14px;
+  color: var(--tg-theme-hint-color, #999);
+}

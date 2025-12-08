@@ -182,3 +182,29 @@ export interface SellerContact {
   source: string;
   created_at: string;
 }
+
+// Persistent message storage (replaces in-memory cache)
+export interface StoredMessage {
+  id: number;
+  message_id: number;
+  group_id: number;
+  group_title: string | null;
+  topic_id: number | null;
+  topic_title: string | null;
+  text: string;
+  sender_id: number | null;
+  sender_name: string | null;
+  timestamp: number;
+  is_deleted: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// Topic for forum groups
+export interface Topic {
+  id: number;
+  group_id: number;
+  topic_id: number;
+  title: string | null;
+  updated_at: string;
+}

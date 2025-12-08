@@ -1142,7 +1142,7 @@ bot.on("callback_query", async (context) => {
   const userId = context.from?.id;
   if (!userId) return;
 
-  let data: { action: string; id?: string | number; type?: string; idx?: number };
+  let data: { action: string; id?: string | number; type?: string; idx?: number; msgId?: number; grpId?: number };
   try {
     data = JSON.parse(context.data || "{}");
   } catch {
@@ -2201,6 +2201,115 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
       await context.answer({ text: "Уже выбрано" });
       break;
     }
+
+    case "analyze": {
+      // Deep analysis of matched message
+      const msgId = data.msgId as number;
+      const grpId = data.grpId as number;
+
+      if (!msgId || !grpId) {
+        await context.answer({ text: "Данные не найдены" });
+        return;
+      }
+
+      await context.answer({ text: "Анализирую..." });
+      await context.editText("⏳ Анализирую объявление...\nЭто может занять 10-30 секунд.");
+
+      try {
+        // Get message text from DB
+        const storedMsg = queries.getMessage(msgId, grpId);
+        if (!storedMsg) {
+          await context.editText("Сообщение не найдено в базе данных.");
+          return;
+        }
+
+        // Run deep analysis
+        const { deepAnalyze } = await import("../llm/deep-analyze.ts");
+        const result = await deepAnalyze(storedMsg.text);
+
+        // Format result
+        if (!result.isListing) {
+          const reason = result.notListingReason || "Не удалось определить тип";
+          await context.editText(`❌ Это не объявление\n\nПричина: ${reason}`);
+          break;
+        }
+
+        const listingTypeLabels: Record<string, string> = {
+          sale: "Продажа",
+          rent: "Аренда",
+          service: "Услуга",
+          other: "Другое",
+        };
+
+        let resultText = `📊 <b>Анализ объявления</b>\n`;
+        resultText += `Тип: ${listingTypeLabels[result.listingType || "other"] || "Неизвестно"}\n\n`;
+
+        // Scam risk section
+        const riskEmoji = result.scamRisk.level === "high" ? "🚨" : result.scamRisk.level === "medium" ? "⚠️" : "✅";
+        resultText += `${riskEmoji} <b>Риск мошенничества:</b> ${result.scamRisk.score}/100\n`;
+        if (result.scamRisk.flags.length > 0) {
+          resultText += `Флаги: ${result.scamRisk.flags.join(", ")}\n`;
+        }
+        resultText += `${result.scamRisk.recommendation}\n\n`;
+
+        // Items table
+        if (result.items.length > 0) {
+          resultText += `<b>📋 Товары/услуги:</b>\n`;
+          resultText += `<code>`;
+          resultText += `${"Товар".padEnd(20)} | ${"Цена".padEnd(12)} | ${"Рынок".padEnd(15)} | Оценка\n`;
+          resultText += `${"─".repeat(20)} | ${"─".repeat(12)} | ${"─".repeat(15)} | ${"─".repeat(8)}\n`;
+
+          const verdictEmoji: Record<string, string> = {
+            good_deal: "✅",
+            overpriced: "❌",
+            fair: "👍",
+            unknown: "❓",
+          };
+
+          for (const item of result.items) {
+            const name = item.name.slice(0, 18).padEnd(20);
+            const price = (item.extractedPrice || "—").slice(0, 10).padEnd(12);
+            const market = item.marketPriceAvg
+              ? `~${item.marketPriceAvg.toLocaleString("ru-RU")}`.slice(0, 13).padEnd(15)
+              : "—".padEnd(15);
+            const verdict = verdictEmoji[item.priceVerdict] || "❓";
+            resultText += `${name} | ${price} | ${market} | ${verdict}\n`;
+          }
+          resultText += `</code>\n\n`;
+
+          // Worth buying warnings
+          const notWorth = result.items.filter((i) => !i.worthBuying);
+          if (notWorth.length > 0) {
+            resultText += `🚫 <b>Не рекомендуется:</b>\n`;
+            for (const item of notWorth) {
+              resultText += `• ${item.name}: ${item.worthBuyingReason}\n`;
+            }
+            resultText += `\n`;
+          }
+
+          // Sources
+          const allSources = result.items.flatMap((i) => i.sources).filter((s) => s.price);
+          if (allSources.length > 0) {
+            resultText += `<b>🔗 Источники цен:</b>\n`;
+            const uniqueSources = allSources.slice(0, 5);
+            for (const src of uniqueSources) {
+              const title = src.title.slice(0, 40);
+              resultText += `• <a href="${src.url}">${title}</a>: ${src.price || "—"}\n`;
+            }
+            resultText += `\n`;
+          }
+        }
+
+        // Overall verdict
+        resultText += `<b>📝 Итог:</b>\n${result.overallVerdict}`;
+
+        await context.editText(resultText, { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
+      } catch (error) {
+        botLog.error({ err: error }, "Deep analysis failed");
+        await context.editText("Ошибка анализа. Попробуйте позже.");
+      }
+      break;
+    }
   }
 });
 
@@ -2216,12 +2325,28 @@ export async function notifyUser(
   telegramId: number,
   groupTitle: string,
   messageText: string,
-  subscriptionQuery: string
+  subscriptionQuery: string,
+  messageId?: number,
+  groupId?: number
 ): Promise<void> {
   try {
+    const keyboard = messageId && groupId
+      ? {
+          inline_keyboard: [
+            [
+              {
+                text: "🔍 Анализ цены",
+                callback_data: JSON.stringify({ action: "analyze", msgId: messageId, grpId: groupId }),
+              },
+            ],
+          ],
+        }
+      : undefined;
+
     await bot.api.sendMessage({
       chat_id: telegramId,
       text: `🔔 Найдено совпадение!\n\nГруппа: ${groupTitle}\n\nЗапрос: ${subscriptionQuery}\n\nСообщение:\n${messageText.slice(0, 500)}${messageText.length > 500 ? "..." : ""}`,
+      reply_markup: keyboard,
     });
     botLog.debug({ userId: telegramId, groupTitle }, "Notification sent");
   } catch (error) {

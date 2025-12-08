@@ -1,0 +1,115 @@
+.subscription-card {
+  background: var(--tg-theme-bg-color, #fff);
+  border-radius: 12px;
+  padding: 16px;
+  margin: 0 16px 12px;
+}
+
+.subscription-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.subscription-query {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--tg-theme-text-color, #000);
+  word-break: break-word;
+}
+
+.subscription-delete {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+  color: var(--tg-theme-hint-color, #999);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, color 0.2s;
+}
+
+.subscription-delete:hover {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+.subscription-delete:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.subscription-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.subscription-group-badge {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  background: var(--tg-theme-link-color, #3390ec);
+  color: #fff;
+}
+
+.subscription-keywords {
+  margin-bottom: 10px;
+}
+
+.keywords-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.keywords-row:last-child {
+  margin-bottom: 0;
+}
+
+.keywords-label {
+  flex-shrink: 0;
+  width: 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tg-theme-hint-color, #999);
+}
+
+.keywords-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.keyword-badge {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.keywords-list.positive .keyword-badge {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.keywords-list.negative .keyword-badge {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+.subscription-description {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--tg-theme-hint-color, #999);
+  font-style: italic;
+}

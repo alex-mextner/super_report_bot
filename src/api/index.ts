@@ -4,8 +4,9 @@ import { serveStatic } from "hono/bun";
 import { queries } from "../db/index.ts";
 import { validateInitData, parseInitDataUser } from "./auth.ts";
 import { apiLog } from "../logger.ts";
-import { getMessages, getAllCachedMessages, getCachedGroups, getCachedMessageById } from "../cache/messages.ts";
+import { getMessages, getAllCachedMessages, getCachedGroups, getCachedMessageById, getTopicsByGroup } from "../cache/messages.ts";
 import { analyzeMessage, analyzeMessagesBatch, type BatchItem } from "../llm/analyze.ts";
+import { deepAnalyze } from "../llm/deep-analyze.ts";
 import { generateNgrams, generateWordShingles } from "../matcher/normalize.ts";
 
 const ADMIN_ID = Number(process.env.ADMIN_ID) || 0;
@@ -73,6 +74,14 @@ api.get("/groups", (c) => {
   const groups = getCachedGroups();
   apiLog.debug({ count: groups.length }, "GET /api/groups");
   return c.json(groups);
+});
+
+// GET /api/groups/:id/topics - list of topics in a group
+api.get("/groups/:id/topics", (c) => {
+  const groupId = Number(c.req.param("id"));
+  const topics = getTopicsByGroup(groupId);
+  apiLog.debug({ groupId, count: topics.length }, "GET /api/groups/:id/topics");
+  return c.json({ items: topics });
 });
 
 // GET /api/products
@@ -176,6 +185,132 @@ api.post("/analyze-batch", async (c) => {
   }
 });
 
+// === Subscriptions API ===
+
+// GET /api/subscriptions - list user's subscriptions
+api.get("/subscriptions", (c) => {
+  const userId = c.get("userId");
+  if (!userId) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const subscriptions = queries.getUserSubscriptions(userId);
+
+  // Add groups for each subscription
+  const items = subscriptions.map((sub) => {
+    const groups = queries.getSubscriptionGroups(sub.id);
+    return {
+      id: sub.id,
+      original_query: sub.original_query,
+      positive_keywords: sub.positive_keywords,
+      negative_keywords: sub.negative_keywords,
+      llm_description: sub.llm_description,
+      is_active: sub.is_active,
+      created_at: sub.created_at,
+      groups: groups.map((g) => ({
+        id: g.group_id,
+        title: g.group_title,
+      })),
+    };
+  });
+
+  apiLog.debug({ userId, count: items.length }, "GET /api/subscriptions");
+  return c.json({ items });
+});
+
+// GET /api/subscriptions/:id - single subscription
+api.get("/subscriptions/:id", (c) => {
+  const userId = c.get("userId");
+  if (!userId) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const id = Number(c.req.param("id"));
+  const subscription = queries.getSubscriptionById(id, userId);
+
+  if (!subscription) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  const groups = queries.getSubscriptionGroups(id);
+
+  return c.json({
+    id: subscription.id,
+    original_query: subscription.original_query,
+    positive_keywords: subscription.positive_keywords,
+    negative_keywords: subscription.negative_keywords,
+    llm_description: subscription.llm_description,
+    is_active: subscription.is_active,
+    created_at: subscription.created_at,
+    groups: groups.map((g) => ({
+      id: g.group_id,
+      title: g.group_title,
+    })),
+  });
+});
+
+// DELETE /api/subscriptions/:id - deactivate subscription
+api.delete("/subscriptions/:id", (c) => {
+  const userId = c.get("userId");
+  if (!userId) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const id = Number(c.req.param("id"));
+
+  // Check if subscription exists
+  const subscription = queries.getSubscriptionById(id, userId);
+  if (!subscription) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  queries.deactivateSubscription(id, userId);
+  apiLog.info({ userId, subscriptionId: id }, "Subscription deactivated");
+
+  return c.json({ success: true });
+});
+
+// GET /api/subscriptions/:id/groups - groups for subscription
+api.get("/subscriptions/:id/groups", (c) => {
+  const userId = c.get("userId");
+  if (!userId) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const id = Number(c.req.param("id"));
+
+  // Check if subscription belongs to user
+  const subscription = queries.getSubscriptionById(id, userId);
+  if (!subscription) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  const groups = queries.getSubscriptionGroups(id);
+
+  return c.json({
+    items: groups.map((g) => ({
+      id: g.group_id,
+      title: g.group_title,
+    })),
+  });
+});
+
+// POST /api/analyze-deep - deep product analysis with market prices
+api.post("/analyze-deep", async (c) => {
+  const body = await c.req.json<{ text: string; messageId?: number; groupId?: number }>();
+  if (!body.text) {
+    return c.json({ error: "Text required" }, 400);
+  }
+
+  try {
+    const result = await deepAnalyze(body.text);
+    return c.json(result);
+  } catch (error) {
+    apiLog.error({ err: error }, "Deep analysis failed");
+    return c.json({ error: "Analysis failed" }, 500);
+  }
+});
+
 // Health check
 api.get("/health", (c) => {
   return c.json({ status: "ok" });
@@ -199,11 +334,13 @@ function getProductsFromCache(search?: string, groupId?: number, offset = 0, lim
     message_id: msg.id,
     group_id: msg.groupId,
     group_title: msg.groupTitle,
+    topic_id: msg.topicId ?? null,
+    topic_title: msg.topicTitle ?? null,
     text: msg.text,
     sender_id: msg.senderId ?? null,
     sender_name: msg.senderName ?? null,
     message_date: msg.date,
-    messageLink: buildTelegramLink(msg.groupId, msg.id),
+    messageLink: buildTelegramLink(msg.groupId, msg.id, msg.topicId),
   }));
 
   // Sort by date descending
@@ -330,14 +467,18 @@ export function fuzzySearch<T extends { text: string }>(
 /**
  * Build Telegram message link
  * For supergroups: https://t.me/c/{chat_id}/{message_id}
+ * For forum topics: https://t.me/c/{chat_id}/{topic_id}/{message_id}
  */
-function buildTelegramLink(groupId: number, messageId: number): string {
+function buildTelegramLink(groupId: number, messageId: number, topicId?: number): string {
   // Supergroup IDs start with -100
   const chatIdStr = String(groupId);
   const cleanChatId = chatIdStr.startsWith("-100")
     ? chatIdStr.slice(4)
     : chatIdStr.replace("-", "");
 
+  if (topicId) {
+    return `https://t.me/c/${cleanChatId}/${topicId}/${messageId}`;
+  }
   return `https://t.me/c/${cleanChatId}/${messageId}`;
 }
 

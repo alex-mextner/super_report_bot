@@ -1,3 +1,27 @@
+.home-page {
+  min-height: 100vh;
+  background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+}
+
+.home-header {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 16px 8px;
+}
+
+.subscriptions-link {
+  font-size: 14px;
+  color: var(--tg-theme-link-color, #3390ec);
+  text-decoration: none;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: var(--tg-theme-bg-color, #fff);
+}
+
+.subscriptions-link:active {
+  opacity: 0.7;
+}
+
 .analyze-all-container {
   padding: 0 16px 12px;
 }

@@ -2,8 +2,10 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useEffect } from "react";
 import { useTelegram } from "../hooks/useTelegram";
 import { useProduct, useSimilarProducts } from "../hooks/useProducts";
+import { useDeepAnalyze } from "../hooks/useDeepAnalyze";
 import { SellerContacts } from "../components/SellerContacts";
 import { SimilarProducts } from "../components/SimilarProducts";
+import { DeepAnalysis } from "../components/DeepAnalysis";
 import "./ProductPage.css";
 
 function formatDate(timestamp: number): string {
@@ -23,6 +25,7 @@ export function ProductPage() {
   const productId = Number(id);
   const { product, loading, error } = useProduct(productId);
   const { similar, loading: similarLoading } = useSimilarProducts(productId);
+  const { analyze, loading: analyzing, result: analysisResult, error: analysisError } = useDeepAnalyze();
 
   // Setup back button
   useEffect(() => {
@@ -63,12 +66,28 @@ export function ProductPage() {
           </div>
         )}
 
-        <button
-          className="goto-message-btn"
-          onClick={() => openLink(product.messageLink)}
-        >
-          Перейти к сообщению
-        </button>
+        <div className="product-actions">
+          <button
+            className="goto-message-btn"
+            onClick={() => openLink(product.messageLink)}
+          >
+            Перейти к сообщению
+          </button>
+
+          <button
+            className="analyze-btn"
+            onClick={() => analyze(product.text)}
+            disabled={analyzing}
+          >
+            {analyzing ? "Анализирую..." : "Анализ цены"}
+          </button>
+        </div>
+
+        {analysisError && (
+          <div className="analysis-error">{analysisError}</div>
+        )}
+
+        {analysisResult && <DeepAnalysis result={analysisResult} />}
 
         <SellerContacts contacts={product.contacts} />
         <SimilarProducts products={similar} loading={similarLoading} />

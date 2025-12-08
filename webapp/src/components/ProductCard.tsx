@@ -30,6 +30,9 @@ export function ProductCard({ product, showScore }: Props) {
     <div className="product-card" onClick={() => navigate(`/product/${product.id}`)}>
       <div className="product-header">
         <span className="product-group">{product.group_title}</span>
+        {product.topic_title && (
+          <span className="product-topic">{product.topic_title}</span>
+        )}
         <span className="product-date">{formatDate(product.message_date)}</span>
         {showScore && product._score !== undefined && (
           <span className={`product-score score-${product._matchType}`}>

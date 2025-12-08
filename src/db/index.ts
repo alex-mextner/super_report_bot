@@ -8,6 +8,8 @@ import type {
   Category,
   Product,
   SellerContact,
+  StoredMessage,
+  Topic,
 } from "../types.ts";
 import { runMigrations } from "./migrations.ts";
 
@@ -167,6 +169,72 @@ const stmts = {
   ),
   getProductContacts: db.prepare<SellerContact, [number]>(
     "SELECT * FROM seller_contacts WHERE product_id = ?"
+  ),
+
+  // Messages (persistent history)
+  upsertMessage: db.prepare<void, [number, number, string | null, number | null, string | null, string, number | null, string | null, number]>(
+    `INSERT INTO messages (message_id, group_id, group_title, topic_id, topic_title, text, sender_id, sender_name, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(message_id, group_id) DO UPDATE SET
+       text = excluded.text,
+       group_title = excluded.group_title,
+       topic_id = excluded.topic_id,
+       topic_title = excluded.topic_title,
+       sender_id = excluded.sender_id,
+       sender_name = excluded.sender_name,
+       updated_at = CURRENT_TIMESTAMP`
+  ),
+  updateMessageText: db.prepare<void, [string, number, number]>(
+    `UPDATE messages SET text = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE message_id = ? AND group_id = ?`
+  ),
+  softDeleteMessage: db.prepare<void, [number, number]>(
+    `UPDATE messages SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP
+     WHERE message_id = ? AND group_id = ?`
+  ),
+  getMessage: db.prepare<StoredMessage, [number, number]>(
+    "SELECT * FROM messages WHERE message_id = ? AND group_id = ?"
+  ),
+  getMessagesByGroup: db.prepare<StoredMessage, [number, number, number]>(
+    `SELECT * FROM messages WHERE group_id = ? AND is_deleted = 0
+     ORDER BY timestamp DESC LIMIT ? OFFSET ?`
+  ),
+  getMessagesByGroupAndTopic: db.prepare<StoredMessage, [number, number, number, number]>(
+    `SELECT * FROM messages WHERE group_id = ? AND topic_id = ? AND is_deleted = 0
+     ORDER BY timestamp DESC LIMIT ? OFFSET ?`
+  ),
+  getAllMessages: db.prepare<StoredMessage, [number, number]>(
+    `SELECT * FROM messages WHERE is_deleted = 0
+     ORDER BY timestamp DESC LIMIT ? OFFSET ?`
+  ),
+  countMessagesByGroup: db.prepare<{ count: number }, [number]>(
+    "SELECT COUNT(*) as count FROM messages WHERE group_id = ? AND is_deleted = 0"
+  ),
+  countAllMessages: db.prepare<{ count: number }, []>(
+    "SELECT COUNT(*) as count FROM messages WHERE is_deleted = 0"
+  ),
+  getDistinctGroups: db.prepare<{ group_id: number; group_title: string; count: number }, []>(
+    `SELECT group_id, group_title, COUNT(*) as count FROM messages
+     WHERE is_deleted = 0 GROUP BY group_id ORDER BY count DESC`
+  ),
+  searchMessages: db.prepare<StoredMessage, [string, number]>(
+    `SELECT * FROM messages WHERE is_deleted = 0 AND text LIKE ?
+     ORDER BY timestamp DESC LIMIT ?`
+  ),
+
+  // Topics
+  upsertTopic: db.prepare<void, [number, number, string | null]>(
+    `INSERT INTO topics (group_id, topic_id, title)
+     VALUES (?, ?, ?)
+     ON CONFLICT(group_id, topic_id) DO UPDATE SET
+       title = excluded.title,
+       updated_at = CURRENT_TIMESTAMP`
+  ),
+  getTopicsByGroup: db.prepare<Topic, [number]>(
+    "SELECT * FROM topics WHERE group_id = ? ORDER BY topic_id"
+  ),
+  getTopic: db.prepare<Topic, [number, number]>(
+    "SELECT * FROM topics WHERE group_id = ? AND topic_id = ?"
   ),
 };
 
@@ -484,6 +552,88 @@ export const queries = {
     }
     const result = db.prepare<{ count: number }, []>("SELECT COUNT(*) as count FROM products").get();
     return result?.count || 0;
+  },
+
+  // === Messages (persistent history) ===
+  saveMessage(data: {
+    message_id: number;
+    group_id: number;
+    group_title: string | null;
+    topic_id: number | null;
+    topic_title: string | null;
+    text: string;
+    sender_id: number | null;
+    sender_name: string | null;
+    timestamp: number;
+  }): void {
+    stmts.upsertMessage.run(
+      data.message_id,
+      data.group_id,
+      data.group_title,
+      data.topic_id,
+      data.topic_title,
+      data.text,
+      data.sender_id,
+      data.sender_name,
+      data.timestamp
+    );
+  },
+
+  updateMessageText(messageId: number, groupId: number, text: string): void {
+    stmts.updateMessageText.run(text, messageId, groupId);
+  },
+
+  softDeleteMessage(messageId: number, groupId: number): void {
+    stmts.softDeleteMessage.run(messageId, groupId);
+  },
+
+  getMessage(messageId: number, groupId: number): StoredMessage | null {
+    return stmts.getMessage.get(messageId, groupId) || null;
+  },
+
+  getMessages(opts?: {
+    groupId?: number;
+    topicId?: number;
+    offset?: number;
+    limit?: number;
+  }): StoredMessage[] {
+    const { groupId, topicId, offset = 0, limit = 100 } = opts || {};
+
+    if (groupId && topicId) {
+      return stmts.getMessagesByGroupAndTopic.all(groupId, topicId, limit, offset);
+    }
+    if (groupId) {
+      return stmts.getMessagesByGroup.all(groupId, limit, offset);
+    }
+    return stmts.getAllMessages.all(limit, offset);
+  },
+
+  getMessagesCount(groupId?: number): number {
+    if (groupId) {
+      return stmts.countMessagesByGroup.get(groupId)?.count || 0;
+    }
+    return stmts.countAllMessages.get()?.count || 0;
+  },
+
+  getDistinctMessageGroups(): { group_id: number; group_title: string; count: number }[] {
+    return stmts.getDistinctGroups.all();
+  },
+
+  searchMessagesLike(query: string, limit: number = 100): StoredMessage[] {
+    return stmts.searchMessages.all(`%${query}%`, limit);
+  },
+
+  // === Topics ===
+  saveTopic(groupId: number, topicId: number, title: string | null): void {
+    stmts.upsertTopic.run(groupId, topicId, title);
+  },
+
+  getTopicsByGroup(groupId: number): Topic[] {
+    return stmts.getTopicsByGroup.all(groupId);
+  },
+
+  getTopic(groupId: number, topicId: number): Topic | null {
+    return stmts.getTopic.get(groupId, topicId) || null;
   },
 };
 

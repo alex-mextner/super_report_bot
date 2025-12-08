@@ -9,6 +9,8 @@ export interface Product {
   message_id: number;
   group_id: number;
   group_title: string;
+  topic_id: number | null;
+  topic_title: string | null;
   text: string;
   category_code: string | null;
   price_raw: string | null;
@@ -54,4 +56,25 @@ export interface SimilarProduct extends Product {
 
 export interface SimilarResponse {
   items: SimilarProduct[];
+}
+
+// Subscription types
+export interface SubscriptionGroup {
+  id: number;
+  title: string;
+}
+
+export interface Subscription {
+  id: number;
+  original_query: string;
+  positive_keywords: string[];
+  negative_keywords: string[];
+  llm_description: string;
+  is_active: number;
+  created_at: string;
+  groups: SubscriptionGroup[];
+}
+
+export interface SubscriptionsResponse {
+  items: Subscription[];
 }
