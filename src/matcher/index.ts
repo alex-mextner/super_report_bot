@@ -1,5 +1,5 @@
-import { passesNgramFilter } from "./ngram.ts";
-import { tokenize } from "./normalize.ts";
+import { passesNgramFilter, phraseMatches } from "./ngram.ts";
+import { generateNgrams } from "./normalize.ts";
 import { matcherLog } from "../logger.ts";
 import type { Subscription, MatchResult, IncomingMessage } from "../types.ts";
 
@@ -24,12 +24,12 @@ export function matchMessage(
 ): MatchResult | null {
   const text = message.text;
 
-  // Check negative keywords first (exact token match)
+  // Check negative keywords first (n-gram matching with bridge check for phrases)
   if (subscription.negative_keywords.length > 0) {
-    const textTokens = new Set(tokenize(text));
+    const textNgrams = generateNgrams(text, 3);
     for (const negKw of subscription.negative_keywords) {
-      const negTokens = tokenize(negKw);
-      if (negTokens.some((t) => textTokens.has(t))) {
+      // Threshold 0.85 catches morphological variants, bridge check ensures words are adjacent
+      if (phraseMatches(textNgrams, negKw, 0.85)) {
         matcherLog.debug(
           { subscriptionId: subscription.id, negativeKeyword: negKw },
           "Negative keyword hit"

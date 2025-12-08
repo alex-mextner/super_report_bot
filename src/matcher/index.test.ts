@@ -112,6 +112,42 @@ describe("matchMessage", () => {
     // Note: our tokenize normalizes and splits, so this depends on implementation
   });
 
+  test("multi-word negative keyword matches as phrase (substring)", () => {
+    const subscription = createSubscription({
+      positive_keywords: ["nike", "кроссовки"],
+      negative_keywords: ["на запчасти"],
+      llm_description: "Nike кроссовки",
+    });
+
+    // Text with "на" but not "запчасти" - should NOT block
+    const result1 = matchMessage(
+      createMessage({
+        text: "Новые кроссовки Nike. Заказывала с официального сайта на прошлой неделе",
+      }),
+      subscription,
+      { ngramThreshold: 0.1 }
+    );
+    expect(result1).not.toBeNull();
+
+    // Text with both words but NOT as phrase - should NOT block
+    const result2 = matchMessage(
+      createMessage({
+        text: "Продаю Nike кроссовки на рынке, есть запчасти для велосипеда",
+      }),
+      subscription,
+      { ngramThreshold: 0.1 }
+    );
+    expect(result2).not.toBeNull();
+
+    // Text with exact phrase "на запчасти" - SHOULD block
+    const blocked = matchMessage(
+      createMessage({ text: "Продаю Nike кроссовки на запчасти" }),
+      subscription,
+      { ngramThreshold: 0.1 }
+    );
+    expect(blocked).toBeNull();
+  });
+
   test("handles empty negative keywords", () => {
     const message = createMessage({
       text: "Продаю iPhone 15 pro max", // Would be blocked if negative keywords existed

@@ -68,7 +68,7 @@ export function calculateNgramSimilarity(
  * Calculate what fraction of keyword's ngrams are present in text
  * This is asymmetric - we check if keyword is IN text, not similarity
  */
-function keywordCoverage(textNgrams: Set<string>, keyword: string): number {
+export function keywordCoverage(textNgrams: Set<string>, keyword: string): number {
   const keywordNgrams = generateNgrams(keyword, 3);
   if (keywordNgrams.size === 0) return 0;
 
@@ -77,6 +77,34 @@ function keywordCoverage(textNgrams: Set<string>, keyword: string): number {
     if (textNgrams.has(ng)) found++;
   }
   return found / keywordNgrams.size;
+}
+
+/**
+ * Check if a phrase matches in text with high confidence
+ * For multi-word phrases, also checks that "bridge" ngrams exist (ngrams spanning word boundaries)
+ */
+export function phraseMatches(textNgrams: Set<string>, phrase: string, threshold: number = 0.9): boolean {
+  const coverage = keywordCoverage(textNgrams, phrase);
+  if (coverage < threshold) return false;
+
+  // For multi-word phrases, check bridge ngrams (those containing space in the middle)
+  const words = phrase.toLowerCase().split(/\s+/);
+  if (words.length > 1) {
+    // Generate bridge ngrams: last char of word + space + first char of next word
+    for (let i = 0; i < words.length - 1; i++) {
+      const prevWord = words[i]!;
+      const nextWord = words[i + 1]!;
+      if (prevWord.length > 0 && nextWord.length > 0) {
+        // Bridge ngram: "X Y" where X is end of prev word, Y is start of next
+        const bridge = prevWord.slice(-1) + " " + nextWord.slice(0, 1);
+        if (!textNgrams.has(bridge)) {
+          return false; // Words are not adjacent in text
+        }
+      }
+    }
+  }
+
+  return true;
 }
 
 /**
