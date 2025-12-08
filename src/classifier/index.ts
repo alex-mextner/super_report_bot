@@ -3,7 +3,7 @@ import { classifyBatch, DEFAULT_CATEGORIES } from "../llm/classify.ts";
 import { queries } from "../db/index.ts";
 import { extractPrice } from "../utils/price.ts";
 import { parseContacts } from "../utils/contacts.ts";
-import { logger, llmLog } from "../logger.ts";
+import { llmLog } from "../logger.ts";
 
 const BATCH_SIZE = 50;
 const CLASSIFY_INTERVAL = 60000; // 1 minute
@@ -28,7 +28,7 @@ export function seedCategories(): void {
  */
 export async function runClassificationJob(): Promise<void> {
   if (isRunning) {
-    logger.debug("Classification job already running, skipping");
+    llmLog.debug("Classification job already running, skipping");
     return;
   }
 

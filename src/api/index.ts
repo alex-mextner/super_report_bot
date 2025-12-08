@@ -4,6 +4,8 @@ import { serveStatic } from "hono/bun";
 import { queries } from "../db/index.ts";
 import { validateInitData } from "./auth.ts";
 import { apiLog } from "../logger.ts";
+import { getMessages } from "../cache/messages.ts";
+import { extractPrice } from "../utils/price.ts";
 
 const app = new Hono();
 const api = new Hono();
@@ -45,6 +47,14 @@ api.get("/products", (c) => {
   const search = c.req.query("search");
   const offset = Number(c.req.query("offset")) || 0;
   const limit = Math.min(Number(c.req.query("limit")) || 20, 100);
+
+  // Check if we have classified products
+  const totalClassified = queries.getProductsCount();
+
+  // If no classified products yet, return raw messages from cache
+  if (totalClassified === 0) {
+    return c.json(getProductsFromCache(search, offset, limit));
+  }
 
   const products = queries.getProducts({ category, search, offset, limit });
   const total = queries.getProductsCount(category);
@@ -106,6 +116,70 @@ api.get("/products/:id/similar", (c) => {
 api.get("/health", (c) => {
   return c.json({ status: "ok" });
 });
+
+/**
+ * Get products from cache (fallback when classification not done)
+ */
+function getProductsFromCache(search?: string, offset = 0, limit = 20) {
+  const groupIds = queries.getAllSubscriptionGroupIds();
+  let allMessages: Array<{
+    id: number;
+    message_id: number;
+    group_id: number;
+    group_title: string;
+    text: string;
+    price_raw: string | null;
+    price_normalized: number | null;
+    sender_id: number | null;
+    sender_name: string | null;
+    message_date: number;
+    category_code: null;
+    messageLink: string;
+  }> = [];
+
+  for (const groupId of groupIds) {
+    const messages = getMessages(groupId);
+    for (const msg of messages) {
+      const { raw, normalized } = extractPrice(msg.text);
+      allMessages.push({
+        id: msg.id, // use message_id as id for cache items
+        message_id: msg.id,
+        group_id: msg.groupId,
+        group_title: msg.groupTitle,
+        text: msg.text,
+        price_raw: raw,
+        price_normalized: normalized,
+        sender_id: msg.senderId ?? null,
+        sender_name: msg.senderName ?? null,
+        message_date: msg.date,
+        category_code: null,
+        messageLink: buildTelegramLink(msg.groupId, msg.id),
+      });
+    }
+  }
+
+  // Sort by date descending
+  allMessages.sort((a, b) => b.message_date - a.message_date);
+
+  // Filter by search
+  if (search) {
+    const searchLower = search.toLowerCase();
+    allMessages = allMessages.filter((m) =>
+      m.text.toLowerCase().includes(searchLower)
+    );
+  }
+
+  const total = allMessages.length;
+  const items = allMessages.slice(offset, offset + limit);
+
+  return {
+    items,
+    offset,
+    limit,
+    total,
+    hasMore: offset + items.length < total,
+  };
+}
 
 /**
  * Build Telegram message link
