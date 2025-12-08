@@ -112,6 +112,21 @@ describe("matchMessage", () => {
     // Note: our tokenize normalizes and splits, so this depends on implementation
   });
 
+  test("should NOT trigger negative keyword when word is absent", () => {
+    const message = createMessage({
+      text: "iPhone 14 Pro, 256 гигабайт памяти, Deep Purple В идеальном",
+    });
+    const subscription = createSubscription({
+      positive_keywords: ["iphone", "14", "pro"],
+      negative_keywords: ["ремонт"],
+      llm_description: "iPhone 14 Pro для продажи",
+    });
+
+    const result = matchMessage(message, subscription, { ngramThreshold: 0.1 });
+    // Должен пройти n-gram фильтр и НЕ быть заблокирован негативным словом
+    expect(result).not.toBeNull();
+  });
+
   test("multi-word negative keyword matches as phrase (substring)", () => {
     const subscription = createSubscription({
       positive_keywords: ["nike", "кроссовки"],
