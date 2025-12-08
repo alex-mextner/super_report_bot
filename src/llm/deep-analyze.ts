@@ -18,6 +18,30 @@ const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY;
 
 const EXCHANGE_API = "https://open.er-api.com/v6/latest/EUR";
 
+// ============= Search Region =============
+
+type SearchRegion = "serbia" | "general";
+
+const SERBIA_PATTERNS = /серб|сербия|белград|нов[ыи]й\s*сад|serbian|belgrade|novi\s*sad/i;
+
+function detectSearchRegion(groupTitle: string | null | undefined): SearchRegion {
+  if (!groupTitle) return "general";
+  if (SERBIA_PATTERNS.test(groupTitle)) return "serbia";
+  return "general";
+}
+
+// Search queries with fallback chain for Serbia: KupujemProdajem → Belgrade → Russia
+function getSearchQueries(baseQuery: string, region: SearchRegion): string[] {
+  if (region === "serbia") {
+    return [
+      `site:kupujemprodajem.com ${baseQuery} cena`,
+      `${baseQuery} cena beograd`,
+      `${baseQuery} цена купить`,
+    ];
+  }
+  return [`${baseQuery} цена купить`];
+}
+
 // ============= Types =============
 
 interface BraveResult {
@@ -291,7 +315,8 @@ async function analyzeItemPrice(
   itemName: string,
   extractedPrice: NormalizedPrice | null,
   searchQuery: string,
-  rates: Record<string, number>
+  rates: Record<string, number>,
+  region: SearchRegion
 ): Promise<ItemAnalysis> {
   // Convert extracted price to EUR
   const extractedCurrency = extractedPrice?.currency ? normalizeCurrency(extractedPrice.currency) : null;
@@ -306,12 +331,22 @@ async function analyzeItemPrice(
     : null;
 
   apiLog.debug(
-    { itemName, extractedPrice, extractedCurrency, priceInEur },
+    { itemName, extractedPrice, extractedCurrency, priceInEur, region },
     "Extracted price from LLM"
   );
 
-  // Search for market prices
-  const searchResults = await searchWeb(searchQuery + " цена купить");
+  // Search for market prices with fallback chain
+  const queries = getSearchQueries(searchQuery, region);
+  let searchResults: BraveResult[] = [];
+
+  for (const query of queries) {
+    searchResults = await searchWeb(query);
+    if (searchResults.length > 0) {
+      apiLog.debug({ itemName, query, resultsCount: searchResults.length }, "Search found results");
+      break;
+    }
+    apiLog.debug({ itemName, query }, "Search returned no results, trying fallback");
+  }
 
   if (searchResults.length === 0) {
     return {
@@ -706,8 +741,9 @@ function generateOverallVerdict(
 
 // ============= Main Function =============
 
-export async function deepAnalyze(text: string): Promise<DeepAnalysisResult> {
-  apiLog.info({ textLength: text.length }, "Starting deep analysis");
+export async function deepAnalyze(text: string, groupTitle?: string | null): Promise<DeepAnalysisResult> {
+  const region = detectSearchRegion(groupTitle);
+  apiLog.info({ textLength: text.length, groupTitle, region }, "Starting deep analysis");
 
   // Step 1: Get exchange rates
   const rates = await getExchangeRates();
@@ -734,9 +770,9 @@ export async function deepAnalyze(text: string): Promise<DeepAnalysisResult> {
     };
   }
 
-  // Step 3: Analyze each item's price (parallel)
+  // Step 3: Analyze each item's price (parallel, region-specific search)
   const itemPromises = listingInfo.items.map((item) =>
-    analyzeItemPrice(item.name, item.price, item.searchQuery, rates)
+    analyzeItemPrice(item.name, item.price, item.searchQuery, rates, region)
   );
   const items = await Promise.all(itemPromises);
 

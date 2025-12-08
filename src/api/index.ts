@@ -297,13 +297,13 @@ api.get("/subscriptions/:id/groups", (c) => {
 
 // POST /api/analyze-deep - deep product analysis with market prices
 api.post("/analyze-deep", async (c) => {
-  const body = await c.req.json<{ text: string; messageId?: number; groupId?: number }>();
+  const body = await c.req.json<{ text: string; groupTitle?: string }>();
   if (!body.text) {
     return c.json({ error: "Text required" }, 400);
   }
 
   try {
-    const result = await deepAnalyze(body.text);
+    const result = await deepAnalyze(body.text, body.groupTitle);
     return c.json(result);
   } catch (error) {
     apiLog.error({ err: error }, "Deep analysis failed");

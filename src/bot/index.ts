@@ -2223,9 +2223,9 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
           return;
         }
 
-        // Run deep analysis
+        // Run deep analysis (pass group title for region-specific search)
         const { deepAnalyze } = await import("../llm/deep-analyze.ts");
-        const result = await deepAnalyze(storedMsg.text);
+        const result = await deepAnalyze(storedMsg.text, storedMsg.group_title);
 
         // Format result
         if (!result.isListing) {
