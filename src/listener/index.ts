@@ -1,7 +1,7 @@
 import { TelegramClient, Message } from "@mtcute/bun";
 import { tl } from "@mtcute/bun";
 import { queries } from "../db/index.ts";
-import { matchMessageAgainstAll } from "../matcher/index.ts";
+import { matchMessageAgainstAll, passesNgramFilter } from "../matcher/index.ts";
 import { verifyMatch } from "../llm/verify.ts";
 import { notifyUser } from "../bot/index.ts";
 import { listenerLog } from "../logger.ts";
@@ -541,6 +541,24 @@ export async function scanFromCache(
 
     const messages = getMessages(groupId);
     listenerLog.debug({ groupId, messageCount: messages.length }, "Scanning cached messages");
+
+    // DEBUG: Log first 5 messages with their ngram scores
+    const DEBUG_LIMIT = 5;
+    for (let i = 0; i < Math.min(DEBUG_LIMIT, messages.length); i++) {
+      const debugMsg = messages[i];
+      const debugResult = passesNgramFilter(
+        debugMsg.text,
+        subscription.positive_keywords,
+        subscription.llm_description,
+        0.15
+      );
+      listenerLog.info({
+        msgId: debugMsg.id,
+        text: debugMsg.text.substring(0, 120),
+        score: debugResult.score.toFixed(3),
+        passed: debugResult.passed,
+      }, "Debug: message ngram score");
+    }
 
     for (const msg of messages) {
       processedCount++;
