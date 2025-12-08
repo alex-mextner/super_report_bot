@@ -1749,8 +1749,24 @@ ${bold("Выбери группы для мониторинга:")}
         scanFromCache(groupIds, subscriptionId)
           .then((count) => {
             botLog.info({ count, subscriptionId }, "Cache scan complete");
+            const resultText =
+              count > 0
+                ? `✅ Подписка создана! Мониторинг групп: ${groupNames}\n\n📬 Найдено ${count} сообщений в истории.`
+                : `✅ Подписка создана! Мониторинг групп: ${groupNames}\n\n📭 В истории совпадений не найдено.`;
+            context
+              .editText(resultText)
+              .catch((e) =>
+                botLog.error(e, "Failed to update scan result message")
+              );
           })
-          .catch((e) => botLog.error(e, "Cache scan failed"));
+          .catch((e) => {
+            botLog.error(e, "Cache scan failed");
+            context
+              .editText(
+                `✅ Подписка создана! Мониторинг групп: ${groupNames}\n\n⚠️ Ошибка сканирования истории.`
+              )
+              .catch(() => {});
+          });
       } else {
         await context.editText(
           "Подписка создана! Группы не выбраны, мониторинг будет по всем доступным."
