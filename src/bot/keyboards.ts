@@ -56,11 +56,35 @@ export const confirmKeyboard = (queryId: string) =>
     .text("Подтвердить", JSON.stringify({ action: "confirm", id: queryId }))
     .text("Изменить", JSON.stringify({ action: "edit", id: queryId }))
     .row()
+    .text("🤖 Перегенерировать", JSON.stringify({ action: "regenerate", id: queryId }))
+    .row()
     .text("Отмена", JSON.stringify({ action: "cancel", id: queryId }));
 
-export const subscriptionKeyboard = (subscriptionId: number) =>
-  new InlineKeyboard()
-    .text("Отключить", JSON.stringify({ action: "disable", id: subscriptionId }));
+export const subscriptionKeyboard = (
+  subscriptionId: number,
+  hasNegativeKeywords: boolean,
+  hasDisabledNegative: boolean
+) => {
+  const kb = new InlineKeyboard()
+    .text("✏️ + слова", JSON.stringify({ action: "edit_positive", id: subscriptionId }))
+    .text("✏️ − слова", JSON.stringify({ action: "edit_negative", id: subscriptionId }))
+    .row()
+    .text("✏️ Описание", JSON.stringify({ action: "edit_description", id: subscriptionId }))
+    .text("🤖 ИИ", JSON.stringify({ action: "regenerate_sub", id: subscriptionId }))
+    .row();
+
+  // Toggle button only if there are negative keywords (active or disabled)
+  if (hasNegativeKeywords || hasDisabledNegative) {
+    kb.text(
+      hasNegativeKeywords ? "🚫 Откл. искл." : "✅ Вкл. искл.",
+      JSON.stringify({ action: "toggle_negative", id: subscriptionId })
+    );
+  }
+
+  kb.text("❌ Удалить", JSON.stringify({ action: "disable", id: subscriptionId }));
+
+  return kb;
+};
 
 export const backKeyboard = () =>
   new InlineKeyboard().text("Назад", JSON.stringify({ action: "back" }));

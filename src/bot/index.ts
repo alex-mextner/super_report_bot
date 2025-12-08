@@ -71,15 +71,25 @@ bot.command("list", async (context) => {
   }
 
   for (const sub of subscriptions) {
+    const hasNeg = sub.negative_keywords.length > 0;
+    const hasDisabledNeg = (sub.disabled_negative_keywords?.length ?? 0) > 0;
+
+    let exclusionsText = "нет";
+    if (hasNeg) {
+      exclusionsText = sub.negative_keywords.join(", ");
+    } else if (hasDisabledNeg) {
+      exclusionsText = `(отключены: ${sub.disabled_negative_keywords!.join(", ")})`;
+    }
+
     await context.send(
       format`
 ${bold("Подписка #" + sub.id)}
 ${bold("Запрос:")} ${sub.original_query}
 ${bold("Ключевые слова:")} ${code(sub.positive_keywords.join(", "))}
-${bold("Исключения:")} ${code(sub.negative_keywords.join(", ") || "нет")}
+${bold("Исключения:")} ${code(exclusionsText)}
       `,
       {
-        reply_markup: subscriptionKeyboard(sub.id),
+        reply_markup: subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg),
       }
     );
   }
@@ -289,6 +299,61 @@ bot.on("message", async (context) => {
     return;
   }
 
+  // Handle editing existing subscription positive keywords
+  if (state.step === "editing_sub_positive" && state.editing_subscription_id) {
+    const keywords = text
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (keywords.length === 0) {
+      await context.send("Нужно указать хотя бы одно слово.");
+      return;
+    }
+
+    queries.updatePositiveKeywords(state.editing_subscription_id, userId, keywords);
+    setUserState(userId, { step: "idle" });
+    await context.send(`✅ Позитивные слова обновлены: ${keywords.join(", ")}`);
+    return;
+  }
+
+  // Handle editing existing subscription negative keywords
+  if (state.step === "editing_sub_negative" && state.editing_subscription_id) {
+    const lowerText = text.toLowerCase();
+    let keywords: string[];
+
+    if (lowerText === "нет" || lowerText === "-" || lowerText === "очистить") {
+      keywords = [];
+    } else {
+      keywords = text
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+
+    queries.updateNegativeKeywords(state.editing_subscription_id, userId, keywords);
+    setUserState(userId, { step: "idle" });
+    await context.send(
+      keywords.length > 0
+        ? `✅ Негативные слова обновлены: ${keywords.join(", ")}`
+        : "✅ Негативные слова очищены"
+    );
+    return;
+  }
+
+  // Handle editing existing subscription description
+  if (state.step === "editing_sub_description" && state.editing_subscription_id) {
+    if (text.length < 5) {
+      await context.send("Описание слишком короткое.");
+      return;
+    }
+
+    queries.updateLlmDescription(state.editing_subscription_id, userId, text);
+    setUserState(userId, { step: "idle" });
+    await context.send("✅ Описание обновлено");
+    return;
+  }
+
   // If user is editing keywords
   if (state.step === "editing_keywords" && state.pending_subscription) {
     const text = context.text;
@@ -489,8 +554,202 @@ ${bold("Выбери группы для мониторинга:")}
     case "disable": {
       const subscriptionId = Number(data.id);
       queries.deactivateSubscription(subscriptionId, userId);
+      invalidateSubscriptionsCache();
       await context.answer({ text: "Подписка отключена" });
       await context.editText("Подписка отключена.");
+      break;
+    }
+
+    case "edit_positive": {
+      const subscriptionId = Number(data.id);
+      const sub = queries.getSubscriptionById(subscriptionId, userId);
+      if (!sub) {
+        await context.answer({ text: "Подписка не найдена" });
+        return;
+      }
+
+      setUserState(userId, {
+        step: "editing_sub_positive",
+        editing_subscription_id: subscriptionId,
+      });
+      await context.answer({ text: "Отправь новые слова" });
+      await context.send(
+        `Текущие позитивные слова: ${sub.positive_keywords.join(", ")}\n\n` +
+          "Отправь новые позитивные ключевые слова через запятую:"
+      );
+      break;
+    }
+
+    case "edit_negative": {
+      const subscriptionId = Number(data.id);
+      const sub = queries.getSubscriptionById(subscriptionId, userId);
+      if (!sub) {
+        await context.answer({ text: "Подписка не найдена" });
+        return;
+      }
+
+      setUserState(userId, {
+        step: "editing_sub_negative",
+        editing_subscription_id: subscriptionId,
+      });
+      await context.answer({ text: "Отправь новые слова" });
+      await context.send(
+        `Текущие негативные слова: ${sub.negative_keywords.join(", ") || "нет"}\n\n` +
+          'Отправь новые негативные ключевые слова через запятую (или "нет" для очистки):'
+      );
+      break;
+    }
+
+    case "edit_description": {
+      const subscriptionId = Number(data.id);
+      const sub = queries.getSubscriptionById(subscriptionId, userId);
+      if (!sub) {
+        await context.answer({ text: "Подписка не найдена" });
+        return;
+      }
+
+      setUserState(userId, {
+        step: "editing_sub_description",
+        editing_subscription_id: subscriptionId,
+      });
+      await context.answer({ text: "Отправь новое описание" });
+      await context.send(
+        `Текущее описание:\n${sub.llm_description}\n\n` +
+          "Отправь новое описание для LLM верификации:"
+      );
+      break;
+    }
+
+    case "toggle_negative": {
+      const subscriptionId = Number(data.id);
+      const sub = queries.getSubscriptionById(subscriptionId, userId);
+      if (!sub) {
+        await context.answer({ text: "Подписка не найдена" });
+        return;
+      }
+
+      const hasNeg = sub.negative_keywords.length > 0;
+      queries.toggleNegativeKeywords(subscriptionId, userId, !hasNeg);
+      invalidateSubscriptionsCache();
+
+      // Refresh subscription data
+      const updated = queries.getSubscriptionById(subscriptionId, userId)!;
+      const newHasNeg = updated.negative_keywords.length > 0;
+      const newHasDisabled = (updated.disabled_negative_keywords?.length ?? 0) > 0;
+
+      let exclusionsText = "нет";
+      if (newHasNeg) {
+        exclusionsText = updated.negative_keywords.join(", ");
+      } else if (newHasDisabled) {
+        exclusionsText = `(отключены: ${updated.disabled_negative_keywords!.join(", ")})`;
+      }
+
+      await context.answer({
+        text: hasNeg ? "Исключения отключены" : "Исключения включены",
+      });
+      await context.editText(
+        format`
+${bold("Подписка #" + updated.id)}
+${bold("Запрос:")} ${updated.original_query}
+${bold("Ключевые слова:")} ${code(updated.positive_keywords.join(", "))}
+${bold("Исключения:")} ${code(exclusionsText)}
+        `,
+        {
+          reply_markup: subscriptionKeyboard(subscriptionId, newHasNeg, newHasDisabled),
+        }
+      );
+      break;
+    }
+
+    case "regenerate": {
+      // Regenerate keywords for pending subscription
+      if (state.step !== "awaiting_confirmation" || !state.pending_subscription) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      await context.answer({ text: "Генерирую..." });
+
+      let result: KeywordGenerationResult;
+      try {
+        result = await generateKeywords(state.pending_subscription.original_query);
+      } catch (error) {
+        botLog.error({ err: error, userId }, "LLM regeneration failed");
+        await context.send("Ошибка генерации. Попробуй позже.");
+        return;
+      }
+
+      const queryId = `${userId}_${Date.now()}`;
+
+      setUserState(userId, {
+        step: "awaiting_confirmation",
+        pending_subscription: {
+          original_query: state.pending_subscription.original_query,
+          positive_keywords: result.positive_keywords,
+          negative_keywords: result.negative_keywords,
+          llm_description: result.llm_description,
+        },
+      });
+
+      await context.editText(
+        format`
+${bold("Перегенерированные ключевые слова:")}
+
+${bold("Позитивные:")}
+${code(result.positive_keywords.join(", "))}
+
+${bold("Негативные:")}
+${code(result.negative_keywords.join(", ") || "нет")}
+
+${bold("Описание:")}
+${result.llm_description}
+
+Подтверди или измени:
+        `,
+        {
+          reply_markup: confirmKeyboard(queryId),
+        }
+      );
+      break;
+    }
+
+    case "regenerate_sub": {
+      const subscriptionId = Number(data.id);
+      const sub = queries.getSubscriptionById(subscriptionId, userId);
+      if (!sub) {
+        await context.answer({ text: "Подписка не найдена" });
+        return;
+      }
+
+      await context.answer({ text: "Генерирую..." });
+
+      let result: KeywordGenerationResult;
+      try {
+        result = await generateKeywords(sub.original_query);
+      } catch (error) {
+        botLog.error({ err: error, userId }, "LLM regeneration failed");
+        await context.send("Ошибка генерации. Попробуй позже.");
+        return;
+      }
+
+      queries.updatePositiveKeywords(subscriptionId, userId, result.positive_keywords);
+      queries.updateNegativeKeywords(subscriptionId, userId, result.negative_keywords);
+      queries.updateLlmDescription(subscriptionId, userId, result.llm_description);
+      invalidateSubscriptionsCache();
+
+      const hasNeg = result.negative_keywords.length > 0;
+
+      await context.editText(
+        format`
+${bold("Подписка #" + subscriptionId)} (обновлена)
+${bold("Запрос:")} ${sub.original_query}
+${bold("Ключевые слова:")} ${code(result.positive_keywords.join(", "))}
+${bold("Исключения:")} ${code(result.negative_keywords.join(", ") || "нет")}
+        `,
+        {
+          reply_markup: subscriptionKeyboard(subscriptionId, hasNeg, false),
+        }
+      );
       break;
     }
 

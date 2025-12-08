@@ -11,6 +11,7 @@ export interface Subscription {
   original_query: string;
   positive_keywords: string[]; // stored as JSON in DB
   negative_keywords: string[]; // stored as JSON in DB
+  disabled_negative_keywords?: string[]; // stored as JSON in DB, for toggle feature
   llm_description: string;
   is_active: number; // SQLite boolean
   created_at: string;
@@ -63,7 +64,11 @@ export interface UserState {
     | "editing_keywords"
     | "selecting_groups"
     | "adding_group"
-    | "awaiting_invite_link";
+    | "awaiting_invite_link"
+    // States for editing existing subscriptions
+    | "editing_sub_positive"
+    | "editing_sub_negative"
+    | "editing_sub_description";
   pending_subscription?: {
     original_query: string;
     positive_keywords: string[];
@@ -74,6 +79,8 @@ export interface UserState {
   current_pending_group?: PendingGroup; // group awaiting invite link
   selected_groups?: { id: number; title: string }[];
   available_groups?: { id: number; title: string }[];
+  // ID of subscription being edited
+  editing_subscription_id?: number;
 }
 
 // Message from monitored group

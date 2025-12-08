@@ -41,7 +41,7 @@ export async function verifyMatch(
 
   // Result can be single object or array depending on input type
   const result = Array.isArray(results)
-    ? (results as ZeroShotResult[])[0]
+    ? (results as unknown as ZeroShotResult[])[0]
     : (results as unknown as ZeroShotResult);
   if (!result) {
     return { isMatch: false, confidence: 0, label: "no_result" };

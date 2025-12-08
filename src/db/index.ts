@@ -1,11 +1,15 @@
 import { Database } from "bun:sqlite";
 import type { User, Subscription, MonitoredGroup, MatchedMessage } from "../types.ts";
+import { runMigrations } from "./migrations.ts";
 
 const db = new Database("data.db", { create: true });
 
 // Initialize schema
 const schema = await Bun.file(new URL("./schema.sql", import.meta.url)).text();
 db.exec(schema);
+
+// Run migrations
+runMigrations(db);
 
 // Prepared statements
 const stmts = {
@@ -76,14 +80,41 @@ const stmts = {
     `SELECT 1 as found FROM user_groups
      WHERE group_id = ? AND user_id = (SELECT id FROM users WHERE telegram_id = ?) LIMIT 1`
   ),
+
+  // Subscription editing
+  getSubscriptionById: db.prepare<Subscription, [number, number]>(
+    `SELECT s.* FROM subscriptions s
+     JOIN users u ON s.user_id = u.id
+     WHERE s.id = ? AND u.telegram_id = ?`
+  ),
+  updatePositiveKeywords: db.prepare<void, [string, number, number]>(
+    `UPDATE subscriptions SET positive_keywords = ?
+     WHERE id = ? AND user_id = (SELECT id FROM users WHERE telegram_id = ?)`
+  ),
+  updateNegativeKeywords: db.prepare<void, [string, number, number]>(
+    `UPDATE subscriptions SET negative_keywords = ?
+     WHERE id = ? AND user_id = (SELECT id FROM users WHERE telegram_id = ?)`
+  ),
+  updateLlmDescription: db.prepare<void, [string, number, number]>(
+    `UPDATE subscriptions SET llm_description = ?
+     WHERE id = ? AND user_id = (SELECT id FROM users WHERE telegram_id = ?)`
+  ),
+  toggleNegativeKeywords: db.prepare<void, [string, string, number, number]>(
+    `UPDATE subscriptions
+     SET negative_keywords = ?, disabled_negative_keywords = ?
+     WHERE id = ? AND user_id = (SELECT id FROM users WHERE telegram_id = ?)`
+  ),
 };
 
 // Helper to parse JSON fields from subscription
 function parseSubscription(row: Subscription): Subscription {
+  const rawDisabled = (row as unknown as { disabled_negative_keywords?: string })
+    .disabled_negative_keywords;
   return {
     ...row,
     positive_keywords: JSON.parse(row.positive_keywords as unknown as string),
     negative_keywords: JSON.parse(row.negative_keywords as unknown as string),
+    disabled_negative_keywords: rawDisabled ? JSON.parse(rawDisabled) : [],
   };
 }
 
@@ -193,6 +224,71 @@ export const queries = {
 
   hasUserGroup(telegramId: number, groupId: number): boolean {
     return stmts.hasUserGroup.get(groupId, telegramId) !== null;
+  },
+
+  // Subscription editing
+  getSubscriptionById(subscriptionId: number, telegramId: number): Subscription | null {
+    const row = stmts.getSubscriptionById.get(subscriptionId, telegramId);
+    return row ? parseSubscription(row) : null;
+  },
+
+  updatePositiveKeywords(
+    subscriptionId: number,
+    telegramId: number,
+    keywords: string[]
+  ): void {
+    stmts.updatePositiveKeywords.run(
+      JSON.stringify(keywords),
+      subscriptionId,
+      telegramId
+    );
+  },
+
+  updateNegativeKeywords(
+    subscriptionId: number,
+    telegramId: number,
+    keywords: string[]
+  ): void {
+    stmts.updateNegativeKeywords.run(
+      JSON.stringify(keywords),
+      subscriptionId,
+      telegramId
+    );
+  },
+
+  updateLlmDescription(
+    subscriptionId: number,
+    telegramId: number,
+    description: string
+  ): void {
+    stmts.updateLlmDescription.run(description, subscriptionId, telegramId);
+  },
+
+  toggleNegativeKeywords(
+    subscriptionId: number,
+    telegramId: number,
+    enable: boolean
+  ): void {
+    const sub = this.getSubscriptionById(subscriptionId, telegramId);
+    if (!sub) return;
+
+    if (enable) {
+      // Restore from disabled
+      stmts.toggleNegativeKeywords.run(
+        JSON.stringify(sub.disabled_negative_keywords || []),
+        "[]",
+        subscriptionId,
+        telegramId
+      );
+    } else {
+      // Move to disabled
+      stmts.toggleNegativeKeywords.run(
+        "[]",
+        JSON.stringify(sub.negative_keywords),
+        subscriptionId,
+        telegramId
+      );
+    }
   },
 };
 

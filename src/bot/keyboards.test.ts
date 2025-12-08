@@ -11,14 +11,14 @@ import {
 import type { PendingGroup } from "../types.ts";
 
 describe("confirmKeyboard", () => {
-  test("creates keyboard with confirm, edit and cancel buttons", () => {
+  test("creates keyboard with confirm, edit, regenerate and cancel buttons", () => {
     const keyboard = confirmKeyboard("test_query_id");
 
     // InlineKeyboard has a .toJSON() method that returns the keyboard structure
     const json = keyboard.toJSON();
 
     expect(json.inline_keyboard).toBeDefined();
-    expect(json.inline_keyboard.length).toBe(2); // Two rows
+    expect(json.inline_keyboard.length).toBe(3); // Three rows
 
     // First row: Confirm and Edit
     const firstRow = json.inline_keyboard[0]!;
@@ -26,10 +26,15 @@ describe("confirmKeyboard", () => {
     expect(firstRow[0]!.text).toBe("Подтвердить");
     expect(firstRow[1]!.text).toBe("Изменить");
 
-    // Second row: Cancel
+    // Second row: Regenerate
     const secondRow = json.inline_keyboard[1]!;
     expect(secondRow.length).toBe(1);
-    expect(secondRow[0]!.text).toBe("Отмена");
+    expect(secondRow[0]!.text).toBe("🤖 Перегенерировать");
+
+    // Third row: Cancel
+    const thirdRow = json.inline_keyboard[2]!;
+    expect(thirdRow.length).toBe(1);
+    expect(thirdRow[0]!.text).toBe("Отмена");
   });
 
   test("includes query ID in callback data", () => {
@@ -57,22 +62,54 @@ describe("confirmKeyboard", () => {
 });
 
 describe("subscriptionKeyboard", () => {
-  test("creates keyboard with disable button", () => {
-    const keyboard = subscriptionKeyboard(42);
+  test("creates keyboard with edit and delete buttons", () => {
+    const keyboard = subscriptionKeyboard(42, true, false);
     const json = keyboard.toJSON();
 
-    expect(json.inline_keyboard.length).toBe(1);
-    expect(json.inline_keyboard[0]!.length).toBe(1);
-    expect(json.inline_keyboard[0]![0]!.text).toBe("Отключить");
+    // Should have rows for: edit buttons, toggle/delete
+    expect(json.inline_keyboard.length).toBeGreaterThanOrEqual(2);
+
+    // Find delete button
+    const allButtons = json.inline_keyboard.flat();
+    const deleteButton = allButtons.find((b) => b.text === "❌ Удалить");
+    expect(deleteButton).toBeDefined();
+  });
+
+  test("shows toggle button when has negative keywords", () => {
+    const keyboard = subscriptionKeyboard(42, true, false);
+    const json = keyboard.toJSON();
+
+    const allButtons = json.inline_keyboard.flat();
+    const toggleButton = allButtons.find((b) => b.text.includes("Откл. искл."));
+    expect(toggleButton).toBeDefined();
+  });
+
+  test("shows toggle button when has disabled negative keywords", () => {
+    const keyboard = subscriptionKeyboard(42, false, true);
+    const json = keyboard.toJSON();
+
+    const allButtons = json.inline_keyboard.flat();
+    const toggleButton = allButtons.find((b) => b.text.includes("Вкл. искл."));
+    expect(toggleButton).toBeDefined();
+  });
+
+  test("hides toggle button when no negative keywords at all", () => {
+    const keyboard = subscriptionKeyboard(42, false, false);
+    const json = keyboard.toJSON();
+
+    const allButtons = json.inline_keyboard.flat();
+    const toggleButton = allButtons.find((b) => b.text.includes("искл."));
+    expect(toggleButton).toBeUndefined();
   });
 
   test("includes subscription ID in callback data", () => {
     const subscriptionId = 123;
-    const keyboard = subscriptionKeyboard(subscriptionId);
+    const keyboard = subscriptionKeyboard(subscriptionId, false, false);
     const json = keyboard.toJSON();
 
-    const disableButton = json.inline_keyboard[0]![0]!;
-    const data = JSON.parse((disableButton as { callback_data: string }).callback_data);
+    const allButtons = json.inline_keyboard.flat();
+    const deleteButton = allButtons.find((b) => b.text === "❌ Удалить")!;
+    const data = JSON.parse((deleteButton as { callback_data: string }).callback_data);
 
     expect(data.action).toBe("disable");
     expect(data.id).toBe(subscriptionId);
