@@ -52,20 +52,28 @@ export async function withRetry<T>(
       lastError = error as Error;
       const errorMsg = error instanceof Error ? error.message : String(error);
 
+      // Check HTTP status from HuggingFace ProviderApiError
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const httpStatus = (error as any)?.httpResponse?.status;
+
       const isRetryable =
         errorMsg.includes("rate limit") ||
         errorMsg.includes("429") ||
         errorMsg.includes("502") ||
         errorMsg.includes("503") ||
         errorMsg.includes("504") ||
-        errorMsg.includes("timeout");
+        errorMsg.includes("timeout") ||
+        httpStatus === 429 ||
+        httpStatus === 502 ||
+        httpStatus === 503 ||
+        httpStatus === 504;
 
       if (isRetryable && i < maxRetries - 1) {
         // Longer delays for 504 (server timeout) — model needs more time
-        const is504 = errorMsg.includes("504");
+        const is504 = errorMsg.includes("504") || httpStatus === 504;
         const multiplier = is504 ? 3 : 2;
         const delay = baseDelay * Math.pow(multiplier, i);
-        llmLog.debug({ delay, attempt: i + 1, error: errorMsg.slice(0, 100) }, "Retryable error, retrying");
+        llmLog.warn({ delay, attempt: i + 1, httpStatus, error: errorMsg.slice(0, 100) }, "Retryable error, retrying");
         await new Promise((resolve) => setTimeout(resolve, delay));
       } else {
         throw error;
