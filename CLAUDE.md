@@ -1,111 +1,95 @@
----
-description: Use Bun instead of Node.js, npm, pnpm, or vite.
-globs: "*.ts, *.tsx, *.html, *.css, *.js, *.jsx, package.json"
-alwaysApply: false
----
+# CLAUDE.md
 
-Default to using Bun instead of Node.js.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
-- Use `bun test` instead of `jest` or `vitest`
-- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
-- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
-- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
-- Bun automatically loads .env, so don't use dotenv.
+## Project Overview
 
-## APIs
+Super Report Bot — Telegram bot for monitoring group messages with fuzzy matching. Users describe what they're looking for in free-form text, LLM generates keywords, and the system monitors Telegram groups for matching messages.
 
-- `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
-- `Bun.redis` for Redis. Don't use `ioredis`.
-- `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
-- `WebSocket` is built-in. Don't use `ws`.
-- Prefer `Bun.file` over `node:fs`'s readFile/writeFile
-- Bun.$`ls` instead of execa.
+## Commands
 
-## Testing
-
-Use `bun test` to run tests.
-
-```ts#index.test.ts
-import { test, expect } from "bun:test";
-
-test("hello world", () => {
-  expect(1).toBe(1);
-});
+```bash
+bun install          # Install dependencies
+bun run start        # Start bot (production)
+bun run dev          # Start with hot reload
+bun run auth         # Authenticate userbot (MTProto session)
+bun test             # Run all tests
+bun test src/matcher # Run specific test directory
 ```
 
-## Frontend
+## Architecture
 
-Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully support React, CSS, Tailwind.
-
-Server:
-
-```ts#index.ts
-import index from "./index.html"
-
-Bun.serve({
-  routes: {
-    "/": index,
-    "/api/users/:id": {
-      GET: (req) => {
-        return new Response(JSON.stringify({ id: req.params.id }));
-      },
-    },
-  },
-  // optional websocket support
-  websocket: {
-    open: (ws) => {
-      ws.send("Hello, world!");
-    },
-    message: (ws, message) => {
-      ws.send(message);
-    },
-    close: (ws) => {
-      // handle close
-    }
-  },
-  development: {
-    hmr: true,
-    console: true,
-  }
-})
+```
+User sends query → gramio bot → LLM generates keywords → subscription saved to SQLite
+                                                                      ↓
+User gets notification ← gramio bot ← LLM verifies ← N-gram matcher ← MTProto listener
 ```
 
-HTML files can import .tsx, .jsx or .js files directly and Bun's bundler will transpile & bundle automatically. `<link>` tags can point to stylesheets and Bun's CSS bundler will bundle.
+### Two Telegram Clients
 
-```html#index.html
-<html>
-  <body>
-    <h1>Hello, world!</h1>
-    <script type="module" src="./frontend.tsx"></script>
-  </body>
-</html>
+1. **gramio** (`src/bot/`) — Bot API for user interface (commands, keyboards, notifications)
+2. **mtcute** (`src/listener/`) — MTProto userbot for listening to group messages
+
+The userbot requires separate auth session (`bun run auth`). Session stored in `userbot.session`.
+
+### Message Processing Pipeline (3 stages)
+
+1. **N-gram + Jaccard** (`src/matcher/ngram.ts`) — Fast text similarity filter
+   - Character-level trigrams + word-level bigrams
+   - Threshold: 0.15 for candidates
+
+2. **Keyword matching** — Binary + soft coverage scoring
+   - Keyword "found" if ≥70% of its n-grams present in text
+   - Logic is OR-like: single keyword match passes threshold
+
+3. **LLM Verification** (`src/llm/verify.ts`) — Zero-shot classification via BART-MNLI
+   - Confirms if message semantically matches subscription description
+   - Threshold: >0.6 confidence for match
+
+### LLM Usage
+
+- **Keyword generation**: DeepSeek R1 via HuggingFace Inference (Novita provider)
+- **Match verification**: facebook/bart-large-mnli for zero-shot classification
+- Fallback: simple tokenization if LLM unavailable
+
+### Database
+
+SQLite via `bun:sqlite`. Schema in `src/db/schema.sql`.
+
+Key tables:
+- `users` — telegram_id
+- `subscriptions` — query, positive/negative keywords (JSON), llm_description
+- `subscription_groups` — which groups to monitor per subscription
+- `matched_messages` — deduplication
+
+### Conversation Flow State Machine
+
+```
+idle → awaiting_confirmation → selecting_groups → idle
+         ↓                          ↓
+   editing_keywords            (saves subscription)
+         ↓
+   awaiting_confirmation
 ```
 
-With the following `frontend.tsx`:
+State stored in-memory (`Map<userId, UserState>`).
 
-```tsx#frontend.tsx
-import React from "react";
+## Environment Variables
 
-// import .css files directly and it works
-import './index.css';
-
-import { createRoot } from "react-dom/client";
-
-const root = createRoot(document.body);
-
-export default function Frontend() {
-  return <h1>Hello, world!</h1>;
-}
-
-root.render(<Frontend />);
+```
+BOT_TOKEN=       # Telegram Bot API token
+API_ID=          # Telegram API ID (from my.telegram.org)
+API_HASH=        # Telegram API Hash
+HF_TOKEN=        # HuggingFace token (optional, for LLM features)
 ```
 
-Then, run index.ts
+Bun loads `.env` automatically.
 
-```sh
-bun --hot ./index.ts
-```
+## Key Files
 
-For more information, read the Bun API docs in `node_modules/bun-types/docs/**.md`.
+- `src/index.ts` — Entry point, starts both clients
+- `src/bot/index.ts` — Bot commands and callback handlers
+- `src/listener/index.ts` — MTProto message listener and group scanning
+- `src/matcher/ngram.ts` — N-gram similarity algorithms
+- `src/llm/keywords.ts` — Keyword generation prompt and parsing
+- `src/llm/verify.ts` — Zero-shot classification for match verification

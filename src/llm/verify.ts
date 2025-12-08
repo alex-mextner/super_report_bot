@@ -1,0 +1,78 @@
+import { hf, MODELS, withRetry } from "./index.ts";
+import type { Subscription, IncomingMessage } from "../types.ts";
+
+export interface VerificationResult {
+  isMatch: boolean;
+  confidence: number;
+  label: string;
+}
+
+/**
+ * Verify if a message matches a subscription using zero-shot classification
+ * Uses BART-MNLI for natural language inference
+ */
+export async function verifyMatch(
+  message: IncomingMessage,
+  subscription: Subscription
+): Promise<VerificationResult> {
+  const text = message.text;
+  const description = subscription.llm_description;
+
+  // Zero-shot classification: does the message match the description?
+  const results = await withRetry(async () => {
+    return await hf.zeroShotClassification({
+      model: MODELS.BART_MNLI,
+      inputs: text,
+      parameters: {
+        candidate_labels: [
+          `This message matches: ${description}`,
+          "This message does not match the search criteria",
+        ],
+      },
+    });
+  });
+
+  // Result is array of { labels: string[], scores: number[], sequence: string }
+  const result = results[0];
+  if (!result) {
+    return { isMatch: false, confidence: 0, label: "no_result" };
+  }
+
+  const matchIndex = result.labels.findIndex((l: string) => l.includes("matches"));
+  const matchScore = matchIndex >= 0 ? result.scores[matchIndex] ?? 0 : 0;
+
+  return {
+    isMatch: matchScore > 0.6,
+    confidence: matchScore,
+    label: result.labels[0] ?? "unknown",
+  };
+}
+
+/**
+ * Batch verify multiple matches
+ * Useful when multiple subscriptions matched the same message
+ */
+export async function verifyMatches(
+  message: IncomingMessage,
+  subscriptions: Subscription[]
+): Promise<Map<number, VerificationResult>> {
+  const results = new Map<number, VerificationResult>();
+
+  // Process sequentially to avoid rate limits
+  for (const subscription of subscriptions) {
+    try {
+      const result = await verifyMatch(message, subscription);
+      results.set(subscription.id, result);
+    } catch (error) {
+      console.error(`Failed to verify match for subscription ${subscription.id}:`, error);
+      // On error, assume no match
+      results.set(subscription.id, {
+        isMatch: false,
+        confidence: 0,
+        label: "error",
+      });
+    }
+  }
+
+  return results;
+}

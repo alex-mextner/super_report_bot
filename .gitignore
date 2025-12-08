@@ -17,6 +17,15 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # dotenv environment variable files
 .env
+
+# SQLite database
+*.db
+*.db-shm
+*.db-wal
+
+# MTProto session
+*.session
+*.session-*
 .env.development.local
 .env.test.local
 .env.production.local

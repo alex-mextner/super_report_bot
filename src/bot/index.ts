@@ -1,0 +1,492 @@
+import { Bot, format, bold, code } from "gramio";
+import { queries } from "../db/index.ts";
+import { generateKeywords, generateKeywordsFallback } from "../llm/keywords.ts";
+import { confirmKeyboard, subscriptionKeyboard, groupsKeyboard } from "./keyboards.ts";
+import { getUserGroups, invalidateSubscriptionsCache } from "../listener/index.ts";
+import type { UserState, KeywordGenerationResult } from "../types.ts";
+
+const BOT_TOKEN = process.env.BOT_TOKEN;
+
+if (!BOT_TOKEN) {
+  throw new Error("BOT_TOKEN is required");
+}
+
+// In-memory user state (for conversation flow)
+const userStates = new Map<number, UserState>();
+
+function getUserState(userId: number): UserState {
+  return userStates.get(userId) || { step: "idle" };
+}
+
+function setUserState(userId: number, state: UserState): void {
+  userStates.set(userId, state);
+}
+
+export const bot = new Bot(BOT_TOKEN);
+
+// /start command
+bot.command("start", async (context) => {
+  const userId = context.from?.id;
+  if (!userId) return;
+
+  queries.getOrCreateUser(userId);
+
+  await context.send(format`
+Привет! Я бот для мониторинга сообщений в группах.
+
+${bold("Как использовать:")}
+1. Отправь мне описание того, что ищешь (например: "продажа iPhone 14 до 50к в Москве")
+2. Я сгенерирую ключевые слова для поиска
+3. Подтверди или отредактируй их
+4. Получай уведомления при появлении подходящих сообщений
+
+${bold("Команды:")}
+/list - показать мои подписки
+/help - помощь
+  `);
+});
+
+// /list command - show user subscriptions
+bot.command("list", async (context) => {
+  const userId = context.from?.id;
+  if (!userId) return;
+
+  const subscriptions = queries.getUserSubscriptions(userId);
+
+  if (subscriptions.length === 0) {
+    await context.send("У тебя пока нет активных подписок. Отправь описание того, что хочешь найти.");
+    return;
+  }
+
+  for (const sub of subscriptions) {
+    await context.send(
+      format`
+${bold("Подписка #" + sub.id)}
+${bold("Запрос:")} ${sub.original_query}
+${bold("Ключевые слова:")} ${code(sub.positive_keywords.join(", "))}
+${bold("Исключения:")} ${code(sub.negative_keywords.join(", ") || "нет")}
+      `,
+      {
+        reply_markup: subscriptionKeyboard(sub.id),
+      }
+    );
+  }
+});
+
+// /help command
+bot.command("help", async (context) => {
+  await context.send(format`
+${bold("Как работает бот:")}
+
+1. Отправь описание в свободной форме, например:
+   - "ищу macbook pro m2 до 100к"
+   - "продажа велосипеда в спб"
+   - "вакансия frontend react удаленка"
+
+2. Бот сгенерирует:
+   - Позитивные ключевые слова (должны быть в сообщении)
+   - Негативные ключевые слова (исключают сообщение)
+   - Описание для проверки
+
+3. Подтверди или отредактируй параметры
+
+4. Бот будет мониторить группы и присылать уведомления
+  `);
+});
+
+// Handle text messages (new subscription requests)
+bot.on("message", async (context) => {
+  if (!context.text || context.text.startsWith("/")) return;
+
+  const userId = context.from?.id;
+  if (!userId) return;
+
+  const state = getUserState(userId);
+
+  // If user is editing keywords
+  if (state.step === "editing_keywords" && state.pending_subscription) {
+    const text = context.text;
+    const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+
+    let positiveKeywords: string[] | null = null;
+    let negativeKeywords: string[] | null = null;
+
+    for (const line of lines) {
+      const posMatch = line.match(/^позитивные:\s*(.+)$/i);
+      const negMatch = line.match(/^негативные:\s*(.+)$/i);
+
+      if (posMatch?.[1]) {
+        positiveKeywords = posMatch[1].split(",").map((s) => s.trim()).filter(Boolean);
+      } else if (negMatch?.[1]) {
+        negativeKeywords = negMatch[1].split(",").map((s) => s.trim()).filter(Boolean);
+      }
+    }
+
+    if (positiveKeywords === null && negativeKeywords === null) {
+      await context.send(
+        "Не удалось распознать формат. Используй:\n" +
+          "позитивные: слово1, слово2\n" +
+          "негативные: слово1, слово2"
+      );
+      return;
+    }
+
+    // Update pending subscription
+    const updated = {
+      ...state.pending_subscription,
+      positive_keywords: positiveKeywords ?? state.pending_subscription.positive_keywords,
+      negative_keywords: negativeKeywords ?? state.pending_subscription.negative_keywords,
+    };
+
+    const queryId = `${userId}_${Date.now()}`;
+
+    setUserState(userId, {
+      step: "awaiting_confirmation",
+      pending_subscription: updated,
+    });
+
+    await context.send(
+      format`
+${bold("Обновлённые ключевые слова:")}
+
+${bold("Позитивные:")}
+${code(updated.positive_keywords.join(", "))}
+
+${bold("Негативные:")}
+${code(updated.negative_keywords.join(", ") || "нет")}
+
+Подтверди или измени ещё раз:
+      `,
+      {
+        reply_markup: confirmKeyboard(queryId),
+      }
+    );
+    return;
+  }
+
+  // New subscription request
+  const query = context.text;
+
+  await context.send("Генерирую ключевые слова...");
+
+  let result: KeywordGenerationResult;
+  try {
+    result = await generateKeywords(query);
+  } catch (error) {
+    console.error("LLM error:", error);
+    result = generateKeywordsFallback(query);
+    await context.send("Не удалось использовать AI, использую простой алгоритм.");
+  }
+
+  // Generate unique ID for this pending subscription
+  const queryId = `${userId}_${Date.now()}`;
+
+  // Save state
+  setUserState(userId, {
+    step: "awaiting_confirmation",
+    pending_subscription: {
+      original_query: query,
+      positive_keywords: result.positive_keywords,
+      negative_keywords: result.negative_keywords,
+      llm_description: result.llm_description,
+    },
+  });
+
+  await context.send(
+    format`
+${bold("Результат анализа:")}
+
+${bold("Позитивные ключевые слова:")}
+${code(result.positive_keywords.join(", "))}
+
+${bold("Негативные ключевые слова:")}
+${code(result.negative_keywords.join(", ") || "нет")}
+
+${bold("Описание для проверки:")}
+${result.llm_description}
+
+Подтверди или измени параметры:
+    `,
+    {
+      reply_markup: confirmKeyboard(queryId),
+    }
+  );
+});
+
+// Handle callback queries (button clicks)
+bot.on("callback_query", async (context) => {
+  const userId = context.from?.id;
+  if (!userId) return;
+
+  let data: { action: string; id: string | number };
+  try {
+    data = JSON.parse(context.data || "{}");
+  } catch {
+    return;
+  }
+
+  const state = getUserState(userId);
+
+  switch (data.action) {
+    case "confirm": {
+      if (state.step !== "awaiting_confirmation" || !state.pending_subscription) {
+        await context.answer({ text: "Сессия истекла. Отправь новый запрос." });
+        return;
+      }
+
+      // Get available groups from userbot
+      await context.answer({ text: "Загружаю список групп..." });
+
+      let groups: { id: number; title: string }[];
+      try {
+        const userGroups = await getUserGroups();
+        groups = userGroups.map((g) => ({ id: g.id, title: g.title }));
+      } catch (error) {
+        console.error("Failed to get groups:", error);
+        // If can't get groups, create subscription without them
+        const { original_query, positive_keywords, negative_keywords, llm_description } =
+          state.pending_subscription;
+
+        queries.createSubscription(
+          userId,
+          original_query,
+          positive_keywords,
+          negative_keywords,
+          llm_description
+        );
+        invalidateSubscriptionsCache();
+
+        setUserState(userId, { step: "idle" });
+        await context.editText(
+          "Подписка создана! Не удалось загрузить группы, мониторинг будет по всем доступным."
+        );
+        return;
+      }
+
+      if (groups.length === 0) {
+        // No groups available, create subscription anyway
+        const { original_query, positive_keywords, negative_keywords, llm_description } =
+          state.pending_subscription;
+
+        queries.createSubscription(
+          userId,
+          original_query,
+          positive_keywords,
+          negative_keywords,
+          llm_description
+        );
+        invalidateSubscriptionsCache();
+
+        setUserState(userId, { step: "idle" });
+        await context.editText(
+          "Подписка создана! Userbot не состоит ни в каких группах, добавь его в группы для мониторинга."
+        );
+        return;
+      }
+
+      // Move to group selection
+      setUserState(userId, {
+        ...state,
+        step: "selecting_groups",
+        available_groups: groups,
+        selected_groups: [],
+      });
+
+      await context.editText(
+        format`
+${bold("Выбери группы для мониторинга:")}
+
+Выбрано: 0 из ${groups.length}
+        `,
+        {
+          reply_markup: groupsKeyboard(groups, new Set()),
+        }
+      );
+      break;
+    }
+
+    case "edit": {
+      setUserState(userId, { ...state, step: "editing_keywords" });
+      await context.answer({ text: "Отправь исправленные ключевые слова" });
+      await context.editText(
+        "Отправь исправленные ключевые слова в формате:\n" +
+          "позитивные: слово1, слово2\n" +
+          "негативные: слово1, слово2"
+      );
+      break;
+    }
+
+    case "cancel": {
+      setUserState(userId, { step: "idle" });
+      await context.answer({ text: "Отменено" });
+      await context.editText("Отменено. Отправь новый запрос когда будешь готов.");
+      break;
+    }
+
+    case "disable": {
+      const subscriptionId = Number(data.id);
+      queries.deactivateSubscription(subscriptionId, userId);
+      await context.answer({ text: "Подписка отключена" });
+      await context.editText("Подписка отключена.");
+      break;
+    }
+
+    case "back": {
+      setUserState(userId, { step: "idle" });
+      await context.answer({ text: "OK" });
+      break;
+    }
+
+    case "toggle_group": {
+      if (state.step !== "selecting_groups" || !state.available_groups) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      const groupId = Number(data.id);
+      const group = state.available_groups.find((g) => g.id === groupId);
+      if (!group) return;
+
+      const selected = state.selected_groups || [];
+      const isSelected = selected.some((g) => g.id === groupId);
+
+      const newSelected = isSelected
+        ? selected.filter((g) => g.id !== groupId)
+        : [...selected, group];
+
+      setUserState(userId, { ...state, selected_groups: newSelected });
+
+      const selectedIds = new Set(newSelected.map((g) => g.id));
+      await context.answer({ text: isSelected ? "Снято" : "Выбрано" });
+      await context.editText(
+        format`
+${bold("Выбери группы для мониторинга:")}
+
+Выбрано: ${newSelected.length} из ${state.available_groups.length}
+        `,
+        {
+          reply_markup: groupsKeyboard(state.available_groups, selectedIds),
+        }
+      );
+      break;
+    }
+
+    case "select_all_groups": {
+      if (state.step !== "selecting_groups" || !state.available_groups) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      const allGroups = state.available_groups;
+      setUserState(userId, { ...state, selected_groups: [...allGroups] });
+
+      const selectedIds = new Set(allGroups.map((g) => g.id));
+      await context.answer({ text: "Выбраны все" });
+      await context.editText(
+        format`
+${bold("Выбери группы для мониторинга:")}
+
+Выбрано: ${allGroups.length} из ${allGroups.length}
+        `,
+        {
+          reply_markup: groupsKeyboard(allGroups, selectedIds),
+        }
+      );
+      break;
+    }
+
+    case "deselect_all_groups": {
+      if (state.step !== "selecting_groups" || !state.available_groups) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      setUserState(userId, { ...state, selected_groups: [] });
+
+      await context.answer({ text: "Сняты все" });
+      await context.editText(
+        format`
+${bold("Выбери группы для мониторинга:")}
+
+Выбрано: 0 из ${state.available_groups.length}
+        `,
+        {
+          reply_markup: groupsKeyboard(state.available_groups, new Set()),
+        }
+      );
+      break;
+    }
+
+    case "confirm_groups":
+    case "skip_groups": {
+      if (
+        state.step !== "selecting_groups" ||
+        !state.pending_subscription ||
+        !state.available_groups
+      ) {
+        await context.answer({ text: "Сессия истекла. Отправь новый запрос." });
+        return;
+      }
+
+      const { original_query, positive_keywords, negative_keywords, llm_description } =
+        state.pending_subscription;
+
+      // Create subscription
+      const subscriptionId = queries.createSubscription(
+        userId,
+        original_query,
+        positive_keywords,
+        negative_keywords,
+        llm_description
+      );
+
+      const selectedGroups = state.selected_groups || [];
+
+      // Save selected groups
+      if (selectedGroups.length > 0) {
+        queries.setSubscriptionGroups(subscriptionId, selectedGroups);
+      }
+
+      invalidateSubscriptionsCache();
+      setUserState(userId, { step: "idle" });
+
+      await context.answer({ text: "Подписка создана!" });
+
+      if (selectedGroups.length > 0) {
+        const groupNames = selectedGroups.map((g) => g.title).join(", ");
+        await context.editText(
+          `Подписка создана! Мониторинг групп: ${groupNames}`
+        );
+      } else {
+        await context.editText(
+          "Подписка создана! Группы не выбраны, мониторинг будет по всем доступным."
+        );
+      }
+      break;
+    }
+  }
+});
+
+// Error handler
+bot.onError(({ context, error }) => {
+  console.error("Bot error:", error);
+});
+
+/**
+ * Send notification to user about matched message
+ */
+export async function notifyUser(
+  telegramId: number,
+  groupTitle: string,
+  messageText: string,
+  subscriptionQuery: string
+): Promise<void> {
+  try {
+    await bot.api.sendMessage({
+      chat_id: telegramId,
+      text: `🔔 Найдено совпадение!\n\nГруппа: ${groupTitle}\n\nЗапрос: ${subscriptionQuery}\n\nСообщение:\n${messageText.slice(0, 500)}${messageText.length > 500 ? "..." : ""}`,
+    });
+  } catch (error) {
+    console.error(`Failed to notify user ${telegramId}:`, error);
+  }
+}
