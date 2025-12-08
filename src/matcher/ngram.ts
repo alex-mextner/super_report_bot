@@ -119,15 +119,15 @@ export function calculateKeywordNgramSimilarity(
 
   const textNgrams = generateNgrams(text, 3);
 
-  // Check individual keyword coverage (is keyword present in text?)
+  // Check individual keyword coverage using phrase matching
   let keywordsCovered = 0;
   let totalCoverage = 0;
 
   for (const keyword of positiveKeywords) {
     const coverage = keywordCoverage(textNgrams, keyword);
     totalCoverage += coverage;
-    // Keyword is "found" if at least 70% of its ngrams are in text
-    if (coverage >= 0.7) {
+    // Keyword is "found" if phrase matches (threshold 0.7, with bridge check for multi-word)
+    if (phraseMatches(textNgrams, keyword, 0.7)) {
       keywordsCovered++;
     }
   }
