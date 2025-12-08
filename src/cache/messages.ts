@@ -95,6 +95,14 @@ export function getAllCachedMessages(): CachedMessage[] {
   return all;
 }
 
+export function getCachedMessageById(messageId: number): CachedMessage | undefined {
+  for (const groupCache of messageCache.values()) {
+    const msg = groupCache.get(messageId);
+    if (msg) return msg;
+  }
+  return undefined;
+}
+
 export function getCachedGroups(): Array<{ id: number; title: string; count: number }> {
   const groups: Array<{ id: number; title: string; count: number }> = [];
   for (const [groupId, groupCache] of messageCache.entries()) {

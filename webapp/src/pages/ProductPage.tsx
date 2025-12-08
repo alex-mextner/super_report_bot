@@ -43,7 +43,7 @@ export function ProductPage() {
   }
 
   if (error || !product) {
-    return <div className="product-page-error">Товар не найден</div>;
+    return <div className="product-page-error">Не найдено</div>;
   }
 
   return (

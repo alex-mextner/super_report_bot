@@ -2,6 +2,7 @@
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY,
   telegram_id INTEGER UNIQUE NOT NULL,
+  mode TEXT DEFAULT 'normal' CHECK (mode IN ('normal', 'advanced')),
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 

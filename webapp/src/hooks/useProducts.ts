@@ -11,6 +11,7 @@ export function useProducts(groupId?: number, search?: string) {
 
   const fetchProducts = useCallback(
     async (reset = false) => {
+      console.log("[useProducts] fetchProducts", { reset, groupId, search, offset });
       try {
         setLoading(true);
         const currentOffset = reset ? 0 : offset;
@@ -25,6 +26,8 @@ export function useProducts(groupId?: number, search?: string) {
           `/api/products?${params.toString()}`
         );
 
+        console.log("[useProducts] fetched", { itemsCount: data.items.length, total: data.total, hasMore: data.hasMore });
+
         if (reset) {
           setProducts(data.items);
         } else {
@@ -35,6 +38,7 @@ export function useProducts(groupId?: number, search?: string) {
         setOffset(currentOffset + data.items.length);
         setError(null);
       } catch (e) {
+        console.error("[useProducts] error", e);
         setError(e instanceof Error ? e.message : "Failed to load products");
       } finally {
         setLoading(false);

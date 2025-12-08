@@ -1,5 +1,5 @@
 import { InlineKeyboard, Keyboard } from "gramio";
-import type { PendingGroup } from "../types";
+import type { PendingGroup, UserMode } from "../types";
 
 // Request ID counter for requestChat buttons (signed 32-bit)
 let requestIdCounter = 1;
@@ -51,15 +51,27 @@ export function pendingGroupsKeyboard(groups: PendingGroup[]): InlineKeyboard {
   return kb;
 }
 
-export const confirmKeyboard = (queryId: string) =>
-  new InlineKeyboard()
-    .text("Подтвердить", JSON.stringify({ action: "confirm", id: queryId }))
-    .text("🤖 Перегенерировать", JSON.stringify({ action: "regenerate", id: queryId }))
-    .row()
-    .text("✏️ + слова", JSON.stringify({ action: "edit_positive_pending" }))
-    .text("✏️ − слова", JSON.stringify({ action: "edit_negative_pending" }))
-    .row()
-    .text("Отмена", JSON.stringify({ action: "cancel", id: queryId }));
+/**
+ * Confirmation keyboard for subscription creation
+ * In normal mode: only Confirm + Cancel
+ * In advanced mode: full editing capabilities
+ */
+export const confirmKeyboard = (queryId: string, mode: UserMode = "advanced") => {
+  const kb = new InlineKeyboard()
+    .text("Подтвердить", JSON.stringify({ action: "confirm", id: queryId }));
+
+  if (mode === "advanced") {
+    kb.text("🤖 Перегенерировать", JSON.stringify({ action: "regenerate", id: queryId }));
+    kb.row();
+    kb.text("✏️ + слова", JSON.stringify({ action: "edit_positive_pending" }));
+    kb.text("✏️ − слова", JSON.stringify({ action: "edit_negative_pending" }));
+  }
+
+  kb.row();
+  kb.text("Отмена", JSON.stringify({ action: "cancel", id: queryId }));
+
+  return kb;
+};
 
 export const subscriptionKeyboard = (
   subscriptionId: number,
@@ -210,6 +222,48 @@ export function removeKeywordsKeyboard(
     ? { action: "back_to_confirm" }
     : { action: "back_to_sub", id: subscriptionId };
   kb.text("✅ Готово", JSON.stringify(backAction));
+
+  return kb;
+}
+
+// =====================================================
+// Rating examples keyboard
+// =====================================================
+
+/**
+ * Keyboard for rating a single example message
+ * Used during subscription creation to calibrate keywords
+ */
+export function ratingKeyboard(exampleIndex: number, totalExamples: number): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("🔥 Горячо", JSON.stringify({ action: "rate_hot", idx: exampleIndex }))
+    .text("☀️ Тепло", JSON.stringify({ action: "rate_warm", idx: exampleIndex }))
+    .text("❄️ Холодно", JSON.stringify({ action: "rate_cold", idx: exampleIndex }))
+    .row()
+    .text(
+      `Пропустить (${exampleIndex + 1}/${totalExamples})`,
+      JSON.stringify({ action: "skip_rating" })
+    );
+}
+
+// =====================================================
+// Settings keyboard
+// =====================================================
+
+/**
+ * Keyboard for /settings command
+ * Allows user to toggle between normal and advanced modes
+ */
+export function settingsKeyboard(currentMode: UserMode): InlineKeyboard {
+  const kb = new InlineKeyboard();
+
+  if (currentMode === "normal") {
+    kb.text("📊 Обычный режим ✓", JSON.stringify({ action: "noop" }));
+    kb.text("🔬 Продвинутый", JSON.stringify({ action: "set_mode_advanced" }));
+  } else {
+    kb.text("📊 Обычный", JSON.stringify({ action: "set_mode_normal" }));
+    kb.text("🔬 Продвинутый ✓", JSON.stringify({ action: "noop" }));
+  }
 
   return kb;
 }

@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import type {
   User,
+  UserMode,
   Subscription,
   MonitoredGroup,
   MatchedMessage,
@@ -24,6 +25,12 @@ const stmts = {
   // Users
   getUser: db.prepare<User, [number]>("SELECT * FROM users WHERE telegram_id = ?"),
   createUser: db.prepare<void, [number]>("INSERT OR IGNORE INTO users (telegram_id) VALUES (?)"),
+  getUserMode: db.prepare<{ mode: UserMode }, [number]>(
+    "SELECT COALESCE(mode, 'normal') as mode FROM users WHERE telegram_id = ?"
+  ),
+  setUserMode: db.prepare<void, [string, number]>(
+    "UPDATE users SET mode = ? WHERE telegram_id = ?"
+  ),
 
   // Subscriptions
   getActiveSubscriptions: db.prepare<Subscription, []>(
@@ -180,6 +187,15 @@ export const queries = {
   getOrCreateUser(telegramId: number): User {
     stmts.createUser.run(telegramId);
     return stmts.getUser.get(telegramId)!;
+  },
+
+  getUserMode(telegramId: number): UserMode {
+    const result = stmts.getUserMode.get(telegramId);
+    return result?.mode || "normal";
+  },
+
+  setUserMode(telegramId: number, mode: UserMode): void {
+    stmts.setUserMode.run(mode, telegramId);
   },
 
   // Subscriptions

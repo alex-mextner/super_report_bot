@@ -1,5 +1,5 @@
 import { hf, MODELS, withRetry } from "./index.ts";
-import type { KeywordGenerationResult } from "../types.ts";
+import type { KeywordGenerationResult, ExampleRating, RatingExample } from "../types.ts";
 
 const SYSTEM_PROMPT = `Ты помощник для извлечения ключевых слов из поисковых запросов пользователей.
 Твоя задача — сгенерировать позитивные и негативные ключевые слова для фильтрации сообщений.
@@ -142,4 +142,248 @@ export function generateKeywordsFallback(query: string): KeywordGenerationResult
     negative_keywords: [],
     llm_description: query,
   };
+}
+
+// =====================================================
+// Draft keywords generation (fast, for searching examples)
+// =====================================================
+
+const DRAFT_KEYWORDS_PROMPT = `Из запроса пользователя извлеки 10-15 ключевых слов для поиска.
+Включи: основные термины, синонимы, бренды, вариации написания.
+
+Ответ ТОЛЬКО JSON массив строк, без пояснений:
+["слово1", "слово2", ...]`;
+
+/**
+ * Generate draft keywords quickly for searching similar messages
+ * Simpler and faster than full generateKeywords
+ */
+export async function generateDraftKeywords(query: string): Promise<string[]> {
+  try {
+    const response = await withRetry(async () => {
+      const result = await hf.chatCompletion({
+        model: MODELS.DEEPSEEK_R1,
+        provider: "novita",
+        messages: [
+          { role: "system", content: DRAFT_KEYWORDS_PROMPT },
+          { role: "user", content: query },
+        ],
+        max_tokens: 500,
+        temperature: 0.5,
+      });
+      return result.choices[0]?.message?.content || "";
+    });
+
+    // Strip thinking tags
+    const cleaned = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+
+    // Parse JSON array
+    const match = cleaned.match(/\[[\s\S]*\]/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((k) => typeof k === "string");
+      }
+    }
+  } catch {
+    // Fallback to simple tokenization
+  }
+
+  return generateKeywordsFallback(query).positive_keywords;
+}
+
+// =====================================================
+// Example messages generation (when cache is empty)
+// =====================================================
+
+const EXAMPLE_MESSAGES_PROMPT = `Сгенерируй 3 примера объявлений, которые могли бы подойти под запрос пользователя.
+
+Примеры должны быть:
+1. Точное совпадение — идеально подходит под запрос
+2. Вариация по цене/состоянию — похожий товар, но другие условия
+3. Альтернатива — смежный товар/услуга, который может не подойти
+
+Формат объявлений — как в Telegram-группах: краткие, с эмодзи, ценой, описанием.
+
+Ответ ТОЛЬКО JSON:
+{
+  "examples": [
+    {"text": "текст объявления 1", "variation": "exact"},
+    {"text": "текст объявления 2", "variation": "price"},
+    {"text": "текст объявления 3", "variation": "alternative"}
+  ]
+}`;
+
+export interface GeneratedExample {
+  text: string;
+  variation: "exact" | "price" | "alternative";
+}
+
+/**
+ * Generate example messages when cache is empty
+ * Returns 3 synthetic examples for user to rate
+ */
+export async function generateExampleMessages(
+  query: string
+): Promise<GeneratedExample[]> {
+  try {
+    const response = await withRetry(async () => {
+      const result = await hf.chatCompletion({
+        model: MODELS.DEEPSEEK_R1,
+        provider: "novita",
+        messages: [
+          { role: "system", content: EXAMPLE_MESSAGES_PROMPT },
+          { role: "user", content: query },
+        ],
+        max_tokens: 1000,
+        temperature: 0.7,
+      });
+      return result.choices[0]?.message?.content || "";
+    });
+
+    // Strip thinking tags
+    const cleaned = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+
+    // Parse JSON
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      if (parsed.examples && Array.isArray(parsed.examples)) {
+        return parsed.examples;
+      }
+    }
+  } catch {
+    // Return empty if failed
+  }
+
+  return [];
+}
+
+/**
+ * Convert generated examples to RatingExample format
+ */
+export function generatedToRatingExamples(
+  examples: GeneratedExample[]
+): RatingExample[] {
+  return examples.map((ex, idx) => ({
+    id: -(idx + 1), // negative IDs for generated examples
+    text: ex.text,
+    groupId: 0,
+    groupTitle: "Пример",
+    isGenerated: true,
+  }));
+}
+
+// =====================================================
+// Keywords generation with ratings feedback
+// =====================================================
+
+interface RatingFeedback {
+  text: string;
+  rating: ExampleRating;
+}
+
+const KEYWORDS_WITH_RATINGS_PROMPT = `Ты помощник для извлечения ключевых слов из поисковых запросов.
+Пользователь оценил примеры объявлений — учти эту обратную связь!
+
+## Обратная связь
+🔥 Горячо = идеально подходит, добавь похожие слова в positive
+☀️ Тепло = частично подходит, полезный контекст
+❄️ Холодно = НЕ подходит, добавь характерные слова в negative
+
+## Правила генерации
+
+### positive_keywords (50-100 слов)
+- Основной товар/услуга + ВСЕ подвиды/бренды
+- Синонимы, разговорные формы, транслит
+- Слова из "горячих" примеров
+
+### negative_keywords
+- Слова для исключения нерелевантных
+- Характерные слова из "холодных" примеров
+- Стандартные спам-фильтры
+
+### description
+Краткое описание того, что ищет пользователь
+
+## Формат ответа
+ТОЛЬКО JSON:
+{
+  "positive_keywords": [...],
+  "negative_keywords": [...],
+  "description": "..."
+}`;
+
+/**
+ * Generate keywords with user's rating feedback
+ * Takes into account which examples user marked as relevant/irrelevant
+ */
+export async function generateKeywordsWithRatings(
+  query: string,
+  ratings: RatingFeedback[],
+  clarificationContext?: string
+): Promise<KeywordGenerationResult> {
+  // Build feedback section
+  const feedbackLines: string[] = [];
+
+  const hot = ratings.filter((r) => r.rating === "hot");
+  const warm = ratings.filter((r) => r.rating === "warm");
+  const cold = ratings.filter((r) => r.rating === "cold");
+
+  if (hot.length > 0) {
+    feedbackLines.push("🔥 Горячо (релевантно):");
+    hot.forEach((r) => feedbackLines.push(`  "${r.text.slice(0, 200)}..."`));
+  }
+
+  if (warm.length > 0) {
+    feedbackLines.push("☀️ Тепло (частично):");
+    warm.forEach((r) => feedbackLines.push(`  "${r.text.slice(0, 200)}..."`));
+  }
+
+  if (cold.length > 0) {
+    feedbackLines.push("❄️ Холодно (нерелевантно):");
+    cold.forEach((r) => feedbackLines.push(`  "${r.text.slice(0, 200)}..."`));
+  }
+
+  const feedbackSection = feedbackLines.length > 0
+    ? `\n\nОценки пользователя:\n${feedbackLines.join("\n")}`
+    : "";
+
+  const userMessage = clarificationContext
+    ? `Запрос: ${query}${clarificationContext}${feedbackSection}`
+    : `Запрос: ${query}${feedbackSection}`;
+
+  const response = await withRetry(async () => {
+    const result = await hf.chatCompletion({
+      model: MODELS.DEEPSEEK_R1,
+      provider: "novita",
+      messages: [
+        { role: "system", content: KEYWORDS_WITH_RATINGS_PROMPT },
+        { role: "user", content: userMessage },
+      ],
+      max_tokens: 2500,
+      temperature: 0.6,
+    });
+    return result.choices[0]?.message?.content || "";
+  });
+
+  // Strip thinking tags
+  const cleaned = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+
+  // Parse JSON
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) {
+    throw new Error(`Failed to parse LLM response: ${response}`);
+  }
+
+  try {
+    const parsed = JSON.parse(match[0]);
+    return {
+      positive_keywords: parsed.positive_keywords || [],
+      negative_keywords: parsed.negative_keywords || [],
+      llm_description: parsed.description || "",
+    };
+  } catch {
+    throw new Error(`Invalid JSON in LLM response: ${match[0]}`);
+  }
 }

@@ -11,6 +11,7 @@ export function App() {
 
   // Set initData for API client
   useEffect(() => {
+    console.log("[App] initData from Telegram:", { hasInitData: !!initData, length: initData?.length ?? 0 });
     if (initData) {
       setInitData(initData);
     }

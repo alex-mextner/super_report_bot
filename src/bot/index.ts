@@ -1,6 +1,13 @@
 import { Bot, format, bold, code } from "gramio";
 import { queries } from "../db/index.ts";
-import { generateKeywords, generateKeywordsFallback } from "../llm/keywords.ts";
+import {
+  generateKeywords,
+  generateKeywordsFallback,
+  generateDraftKeywords,
+  generateExampleMessages,
+  generatedToRatingExamples,
+  generateKeywordsWithRatings,
+} from "../llm/keywords.ts";
 import {
   generateClarificationQuestions,
   formatClarificationContext,
@@ -17,9 +24,12 @@ import {
   keywordEditSubmenu,
   keywordEditSubmenuPending,
   removeKeywordsKeyboard,
+  ratingKeyboard,
+  settingsKeyboard,
 } from "./keyboards.ts";
 import { interpretEditCommand } from "../llm/edit.ts";
 import { getExamplesForSubscription } from "./examples.ts";
+import { findSimilarWithFallback, toRatingExamples } from "./similar.ts";
 import {
   invalidateSubscriptionsCache,
   isUserbotMember,
@@ -27,7 +37,14 @@ import {
   scanFromCache,
 } from "../listener/index.ts";
 import { botLog } from "../logger.ts";
-import type { UserState, KeywordGenerationResult, PendingGroup } from "../types.ts";
+import type {
+  UserState,
+  UserMode,
+  KeywordGenerationResult,
+  PendingGroup,
+  ExampleRating,
+  RatingExample,
+} from "../types.ts";
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 
@@ -46,23 +63,40 @@ function setUserState(userId: number, state: UserState): void {
   userStates.set(userId, state);
 }
 
-// Helper: generate keywords and show confirmation to user
+// Helper: show single example for rating
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function generateKeywordsAndShowResult(
+async function showExampleForRating(
   context: any,
   userId: number,
-  query: string,
-  clarificationContext?: string
+  example: RatingExample,
+  index: number,
+  total: number
 ): Promise<void> {
-  let result: KeywordGenerationResult;
-  try {
-    result = await generateKeywords(query, clarificationContext);
-  } catch (error) {
-    botLog.error({ err: error, userId }, "LLM keyword generation failed");
-    result = generateKeywordsFallback(query);
-    await context.send("Не удалось использовать AI, использую простой алгоритм.");
-  }
+  const sourceLabel = example.isGenerated
+    ? "🤖 Сгенерированный пример"
+    : `📍 ${example.groupTitle}`;
 
+  await context.send(
+    format`${bold(`Пример ${index + 1}/${total}`)} ${sourceLabel}
+
+${example.text.slice(0, 500)}${example.text.length > 500 ? "..." : ""}
+
+Это похоже на то, что ты ищешь?`,
+    {
+      reply_markup: ratingKeyboard(index, total),
+    }
+  );
+}
+
+// Helper: show confirmation screen
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function showConfirmation(
+  context: any,
+  userId: number,
+  result: KeywordGenerationResult,
+  query: string,
+  mode: UserMode
+): Promise<void> {
   const queryId = `${userId}_${Date.now()}`;
 
   setUserState(userId, {
@@ -75,9 +109,23 @@ async function generateKeywordsAndShowResult(
     },
   });
 
-  await context.send(
-    format`
-${bold("Результат анализа:")}
+  if (mode === "normal") {
+    // Simplified view for normal mode - only description
+    await context.send(
+      format`${bold("Результат анализа:")}
+
+${bold("Что будем искать:")}
+${result.llm_description}
+
+Подтверди или отмени:`,
+      {
+        reply_markup: confirmKeyboard(queryId, mode),
+      }
+    );
+  } else {
+    // Full view for advanced mode
+    await context.send(
+      format`${bold("Результат анализа:")}
 
 ${bold("Позитивные ключевые слова:")}
 ${code(result.positive_keywords.join(", "))}
@@ -88,12 +136,164 @@ ${code(result.negative_keywords.join(", ") || "нет")}
 ${bold("Описание для проверки:")}
 ${result.llm_description}
 
-Подтверди или измени параметры:
-    `,
-    {
-      reply_markup: confirmKeyboard(queryId),
+Подтверди или измени параметры:`,
+      {
+        reply_markup: confirmKeyboard(queryId, mode),
+      }
+    );
+  }
+}
+
+// Helper: start rating flow with examples
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function startRatingFlow(
+  context: any,
+  userId: number,
+  query: string,
+  draftKeywords: string[],
+  clarificationContext?: string
+): Promise<void> {
+  // Get user's groups
+  const userGroups = queries.getUserGroups(userId);
+  const groupIds = userGroups.map((g) => g.id);
+
+  // Search for similar messages in cache
+  let examples: RatingExample[] = [];
+
+  if (groupIds.length > 0) {
+    const similar = findSimilarWithFallback(draftKeywords, groupIds, 3);
+    examples = toRatingExamples(similar);
+    botLog.debug({ userId, found: examples.length }, "Found similar messages for rating");
+  }
+
+  // If not enough examples, generate them via LLM
+  if (examples.length < 3) {
+    botLog.debug({ userId, existing: examples.length }, "Generating synthetic examples");
+    try {
+      const generated = await generateExampleMessages(query);
+      const synthetic = generatedToRatingExamples(generated);
+      examples = [...examples, ...synthetic].slice(0, 3);
+    } catch (error) {
+      botLog.error({ err: error, userId }, "Failed to generate examples");
     }
-  );
+  }
+
+  if (examples.length === 0) {
+    // No examples at all, skip to keyword generation
+    botLog.debug({ userId }, "No examples available, skipping rating flow");
+    const mode = queries.getUserMode(userId);
+    await context.send("Примеры не найдены, генерирую ключевые слова...");
+
+    let result: KeywordGenerationResult;
+    try {
+      result = await generateKeywords(query, clarificationContext);
+    } catch (error) {
+      botLog.error({ err: error, userId }, "LLM keyword generation failed");
+      result = generateKeywordsFallback(query);
+    }
+
+    await showConfirmation(context, userId, result, query, mode);
+    return;
+  }
+
+  // Save state and show first example
+  const state = getUserState(userId);
+  setUserState(userId, {
+    ...state,
+    step: "rating_examples",
+    pending_subscription: {
+      original_query: query,
+      positive_keywords: [],
+      negative_keywords: [],
+      llm_description: "",
+    },
+    pending_examples: {
+      messages: examples,
+      ratings: [],
+      current_index: 0,
+    },
+    draft_keywords: draftKeywords,
+    clarification: state.clarification, // preserve clarification context
+  });
+
+  await showExampleForRating(context, userId, examples[0]!, 0, examples.length);
+}
+
+// Helper: finish rating and generate final keywords
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function finishRatingAndGenerateKeywords(
+  context: any,
+  userId: number
+): Promise<void> {
+  const state = getUserState(userId);
+  const mode = queries.getUserMode(userId);
+
+  if (!state.pending_examples || !state.pending_subscription) {
+    await context.send("Сессия истекла. Отправь новый запрос.");
+    setUserState(userId, { step: "idle" });
+    return;
+  }
+
+  const { ratings } = state.pending_examples;
+  const query = state.pending_subscription.original_query;
+  const clarificationContext = state.clarification
+    ? formatClarificationContext(state.clarification.questions, state.clarification.answers)
+    : undefined;
+
+  await context.send("Генерирую ключевые слова с учётом твоих оценок...");
+
+  let result: KeywordGenerationResult;
+
+  if (ratings.length > 0) {
+    // Generate with ratings feedback
+    try {
+      result = await generateKeywordsWithRatings(
+        query,
+        ratings.map((r) => ({ text: r.text, rating: r.rating })),
+        clarificationContext
+      );
+    } catch (error) {
+      botLog.error({ err: error, userId }, "LLM generation with ratings failed");
+      // Fallback to regular generation
+      try {
+        result = await generateKeywords(query, clarificationContext);
+      } catch {
+        result = generateKeywordsFallback(query);
+      }
+    }
+  } else {
+    // No ratings, use regular generation
+    try {
+      result = await generateKeywords(query, clarificationContext);
+    } catch (error) {
+      botLog.error({ err: error, userId }, "LLM keyword generation failed");
+      result = generateKeywordsFallback(query);
+    }
+  }
+
+  await showConfirmation(context, userId, result, query, mode);
+}
+
+// Legacy helper kept for backwards compatibility
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function generateKeywordsAndShowResult(
+  context: any,
+  userId: number,
+  query: string,
+  clarificationContext?: string
+): Promise<void> {
+  const mode = queries.getUserMode(userId);
+
+  let result: KeywordGenerationResult;
+  try {
+    result = await generateKeywords(query, clarificationContext);
+  } catch (error) {
+    botLog.error({ err: error, userId }, "LLM keyword generation failed");
+    result = generateKeywordsFallback(query);
+    await context.send("Не удалось использовать AI, использую простой алгоритм.");
+  }
+
+  await showConfirmation(context, userId, result, query, mode);
 }
 
 export const bot = new Bot(BOT_TOKEN);
@@ -171,8 +371,34 @@ ${bold("Команды:")}
 /addgroup - добавить группу/канал
 /groups - список добавленных групп
 /list - мои подписки
+/settings - настройки режима
 /catalog - каталог товаров
   `);
+});
+
+// /settings command - configure user mode
+bot.command("settings", async (context) => {
+  const userId = context.from?.id;
+  if (!userId) return;
+
+  queries.getOrCreateUser(userId);
+  const currentMode = queries.getUserMode(userId);
+
+  const modeDescription =
+    currentMode === "normal"
+      ? "В обычном режиме бот не показывает ключевые слова и не задаёт уточняющих вопросов."
+      : "В продвинутом режиме ты видишь ключевые слова, можешь их редактировать и отвечаешь на уточняющие вопросы.";
+
+  await context.send(
+    format`${bold("Настройки")}
+
+${bold("Текущий режим:")} ${currentMode === "normal" ? "📊 Обычный" : "🔬 Продвинутый"}
+
+${modeDescription}`,
+    {
+      reply_markup: settingsKeyboard(currentMode),
+    }
+  );
 });
 
 // /catalog command - open webapp
@@ -827,47 +1053,80 @@ ${code(updated.negative_keywords.join(", ") || "нет")}
         reply_markup: skipQuestionKeyboard(),
       });
     } else {
-      // All questions answered — generate keywords with context
-      await context.send("Генерирую ключевые слова на основе твоих ответов...");
+      // All questions answered — generate draft keywords and start rating flow
+      await context.send("Анализирую ответы...");
       const clarificationContext = formatClarificationContext(questions, answers);
-      await generateKeywordsAndShowResult(context, userId, original_query, clarificationContext);
+
+      let draftKeywords: string[];
+      try {
+        draftKeywords = await generateDraftKeywords(original_query);
+      } catch {
+        draftKeywords = generateKeywordsFallback(original_query).positive_keywords;
+      }
+
+      await startRatingFlow(context, userId, original_query, draftKeywords, clarificationContext);
     }
     return;
   }
 
-  // New subscription request — start clarification flow
+  // New subscription request — check mode and start appropriate flow
   const query = context.text;
+  const mode = queries.getUserMode(userId);
 
-  await context.send("Генерирую уточняющие вопросы...");
+  if (mode === "normal") {
+    // Normal mode: skip clarification, go directly to draft keywords + rating
+    await context.send("Анализирую запрос...");
 
-  let questions: string[];
-  try {
-    questions = await generateClarificationQuestions(query);
-  } catch (error) {
-    botLog.error({ err: error, userId }, "LLM clarification generation failed");
-    // Fallback: skip clarification, go directly to keyword generation
-    await context.send("Не удалось сгенерировать вопросы, перехожу к генерации ключевых слов...");
-    await generateKeywordsAndShowResult(context, userId, query);
-    return;
+    let draftKeywords: string[];
+    try {
+      draftKeywords = await generateDraftKeywords(query);
+    } catch (error) {
+      botLog.error({ err: error, userId }, "Draft keywords generation failed");
+      draftKeywords = generateKeywordsFallback(query).positive_keywords;
+    }
+
+    await startRatingFlow(context, userId, query, draftKeywords);
+  } else {
+    // Advanced mode: start with clarification questions
+    await context.send("Генерирую уточняющие вопросы...");
+
+    let questions: string[];
+    try {
+      questions = await generateClarificationQuestions(query);
+    } catch (error) {
+      botLog.error({ err: error, userId }, "LLM clarification generation failed");
+      // Fallback: skip clarification, go to draft keywords + rating
+      await context.send("Не удалось сгенерировать вопросы, перехожу к примерам...");
+
+      let draftKeywords: string[];
+      try {
+        draftKeywords = await generateDraftKeywords(query);
+      } catch {
+        draftKeywords = generateKeywordsFallback(query).positive_keywords;
+      }
+
+      await startRatingFlow(context, userId, query, draftKeywords);
+      return;
+    }
+
+    // Save clarification state
+    setUserState(userId, {
+      step: "clarifying_query",
+      clarification: {
+        original_query: query,
+        questions,
+        answers: [],
+        current_index: 0,
+      },
+    });
+
+    // Send first question
+    const firstQuestion = questions[0] ?? "Какие конкретные характеристики важны?";
+    const questionNumber = `(1/${questions.length})`;
+    await context.send(format`${bold("Уточняющий вопрос")} ${questionNumber}\n\n${firstQuestion}`, {
+      reply_markup: skipQuestionKeyboard(),
+    });
   }
-
-  // Save clarification state
-  setUserState(userId, {
-    step: "clarifying_query",
-    clarification: {
-      original_query: query,
-      questions,
-      answers: [],
-      current_index: 0,
-    },
-  });
-
-  // Send first question
-  const firstQuestion = questions[0] ?? "Какие конкретные характеристики важны?";
-  const questionNumber = `(1/${questions.length})`;
-  await context.send(format`${bold("Уточняющий вопрос")} ${questionNumber}\n\n${firstQuestion}`, {
-    reply_markup: skipQuestionKeyboard(),
-  });
 });
 
 // Handle callback queries (button clicks)
@@ -1181,11 +1440,19 @@ ${state.pending_subscription.llm_description}
           reply_markup: skipQuestionKeyboard(),
         });
       } else {
-        // All questions done — generate keywords
+        // All questions done — start rating flow
         await context.answer({ text: "Генерирую..." });
-        await context.editText("Генерирую ключевые слова...");
+        await context.editText("Анализирую ответы...");
         const clarificationContext = formatClarificationContext(questions, answers);
-        await generateKeywordsAndShowResult(context, userId, original_query, clarificationContext);
+
+        let draftKeywords: string[];
+        try {
+          draftKeywords = await generateDraftKeywords(original_query);
+        } catch {
+          draftKeywords = generateKeywordsFallback(original_query).positive_keywords;
+        }
+
+        await startRatingFlow(context, userId, original_query, draftKeywords, clarificationContext);
       }
       break;
     }
@@ -1796,6 +2063,134 @@ ${bold("Выбери группы для мониторинга:")}
           "Подписка создана! Группы не выбраны, мониторинг будет по всем доступным."
         );
       }
+      break;
+    }
+
+    // =====================================================
+    // Rating flow handlers
+    // =====================================================
+
+    case "rate_hot":
+    case "rate_warm":
+    case "rate_cold": {
+      if (state.step !== "rating_examples" || !state.pending_examples) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      const { messages, ratings, current_index } = state.pending_examples;
+      const currentExample = messages[current_index];
+      if (!currentExample) {
+        await context.answer({ text: "Ошибка" });
+        return;
+      }
+
+      // Map action to rating
+      const ratingMap: Record<string, ExampleRating> = {
+        rate_hot: "hot",
+        rate_warm: "warm",
+        rate_cold: "cold",
+      };
+      const rating = ratingMap[data.action]!;
+
+      // Save rating
+      const newRatings = [
+        ...ratings,
+        { messageId: currentExample.id, text: currentExample.text, rating },
+      ];
+
+      const ratingEmoji = { hot: "🔥", warm: "☀️", cold: "❄️" }[rating];
+      await context.answer({ text: `${ratingEmoji} Записано` });
+
+      const nextIndex = current_index + 1;
+
+      if (nextIndex < messages.length) {
+        // Show next example
+        setUserState(userId, {
+          ...state,
+          pending_examples: {
+            ...state.pending_examples,
+            ratings: newRatings,
+            current_index: nextIndex,
+          },
+        });
+
+        await context.editText("Переходим к следующему...");
+        await showExampleForRating(
+          context,
+          userId,
+          messages[nextIndex]!,
+          nextIndex,
+          messages.length
+        );
+      } else {
+        // All examples rated, generate final keywords
+        setUserState(userId, {
+          ...state,
+          pending_examples: {
+            ...state.pending_examples,
+            ratings: newRatings,
+            current_index: nextIndex,
+          },
+        });
+
+        await context.editText("Все примеры оценены!");
+        await finishRatingAndGenerateKeywords(context, userId);
+      }
+      break;
+    }
+
+    case "skip_rating": {
+      if (state.step !== "rating_examples" || !state.pending_examples) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      await context.answer({ text: "Пропускаем..." });
+      await context.editText("Примеры пропущены.");
+      await finishRatingAndGenerateKeywords(context, userId);
+      break;
+    }
+
+    // =====================================================
+    // Settings handlers
+    // =====================================================
+
+    case "set_mode_normal": {
+      queries.setUserMode(userId, "normal");
+      await context.answer({ text: "Режим изменён" });
+      await context.editText(
+        format`${bold("Настройки")}
+
+${bold("Текущий режим:")} 📊 Обычный
+
+В обычном режиме бот не показывает ключевые слова и не задаёт уточняющих вопросов.`,
+        {
+          reply_markup: settingsKeyboard("normal"),
+        }
+      );
+      break;
+    }
+
+    case "set_mode_advanced": {
+      queries.setUserMode(userId, "advanced");
+      await context.answer({ text: "Режим изменён" });
+      await context.editText(
+        format`${bold("Настройки")}
+
+${bold("Текущий режим:")} 🔬 Продвинутый
+
+В продвинутом режиме ты видишь ключевые слова, можешь их редактировать и отвечаешь на уточняющие вопросы.`,
+        {
+          reply_markup: settingsKeyboard("advanced"),
+        }
+      );
+      break;
+    }
+
+    case "noop": {
+      // Do nothing (already selected option)
+      await context.answer({ text: "Уже выбрано" });
       break;
     }
   }

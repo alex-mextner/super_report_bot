@@ -4,7 +4,7 @@ import { serveStatic } from "hono/bun";
 import { queries } from "../db/index.ts";
 import { validateInitData, parseInitDataUser } from "./auth.ts";
 import { apiLog } from "../logger.ts";
-import { getMessages, getAllCachedMessages, getCachedGroups } from "../cache/messages.ts";
+import { getMessages, getAllCachedMessages, getCachedGroups, getCachedMessageById } from "../cache/messages.ts";
 import { analyzeMessage, analyzeMessagesBatch, type BatchItem } from "../llm/analyze.ts";
 
 const ADMIN_ID = Number(process.env.ADMIN_ID) || 0;
@@ -25,27 +25,36 @@ api.use(
   })
 );
 
-// Auth middleware (skip in dev mode)
+// Strict auth middleware - only works inside Telegram WebApp
 api.use("/*", async (c, next) => {
-  const initData = c.req.header("X-Telegram-Init-Data");
-
-  // Skip auth in development (use ADMIN_ID as default user)
-  if (process.env.NODE_ENV === "development") {
-    c.set("userId", ADMIN_ID);
-    c.set("isAdmin", true);
+  // Health check is public
+  if (c.req.path === "/api/health") {
     await next();
     return;
   }
 
+  const initData = c.req.header("X-Telegram-Init-Data");
+
+  apiLog.debug(
+    {
+      path: c.req.path,
+      hasInitData: !!initData,
+      initDataLength: initData?.length ?? 0,
+    },
+    "Auth middleware"
+  );
+
   if (!initData || !validateInitData(initData)) {
-    return c.json({ error: "Unauthorized" }, 401);
+    apiLog.warn({ path: c.req.path, hasInitData: !!initData }, "Auth failed");
+    return c.json({ error: "Unauthorized - Telegram WebApp only" }, 401);
   }
 
-  // Parse user from initData
   const user = parseInitDataUser(initData);
   const userId = user?.id ?? null;
   c.set("userId", userId);
   c.set("isAdmin", userId === ADMIN_ID);
+
+  apiLog.debug({ userId, isAdmin: userId === ADMIN_ID }, "Auth success");
 
   await next();
 });
@@ -81,49 +90,34 @@ api.get("/products", (c) => {
 // GET /api/products/:id
 api.get("/products/:id", (c) => {
   const id = Number(c.req.param("id"));
-  const product = queries.getProductById(id);
+  const msg = getCachedMessageById(id);
 
-  if (!product) {
+  if (!msg) {
     return c.json({ error: "Not found" }, 404);
   }
 
-  const contacts = queries.getProductContacts(id);
-
   return c.json({
-    ...product,
-    contacts,
-    messageLink: buildTelegramLink(product.group_id, product.message_id),
+    id: msg.id,
+    message_id: msg.id,
+    group_id: msg.groupId,
+    group_title: msg.groupTitle,
+    text: msg.text,
+    sender_id: msg.senderId ?? null,
+    sender_name: msg.senderName ?? null,
+    message_date: msg.date,
+    contacts: [],
+    messageLink: buildTelegramLink(msg.groupId, msg.id),
   });
 });
 
-// GET /api/products/:id/similar
+// GET /api/products/:id/similar - returns empty for now (no classification)
 api.get("/products/:id/similar", (c) => {
-  const id = Number(c.req.param("id"));
-  const product = queries.getProductById(id);
-
-  if (!product) {
-    return c.json({ error: "Not found" }, 404);
-  }
-
-  const similar = queries.getSimilarProducts(id, product.category_code, 5);
-
-  return c.json({
-    items: similar.map((p) => ({
-      ...p,
-      messageLink: buildTelegramLink(p.group_id, p.message_id),
-      priceDiff:
-        p.price_normalized && product.price_normalized
-          ? p.price_normalized - product.price_normalized
-          : null,
-    })),
-  });
+  return c.json({ items: [] });
 });
 
 // POST /api/analyze - analyze single message with AI (admin only)
 api.post("/analyze", async (c) => {
-  const isAdmin = c.get("isAdmin");
-
-  if (!isAdmin) {
+  if (!c.get("isAdmin")) {
     return c.json({ error: "Premium feature" }, 403);
   }
 
@@ -143,9 +137,7 @@ api.post("/analyze", async (c) => {
 
 // POST /api/analyze-batch - analyze all cached messages (admin only)
 api.post("/analyze-batch", async (c) => {
-  const isAdmin = c.get("isAdmin");
-
-  if (!isAdmin) {
+  if (!c.get("isAdmin")) {
     return c.json({ error: "Premium feature" }, 403);
   }
 
