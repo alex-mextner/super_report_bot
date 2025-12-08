@@ -69,7 +69,8 @@ export interface UserState {
     // States for editing existing subscriptions
     | "editing_sub_positive"
     | "editing_sub_negative"
-    | "editing_sub_description";
+    | "editing_sub_description"
+    | "editing_sub_ai";
   // Clarification flow data
   clarification?: {
     original_query: string;
@@ -89,6 +90,21 @@ export interface UserState {
   available_groups?: { id: number; title: string }[];
   // ID of subscription being edited
   editing_subscription_id?: number;
+  // AI editing flow data
+  pending_ai_edit?: {
+    subscription_id: number;
+    current: {
+      positive_keywords: string[];
+      negative_keywords: string[];
+      llm_description: string;
+    };
+    proposed?: {
+      positive_keywords: string[];
+      negative_keywords: string[];
+      llm_description: string;
+    };
+    conversation: Array<{ role: "user" | "assistant"; content: string }>;
+  };
 }
 
 // Message from monitored group

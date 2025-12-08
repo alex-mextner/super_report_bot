@@ -12,8 +12,11 @@ import {
   inviteLinkKeyboard,
   groupsKeyboard,
   skipQuestionKeyboard,
+  aiEditKeyboard,
   nextRequestId,
 } from "./keyboards.ts";
+import { interpretEditCommand } from "../llm/edit.ts";
+import { getExamplesForSubscription } from "./examples.ts";
 import {
   invalidateSubscriptionsCache,
   isUserbotMember,
@@ -407,6 +410,82 @@ bot.on("message", async (context) => {
     queries.updateLlmDescription(state.editing_subscription_id, userId, text);
     setUserState(userId, { step: "idle" });
     await context.send("✅ Описание обновлено");
+    return;
+  }
+
+  // Handle AI editing flow
+  if (state.step === "editing_sub_ai" && state.pending_ai_edit) {
+    const { current, conversation, subscription_id } = state.pending_ai_edit;
+
+    await context.send("Обрабатываю запрос...");
+
+    try {
+      const result = await interpretEditCommand(text, current, conversation);
+
+      // Get examples for new parameters
+      const examples = getExamplesForSubscription(
+        subscription_id,
+        result.positive_keywords,
+        result.negative_keywords,
+        2
+      );
+
+      // Format diff
+      const addedPos = result.positive_keywords.filter((k) => !current.positive_keywords.includes(k));
+      const removedPos = current.positive_keywords.filter((k) => !result.positive_keywords.includes(k));
+      const addedNeg = result.negative_keywords.filter((k) => !current.negative_keywords.includes(k));
+      const removedNeg = current.negative_keywords.filter((k) => !result.negative_keywords.includes(k));
+
+      let diffText = "";
+      if (addedPos.length) diffText += `+ Добавлено: ${addedPos.join(", ")}\n`;
+      if (removedPos.length) diffText += `- Удалено: ${removedPos.join(", ")}\n`;
+      if (addedNeg.length) diffText += `+ Исключения: ${addedNeg.join(", ")}\n`;
+      if (removedNeg.length) diffText += `- Из исключений: ${removedNeg.join(", ")}\n`;
+      if (current.llm_description !== result.llm_description) {
+        diffText += `Описание: ${result.llm_description}\n`;
+      }
+
+      // Format examples
+      let examplesText = "";
+      for (const ex of examples) {
+        const source = ex.isFromCache ? `[${ex.groupTitle}]` : ex.groupTitle;
+        examplesText += `${source}\n"${ex.text}"\n\n`;
+      }
+
+      // Update state with proposed changes
+      setUserState(userId, {
+        ...state,
+        pending_ai_edit: {
+          ...state.pending_ai_edit,
+          proposed: {
+            positive_keywords: result.positive_keywords,
+            negative_keywords: result.negative_keywords,
+            llm_description: result.llm_description,
+          },
+          conversation: [
+            ...conversation,
+            { role: "user", content: text },
+            { role: "assistant", content: result.summary },
+          ],
+        },
+      });
+
+      await context.send(
+        format`${bold("Изменения:")}
+${diffText || "Без изменений"}
+${bold("ИИ:")} ${result.summary}
+
+${bold("Примеры сообщений:")}
+${examplesText}
+Можешь продолжить редактирование или применить:`,
+        {
+          reply_markup: aiEditKeyboard(subscription_id),
+        }
+      );
+    } catch (error) {
+      botLog.error({ err: error, userId }, "AI edit interpretation failed");
+      await context.send("Ошибка обработки. Попробуй переформулировать.");
+    }
     return;
   }
 
@@ -837,35 +916,72 @@ ${result.llm_description}
         return;
       }
 
-      await context.answer({ text: "Генерирую..." });
+      // Enter AI editing dialog mode
+      setUserState(userId, {
+        step: "editing_sub_ai",
+        editing_subscription_id: subscriptionId,
+        pending_ai_edit: {
+          subscription_id: subscriptionId,
+          current: {
+            positive_keywords: sub.positive_keywords,
+            negative_keywords: sub.negative_keywords,
+            llm_description: sub.llm_description,
+          },
+          conversation: [],
+        },
+      });
 
-      let result: KeywordGenerationResult;
-      try {
-        result = await generateKeywords(sub.original_query);
-      } catch (error) {
-        botLog.error({ err: error, userId }, "LLM regeneration failed");
-        await context.send("Ошибка генерации. Попробуй позже.");
+      await context.answer({ text: "Режим редактирования" });
+
+      // Show current params and instructions
+      const posPreview = sub.positive_keywords.slice(0, 10).join(", ");
+      const posMore = sub.positive_keywords.length > 10 ? ` (+${sub.positive_keywords.length - 10})` : "";
+
+      await context.editText(
+        format`${bold("Режим ИИ-редактирования")}
+
+${bold("Текущие параметры:")}
+${bold("+ слова:")} ${code(posPreview + posMore)}
+${bold("- слова:")} ${code(sub.negative_keywords.join(", ") || "нет")}
+${bold("Описание:")} ${sub.llm_description}
+
+Напиши что изменить, например:
+• "добавь слово аренда"
+• "убери слово продажа"
+• "добавь в исключения офис"
+• "измени описание на ..."`,
+        {
+          reply_markup: aiEditKeyboard(subscriptionId),
+        }
+      );
+      break;
+    }
+
+    case "apply_ai_edit": {
+      if (state.step !== "editing_sub_ai" || !state.pending_ai_edit?.proposed) {
+        await context.answer({ text: "Сессия истекла" });
         return;
       }
 
-      queries.updatePositiveKeywords(subscriptionId, userId, result.positive_keywords);
-      queries.updateNegativeKeywords(subscriptionId, userId, result.negative_keywords);
-      queries.updateLlmDescription(subscriptionId, userId, result.llm_description);
+      const { subscription_id, proposed } = state.pending_ai_edit;
+
+      // Apply changes
+      queries.updatePositiveKeywords(subscription_id, userId, proposed.positive_keywords);
+      queries.updateNegativeKeywords(subscription_id, userId, proposed.negative_keywords);
+      queries.updateLlmDescription(subscription_id, userId, proposed.llm_description);
       invalidateSubscriptionsCache();
 
-      const hasNeg = result.negative_keywords.length > 0;
+      setUserState(userId, { step: "idle" });
 
-      await context.editText(
-        format`
-${bold("Подписка #" + subscriptionId)} (обновлена)
-${bold("Запрос:")} ${sub.original_query}
-${bold("Ключевые слова:")} ${code(result.positive_keywords.join(", "))}
-${bold("Исключения:")} ${code(result.negative_keywords.join(", ") || "нет")}
-        `,
-        {
-          reply_markup: subscriptionKeyboard(subscriptionId, hasNeg, false),
-        }
-      );
+      await context.answer({ text: "Применено!" });
+      await context.editText("✅ Изменения применены.");
+      break;
+    }
+
+    case "cancel_ai_edit": {
+      setUserState(userId, { step: "idle" });
+      await context.answer({ text: "Отменено" });
+      await context.editText("Редактирование отменено.");
       break;
     }
 

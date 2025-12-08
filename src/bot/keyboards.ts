@@ -56,7 +56,10 @@ export const confirmKeyboard = (queryId: string) =>
     .text("Подтвердить", JSON.stringify({ action: "confirm", id: queryId }))
     .text("Изменить", JSON.stringify({ action: "edit", id: queryId }))
     .row()
-    .text("🤖 Перегенерировать", JSON.stringify({ action: "regenerate", id: queryId }))
+    .text(
+      "🤖 Перегенерировать",
+      JSON.stringify({ action: "regenerate", id: queryId })
+    )
     .row()
     .text("Отмена", JSON.stringify({ action: "cancel", id: queryId }));
 
@@ -66,11 +69,23 @@ export const subscriptionKeyboard = (
   hasDisabledNegative: boolean
 ) => {
   const kb = new InlineKeyboard()
-    .text("✏️ + слова", JSON.stringify({ action: "edit_positive", id: subscriptionId }))
-    .text("✏️ − слова", JSON.stringify({ action: "edit_negative", id: subscriptionId }))
+    .text(
+      "✏️ + слова",
+      JSON.stringify({ action: "edit_positive", id: subscriptionId })
+    )
+    .text(
+      "✏️ − слова",
+      JSON.stringify({ action: "edit_negative", id: subscriptionId })
+    )
     .row()
-    .text("✏️ Описание", JSON.stringify({ action: "edit_description", id: subscriptionId }))
-    .text("🤖 ИИ", JSON.stringify({ action: "regenerate_sub", id: subscriptionId }))
+    .text(
+      "✏️ Описание",
+      JSON.stringify({ action: "edit_description", id: subscriptionId })
+    )
+    .text(
+      "🤖 Скорректировать с ИИ",
+      JSON.stringify({ action: "regenerate_sub", id: subscriptionId })
+    )
     .row();
 
   // Toggle button only if there are negative keywords (active or disabled)
@@ -81,7 +96,10 @@ export const subscriptionKeyboard = (
     );
   }
 
-  kb.text("❌ Удалить", JSON.stringify({ action: "disable", id: subscriptionId }));
+  kb.text(
+    "❌ Удалить",
+    JSON.stringify({ action: "disable", id: subscriptionId })
+  );
 
   return kb;
 };
@@ -109,7 +127,10 @@ export function groupsKeyboard(
 
   const hasSelected = selectedIds.size > 0;
   if (hasSelected) {
-    kb.text(`Готово (${selectedIds.size})`, JSON.stringify({ action: "confirm_groups" }));
+    kb.text(
+      `Готово (${selectedIds.size})`,
+      JSON.stringify({ action: "confirm_groups" })
+    );
   } else {
     kb.text("Пропустить", JSON.stringify({ action: "skip_groups" }));
   }
@@ -121,5 +142,21 @@ export function groupsKeyboard(
 
 // Keyboard for clarification questions
 export function skipQuestionKeyboard(): InlineKeyboard {
-  return new InlineKeyboard().text("Пропустить →", JSON.stringify({ action: "skip_question" }));
+  return new InlineKeyboard().text(
+    "Пропустить →",
+    JSON.stringify({ action: "skip_question" })
+  );
+}
+
+// Keyboard for AI editing flow (after proposed changes shown)
+export function aiEditKeyboard(subscriptionId: number): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(
+      "Применить",
+      JSON.stringify({ action: "apply_ai_edit", id: subscriptionId })
+    )
+    .text(
+      "Отмена",
+      JSON.stringify({ action: "cancel_ai_edit", id: subscriptionId })
+    );
 }
