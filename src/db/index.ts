@@ -21,6 +21,11 @@ const stmts = {
   getActiveSubscriptions: db.prepare<Subscription, []>(
     "SELECT * FROM subscriptions WHERE is_active = 1"
   ),
+  getSubscriptionsForGroup: db.prepare<Subscription, [number]>(
+    `SELECT DISTINCT s.* FROM subscriptions s
+     JOIN subscription_groups sg ON s.id = sg.subscription_id
+     WHERE s.is_active = 1 AND sg.group_id = ?`
+  ),
   getUserSubscriptions: db.prepare<Subscription, [number]>(
     `SELECT s.* FROM subscriptions s
      JOIN users u ON s.user_id = u.id
@@ -87,6 +92,9 @@ const stmts = {
      JOIN users u ON s.user_id = u.id
      WHERE s.id = ? AND u.telegram_id = ?`
   ),
+  getSubscriptionByIdOnly: db.prepare<Subscription, [number]>(
+    "SELECT * FROM subscriptions WHERE id = ?"
+  ),
   updatePositiveKeywords: db.prepare<void, [string, number, number]>(
     `UPDATE subscriptions SET positive_keywords = ?
      WHERE id = ? AND user_id = (SELECT id FROM users WHERE telegram_id = ?)`
@@ -135,6 +143,10 @@ export const queries = {
   // Subscriptions
   getActiveSubscriptions(): Subscription[] {
     return stmts.getActiveSubscriptions.all().map(parseSubscription);
+  },
+
+  getSubscriptionsForGroup(groupId: number): Subscription[] {
+    return stmts.getSubscriptionsForGroup.all(groupId).map(parseSubscription);
   },
 
   getUserSubscriptions(telegramId: number): Subscription[] {
@@ -236,6 +248,11 @@ export const queries = {
   // Subscription editing
   getSubscriptionById(subscriptionId: number, telegramId: number): Subscription | null {
     const row = stmts.getSubscriptionById.get(subscriptionId, telegramId);
+    return row ? parseSubscription(row) : null;
+  },
+
+  getSubscriptionByIdOnly(subscriptionId: number): Subscription | null {
+    const row = stmts.getSubscriptionByIdOnly.get(subscriptionId);
     return row ? parseSubscription(row) : null;
   },
 

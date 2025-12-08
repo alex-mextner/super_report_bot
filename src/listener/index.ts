@@ -35,24 +35,27 @@ export const mtClient = new TelegramClient({
   storage: "userbot.session",
 });
 
-// Cache subscriptions to avoid DB queries on every message
-let subscriptionsCache: Subscription[] = [];
-let cacheLastUpdate = 0;
+// Cache subscriptions per group to avoid DB queries on every message
+const subscriptionsByGroup = new Map<number, { subscriptions: Subscription[]; updatedAt: number }>();
 const CACHE_TTL = 60000; // 1 minute
 
-function getSubscriptions(): Subscription[] {
+function getSubscriptionsForGroup(groupId: number): Subscription[] {
   const now = Date.now();
-  if (now - cacheLastUpdate > CACHE_TTL) {
-    subscriptionsCache = queries.getActiveSubscriptions();
-    cacheLastUpdate = now;
-    listenerLog.debug({ count: subscriptionsCache.length }, "Cache refreshed");
+  const cached = subscriptionsByGroup.get(groupId);
+
+  if (cached && now - cached.updatedAt < CACHE_TTL) {
+    return cached.subscriptions;
   }
-  return subscriptionsCache;
+
+  const subscriptions = queries.getSubscriptionsForGroup(groupId);
+  subscriptionsByGroup.set(groupId, { subscriptions, updatedAt: now });
+  listenerLog.debug({ groupId, count: subscriptions.length }, "Group subscriptions cache refreshed");
+  return subscriptions;
 }
 
 // Invalidate cache when subscription changes
 export function invalidateSubscriptionsCache(): void {
-  cacheLastUpdate = 0;
+  subscriptionsByGroup.clear();
 }
 
 // Convert mtcute Message to our IncomingMessage
@@ -96,7 +99,7 @@ async function processMessage(msg: Message): Promise<void> {
     "New message"
   );
 
-  const subscriptions = getSubscriptions();
+  const subscriptions = getSubscriptionsForGroup(incomingMsg.group_id);
   if (subscriptions.length === 0) return;
 
   // Stage 1-2: BM25 + N-gram matching
@@ -394,13 +397,11 @@ export async function scanGroupHistory(
 ): Promise<number> {
   listenerLog.info({ groupId, subscriptionId, limit }, "Scanning history");
 
-  const subscription = getSubscriptions().find((s) => s.id === subscriptionId);
+  const subscription = queries.getSubscriptionByIdOnly(subscriptionId);
   if (!subscription) {
     listenerLog.warn({ subscriptionId }, "Subscription not found");
     return 0;
   }
-
-  const subscriptions = [subscription];
 
   listenerLog.debug(
     {
@@ -432,7 +433,7 @@ export async function scanGroupHistory(
       }
 
       // Check against the specific subscription
-      const candidates = matchMessageAgainstAll(incomingMsg, subscriptions);
+      const candidates = matchMessageAgainstAll(incomingMsg, [subscription]);
       if (candidates.length === 0) continue;
 
       candidateCount++;
@@ -508,7 +509,7 @@ export async function scanFromCache(
 ): Promise<number> {
   listenerLog.info({ groupIds, subscriptionId }, "Scanning from cache");
 
-  const subscription = getSubscriptions().find((s) => s.id === subscriptionId);
+  const subscription = queries.getSubscriptionByIdOnly(subscriptionId);
   if (!subscription) {
     listenerLog.warn({ subscriptionId }, "Subscription not found for cache scan");
     return 0;
