@@ -3,8 +3,12 @@ import {
   confirmKeyboard,
   subscriptionKeyboard,
   backKeyboard,
-  groupsKeyboard,
+  groupPickerKeyboard,
+  inviteLinkKeyboard,
+  pendingGroupsKeyboard,
+  nextRequestId,
 } from "./keyboards.ts";
+import type { PendingGroup } from "../types.ts";
 
 describe("confirmKeyboard", () => {
   test("creates keyboard with confirm, edit and cancel buttons", () => {
@@ -94,149 +98,148 @@ describe("backKeyboard", () => {
   });
 });
 
-describe("groupsKeyboard", () => {
-  test("creates buttons for each group", () => {
-    const groups = [
-      { id: 1, title: "Group 1" },
-      { id: 2, title: "Group 2" },
-      { id: 3, title: "Group 3" },
-    ];
-    const keyboard = groupsKeyboard(groups, new Set());
-    const json = keyboard.toJSON();
-
-    // Should have: 3 group buttons + select all/deselect all row + skip row + cancel row
-    expect(json.inline_keyboard.length).toBe(6); // 3 groups + 3 control rows
+describe("nextRequestId", () => {
+  test("returns incrementing IDs", () => {
+    const id1 = nextRequestId();
+    const id2 = nextRequestId();
+    expect(id2).toBe(id1 + 2); // +2 because we reserve pairs
   });
 
-  test("marks selected groups with checkmark", () => {
-    const groups = [
-      { id: 1, title: "Group 1" },
-      { id: 2, title: "Group 2" },
-    ];
-    const selectedIds = new Set([1]);
-    const keyboard = groupsKeyboard(groups, selectedIds);
+  test("returns positive integers", () => {
+    const id = nextRequestId();
+    expect(id).toBeGreaterThan(0);
+    expect(Number.isInteger(id)).toBe(true);
+  });
+});
+
+describe("groupPickerKeyboard", () => {
+  test("creates reply keyboard with requestChat buttons", () => {
+    const keyboard = groupPickerKeyboard(1);
     const json = keyboard.toJSON();
 
-    // First group should have checkmark
-    expect(json.inline_keyboard[0]![0]!.text).toBe("✅ Group 1");
-    // Second group should not
-    expect(json.inline_keyboard[1]![0]!.text).toBe("Group 2");
+    expect(json.keyboard).toBeDefined();
+    expect(json.one_time_keyboard).toBe(true);
+    expect(json.resize_keyboard).toBe(true);
   });
 
-  test("includes toggle_group action with group ID", () => {
-    const groups = [{ id: 42, title: "Test Group" }];
-    const keyboard = groupsKeyboard(groups, new Set());
+  test("has group and channel selection buttons", () => {
+    const keyboard = groupPickerKeyboard(1);
     const json = keyboard.toJSON();
 
-    const data = JSON.parse((json.inline_keyboard[0]![0]! as { callback_data: string }).callback_data);
-    expect(data.action).toBe("toggle_group");
-    expect(data.id).toBe(42);
+    // First row: group button
+    expect(json.keyboard[0]![0]!.text).toBe("Выбрать группу");
+    expect(json.keyboard[0]![0]!.request_chat).toBeDefined();
+    expect(json.keyboard[0]![0]!.request_chat!.chat_is_channel).toBe(false);
+
+    // Second row: channel button
+    expect(json.keyboard[1]![0]!.text).toBe("Выбрать канал");
+    expect(json.keyboard[1]![0]!.request_chat).toBeDefined();
+    expect(json.keyboard[1]![0]!.request_chat!.chat_is_channel).toBe(true);
   });
 
-  test("has select all and deselect all buttons", () => {
-    const groups = [{ id: 1, title: "Group" }];
-    const keyboard = groupsKeyboard(groups, new Set());
+  test("has Готово button", () => {
+    const keyboard = groupPickerKeyboard(1);
     const json = keyboard.toJSON();
 
-    // Find the row with select/deselect all buttons
-    const controlRow = json.inline_keyboard.find(
-      (row) =>
-        row.some((btn) => btn.text === "Выбрать все") &&
-        row.some((btn) => btn.text === "Снять все")
-    );
-
-    expect(controlRow).toBeDefined();
-    expect(controlRow!.length).toBe(2);
+    // Third row: Готово
+    expect(json.keyboard[2]![0]!.text).toBe("Готово");
   });
 
-  test("shows 'Готово' when groups selected", () => {
-    const groups = [{ id: 1, title: "Group" }];
-    const selectedIds = new Set([1]);
-    const keyboard = groupsKeyboard(groups, selectedIds);
+  test("uses provided requestId for group and requestId+1 for channel", () => {
+    const requestId = 42;
+    const keyboard = groupPickerKeyboard(requestId);
     const json = keyboard.toJSON();
 
-    // Find confirm button
-    const confirmButton = json.inline_keyboard
-      .flat()
-      .find((btn) => btn.text?.includes("Готово"));
+    expect(json.keyboard[0]![0]!.request_chat!.request_id).toBe(requestId);
+    expect(json.keyboard[1]![0]!.request_chat!.request_id).toBe(requestId + 1);
+  });
+});
 
-    expect(confirmButton).toBeDefined();
-    expect(confirmButton!.text).toBe("Готово (1)");
+describe("inviteLinkKeyboard", () => {
+  test("creates inline keyboard with skip and cancel buttons", () => {
+    const keyboard = inviteLinkKeyboard();
+    const json = keyboard.toJSON();
 
-    const data = JSON.parse((confirmButton as { callback_data: string }).callback_data);
-    expect(data.action).toBe("confirm_groups");
+    expect(json.inline_keyboard).toBeDefined();
+    expect(json.inline_keyboard.length).toBe(2); // Two rows
   });
 
-  test("shows 'Пропустить' when no groups selected", () => {
-    const groups = [{ id: 1, title: "Group" }];
-    const keyboard = groupsKeyboard(groups, new Set());
+  test("has skip_invite_link action", () => {
+    const keyboard = inviteLinkKeyboard();
     const json = keyboard.toJSON();
 
-    // Find skip button
-    const skipButton = json.inline_keyboard
-      .flat()
-      .find((btn) => btn.text === "Пропустить");
-
-    expect(skipButton).toBeDefined();
+    const skipButton = json.inline_keyboard[0]![0]!;
+    expect(skipButton.text).toBe("Пропустить");
 
     const data = JSON.parse((skipButton as { callback_data: string }).callback_data);
-    expect(data.action).toBe("skip_groups");
+    expect(data.action).toBe("skip_invite_link");
   });
 
-  test("has cancel button", () => {
-    const groups = [{ id: 1, title: "Group" }];
-    const keyboard = groupsKeyboard(groups, new Set());
+  test("has cancel action", () => {
+    const keyboard = inviteLinkKeyboard();
     const json = keyboard.toJSON();
 
-    // Find cancel button
-    const cancelButton = json.inline_keyboard
-      .flat()
-      .find((btn) => btn.text === "Отмена");
-
-    expect(cancelButton).toBeDefined();
+    const cancelButton = json.inline_keyboard[1]![0]!;
+    expect(cancelButton.text).toBe("Отмена");
 
     const data = JSON.parse((cancelButton as { callback_data: string }).callback_data);
     expect(data.action).toBe("cancel");
   });
+});
+
+describe("pendingGroupsKeyboard", () => {
+  test("creates buttons for each pending group", () => {
+    const groups: PendingGroup[] = [
+      { id: 1, title: "Group 1", needsInviteLink: false, isChannel: false },
+      { id: 2, title: "Channel 1", needsInviteLink: false, isChannel: true },
+    ];
+    const keyboard = pendingGroupsKeyboard(groups);
+    const json = keyboard.toJSON();
+
+    expect(json.inline_keyboard.length).toBe(2);
+  });
+
+  test("shows group icon for groups and channel icon for channels", () => {
+    const groups: PendingGroup[] = [
+      { id: 1, title: "My Group", needsInviteLink: false, isChannel: false },
+      { id: 2, title: "My Channel", needsInviteLink: false, isChannel: true },
+    ];
+    const keyboard = pendingGroupsKeyboard(groups);
+    const json = keyboard.toJSON();
+
+    expect(json.inline_keyboard[0]![0]!.text).toContain("👥");
+    expect(json.inline_keyboard[0]![0]!.text).toContain("My Group");
+
+    expect(json.inline_keyboard[1]![0]!.text).toContain("📢");
+    expect(json.inline_keyboard[1]![0]!.text).toContain("My Channel");
+  });
+
+  test("has remove_pending action with group ID", () => {
+    const groups: PendingGroup[] = [
+      { id: 42, title: "Test Group", needsInviteLink: false, isChannel: false },
+    ];
+    const keyboard = pendingGroupsKeyboard(groups);
+    const json = keyboard.toJSON();
+
+    const data = JSON.parse((json.inline_keyboard[0]![0]! as { callback_data: string }).callback_data);
+    expect(data.action).toBe("remove_pending");
+    expect(data.id).toBe(42);
+  });
 
   test("handles empty groups list", () => {
-    const keyboard = groupsKeyboard([], new Set());
+    const keyboard = pendingGroupsKeyboard([]);
     const json = keyboard.toJSON();
 
-    // Should still have control buttons even with no groups
-    expect(json.inline_keyboard.length).toBeGreaterThan(0);
+    expect(json.inline_keyboard.length).toBe(0);
   });
 
-  test("handles many groups", () => {
-    const groups = Array.from({ length: 10 }, (_, i) => ({
-      id: i + 1,
-      title: `Group ${i + 1}`,
-    }));
-    const keyboard = groupsKeyboard(groups, new Set([1, 5, 10]));
-    const json = keyboard.toJSON();
-
-    // Count selected groups in buttons
-    const selectedButtons = json.inline_keyboard
-      .flat()
-      .filter((btn: any) => btn.text?.startsWith("✅"));
-
-    expect(selectedButtons.length).toBe(3);
-  });
-
-  test("updates count in Готово button based on selection", () => {
-    const groups = [
-      { id: 1, title: "G1" },
-      { id: 2, title: "G2" },
-      { id: 3, title: "G3" },
+  test("uses group ID as fallback when title is undefined", () => {
+    const groups: PendingGroup[] = [
+      { id: 123, needsInviteLink: false, isChannel: false },
     ];
-    const selectedIds = new Set([1, 2, 3]);
-    const keyboard = groupsKeyboard(groups, selectedIds);
+    const keyboard = pendingGroupsKeyboard(groups);
     const json = keyboard.toJSON();
 
-    const confirmButton = json.inline_keyboard
-      .flat()
-      .find((btn) => btn.text?.includes("Готово"));
-
-    expect(confirmButton!.text).toBe("Готово (3)");
+    expect(json.inline_keyboard[0]![0]!.text).toContain("123");
   });
 });

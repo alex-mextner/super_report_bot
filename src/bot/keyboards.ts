@@ -1,4 +1,55 @@
-import { InlineKeyboard } from "gramio";
+import { InlineKeyboard, Keyboard } from "gramio";
+import type { PendingGroup } from "../types";
+
+// Request ID counter for requestChat buttons (signed 32-bit)
+let requestIdCounter = 1;
+export function nextRequestId(): number {
+  const id = requestIdCounter;
+  requestIdCounter = (requestIdCounter + 2) % 2147483647; // +2 to reserve pairs (group/channel)
+  return id;
+}
+
+// Reply keyboard with requestChat buttons for native Telegram picker
+export function groupPickerKeyboard(requestId: number): Keyboard {
+  return new Keyboard()
+    .requestChat("Выбрать группу", requestId, {
+      chat_is_channel: false,
+      request_title: true,
+      request_username: true,
+    })
+    .row()
+    .requestChat("Выбрать канал", requestId + 1, {
+      chat_is_channel: true,
+      request_title: true,
+      request_username: true,
+    })
+    .row()
+    .text("Готово")
+    .oneTime()
+    .resized();
+}
+
+// Inline keyboard for invite link prompt
+export function inviteLinkKeyboard(): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("Пропустить", JSON.stringify({ action: "skip_invite_link" }))
+    .row()
+    .text("Отмена", JSON.stringify({ action: "cancel" }));
+}
+
+// Show pending groups with remove buttons
+export function pendingGroupsKeyboard(groups: PendingGroup[]): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  for (const g of groups) {
+    const icon = g.isChannel ? "📢" : "👥";
+    kb.text(
+      `❌ ${icon} ${g.title || g.id}`,
+      JSON.stringify({ action: "remove_pending", id: g.id })
+    );
+    kb.row();
+  }
+  return kb;
+}
 
 export const confirmKeyboard = (queryId: string) =>
   new InlineKeyboard()
@@ -14,7 +65,7 @@ export const subscriptionKeyboard = (subscriptionId: number) =>
 export const backKeyboard = () =>
   new InlineKeyboard().text("Назад", JSON.stringify({ action: "back" }));
 
-// Groups selection keyboard
+// Groups selection keyboard (for subscription creation)
 export function groupsKeyboard(
   groups: { id: number; title: string }[],
   selectedIds: Set<number>

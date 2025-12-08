@@ -57,6 +57,25 @@ const stmts = {
   removeSubscriptionGroups: db.prepare<void, [number]>(
     `DELETE FROM subscription_groups WHERE subscription_id = ?`
   ),
+
+  // User groups (groups added by user for monitoring)
+  addUserGroup: db.prepare<void, [number, string, number, number]>(
+    `INSERT OR REPLACE INTO user_groups (user_id, group_id, group_title, is_channel)
+     SELECT id, ?, ?, ? FROM users WHERE telegram_id = ?`
+  ),
+  getUserGroups: db.prepare<{ group_id: number; group_title: string; is_channel: number }, [number]>(
+    `SELECT group_id, group_title, is_channel FROM user_groups
+     WHERE user_id = (SELECT id FROM users WHERE telegram_id = ?)
+     ORDER BY added_at DESC`
+  ),
+  removeUserGroup: db.prepare<void, [number, number]>(
+    `DELETE FROM user_groups
+     WHERE group_id = ? AND user_id = (SELECT id FROM users WHERE telegram_id = ?)`
+  ),
+  hasUserGroup: db.prepare<{ found: number }, [number, number]>(
+    `SELECT 1 as found FROM user_groups
+     WHERE group_id = ? AND user_id = (SELECT id FROM users WHERE telegram_id = ?) LIMIT 1`
+  ),
 };
 
 // Helper to parse JSON fields from subscription
@@ -146,6 +165,34 @@ export const queries = {
     for (const group of groups) {
       stmts.addSubscriptionGroup.run(subscriptionId, group.id, group.title);
     }
+  },
+
+  // User groups
+  addUserGroup(
+    telegramId: number,
+    groupId: number,
+    groupTitle: string,
+    isChannel: boolean
+  ): void {
+    stmts.addUserGroup.run(groupId, groupTitle, isChannel ? 1 : 0, telegramId);
+  },
+
+  getUserGroups(
+    telegramId: number
+  ): { id: number; title: string; isChannel: boolean }[] {
+    return stmts.getUserGroups.all(telegramId).map((row) => ({
+      id: row.group_id,
+      title: row.group_title,
+      isChannel: row.is_channel === 1,
+    }));
+  },
+
+  removeUserGroup(telegramId: number, groupId: number): void {
+    stmts.removeUserGroup.run(groupId, telegramId);
+  },
+
+  hasUserGroup(telegramId: number, groupId: number): boolean {
+    return stmts.hasUserGroup.get(groupId, telegramId) !== null;
   },
 };
 

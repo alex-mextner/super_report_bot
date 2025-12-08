@@ -45,15 +45,33 @@ export interface KeywordGenerationResult {
   llm_description: string;
 }
 
+// Pending group during selection flow
+export interface PendingGroup {
+  id: number;
+  title?: string;
+  username?: string;
+  needsInviteLink: boolean;
+  inviteLink?: string;
+  isChannel: boolean;
+}
+
 // Bot state for conversation flow
 export interface UserState {
-  step: "idle" | "awaiting_confirmation" | "editing_keywords" | "selecting_groups";
+  step:
+    | "idle"
+    | "awaiting_confirmation"
+    | "editing_keywords"
+    | "selecting_groups"
+    | "adding_group"
+    | "awaiting_invite_link";
   pending_subscription?: {
     original_query: string;
     positive_keywords: string[];
     negative_keywords: string[];
     llm_description: string;
   };
+  pending_groups?: PendingGroup[];
+  current_pending_group?: PendingGroup; // group awaiting invite link
   selected_groups?: { id: number; title: string }[];
   available_groups?: { id: number; title: string }[];
 }

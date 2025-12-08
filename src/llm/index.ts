@@ -40,8 +40,8 @@ export async function withRateLimit<T>(fn: () => Promise<T>): Promise<T> {
 // Retry with exponential backoff
 export async function withRetry<T>(
   fn: () => Promise<T>,
-  maxRetries: number = 3,
-  baseDelay: number = 1000
+  maxRetries: number = 5,
+  baseDelay: number = 2000
 ): Promise<T> {
   let lastError: Error | null = null;
 
@@ -61,7 +61,10 @@ export async function withRetry<T>(
         errorMsg.includes("timeout");
 
       if (isRetryable && i < maxRetries - 1) {
-        const delay = baseDelay * Math.pow(2, i);
+        // Longer delays for 504 (server timeout) — model needs more time
+        const is504 = errorMsg.includes("504");
+        const multiplier = is504 ? 3 : 2;
+        const delay = baseDelay * Math.pow(multiplier, i);
         llmLog.debug({ delay, attempt: i + 1, error: errorMsg.slice(0, 100) }, "Retryable error, retrying");
         await new Promise((resolve) => setTimeout(resolve, delay));
       } else {

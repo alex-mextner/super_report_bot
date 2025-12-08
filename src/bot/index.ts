@@ -1,10 +1,21 @@
 import { Bot, format, bold, code } from "gramio";
 import { queries } from "../db/index.ts";
 import { generateKeywords, generateKeywordsFallback } from "../llm/keywords.ts";
-import { confirmKeyboard, subscriptionKeyboard, groupsKeyboard } from "./keyboards.ts";
-import { getUserGroups, invalidateSubscriptionsCache } from "../listener/index.ts";
+import {
+  confirmKeyboard,
+  subscriptionKeyboard,
+  groupPickerKeyboard,
+  inviteLinkKeyboard,
+  groupsKeyboard,
+  nextRequestId,
+} from "./keyboards.ts";
+import {
+  invalidateSubscriptionsCache,
+  isUserbotMember,
+  ensureUserbotInGroup,
+} from "../listener/index.ts";
 import { botLog } from "../logger.ts";
-import type { UserState, KeywordGenerationResult } from "../types.ts";
+import type { UserState, KeywordGenerationResult, PendingGroup } from "../types.ts";
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 
@@ -79,21 +90,159 @@ bot.command("help", async (context) => {
   await context.send(format`
 ${bold("Как работает бот:")}
 
-1. Отправь описание в свободной форме, например:
-   - "ищу macbook pro m2 до 100к"
-   - "продажа велосипеда в спб"
-   - "вакансия frontend react удаленка"
+1. Добавь группы для мониторинга: /addgroup
+2. Отправь описание того, что ищешь
+3. Подтверди ключевые слова и выбери группы
+4. Получай уведомления
 
-2. Бот сгенерирует:
-   - Позитивные ключевые слова (должны быть в сообщении)
-   - Негативные ключевые слова (исключают сообщение)
-   - Описание для проверки
-
-3. Подтверди или отредактируй параметры
-
-4. Бот будет мониторить группы и присылать уведомления
+${bold("Команды:")}
+/addgroup - добавить группу/канал
+/groups - список добавленных групп
+/list - мои подписки
   `);
 });
+
+// /addgroup command - add a new group for monitoring
+bot.command("addgroup", async (context) => {
+  const userId = context.from?.id;
+  if (!userId) return;
+
+  queries.getOrCreateUser(userId);
+
+  setUserState(userId, {
+    step: "adding_group",
+    pending_groups: [],
+  });
+
+  await context.send("Выбери группу или канал для добавления:", {
+    reply_markup: groupPickerKeyboard(nextRequestId()),
+  });
+});
+
+// /groups command - list user's groups
+bot.command("groups", async (context) => {
+  const userId = context.from?.id;
+  if (!userId) return;
+
+  const groups = queries.getUserGroups(userId);
+
+  if (groups.length === 0) {
+    await context.send("У тебя нет добавленных групп. Используй /addgroup для добавления.");
+    return;
+  }
+
+  const list = groups
+    .map((g) => {
+      const icon = g.isChannel ? "📢" : "👥";
+      return `${icon} ${g.title}`;
+    })
+    .join("\n");
+
+  await context.send(format`
+${bold("Твои группы для мониторинга:")}
+
+${list}
+
+Используй /addgroup чтобы добавить ещё.
+  `);
+});
+
+// Handle chat_shared event (user selected a group/channel via requestChat)
+bot.on("chat_shared", async (context) => {
+  const userId = context.from?.id;
+  if (!userId) return;
+
+  const state = getUserState(userId);
+  if (state.step !== "adding_group") return;
+
+  const chatShared = context.chatShared;
+  if (!chatShared) return;
+
+  const chatId = chatShared.chatId;
+  const title = chatShared.title || "Unknown";
+  const username = chatShared.username;
+  const requestId = chatShared.requestId;
+  // Even requestId = group, odd = channel (based on our nextRequestId logic)
+  const isChannel = requestId % 2 === 1;
+
+  botLog.debug({ chatId, title, username, requestId, isChannel }, "Chat shared");
+
+  // Check if already added by user
+  if (queries.hasUserGroup(userId, chatId)) {
+    await context.send("Эта группа уже добавлена!");
+    await showAddGroupPrompt(context, userId);
+    return;
+  }
+
+  // Check if userbot is already member
+  const isMember = await isUserbotMember(chatId);
+  const needsInviteLink = !isMember && !username;
+
+  const newGroup: PendingGroup = {
+    id: chatId,
+    title,
+    username,
+    needsInviteLink,
+    isChannel,
+  };
+
+  if (needsInviteLink) {
+    // Ask for invite link
+    setUserState(userId, {
+      ...state,
+      step: "awaiting_invite_link",
+      current_pending_group: newGroup,
+    });
+
+    await context.send(
+      `Приватная группа "${title}".\n\n` +
+        "Бот не может присоединиться без invite link.\n" +
+        "Отправь ссылку вида t.me/+XXX или нажми Пропустить.",
+      { reply_markup: inviteLinkKeyboard() }
+    );
+    return;
+  }
+
+  // Try to join and add
+  await addGroupForUser(context, userId, newGroup);
+});
+
+// Helper to show add group prompt
+async function showAddGroupPrompt(
+  context: { send: (text: string, options?: object) => Promise<unknown> },
+  userId: number
+): Promise<void> {
+  setUserState(userId, { step: "adding_group", pending_groups: [] });
+  await context.send('Выбери ещё группу или нажми "Готово":', {
+    reply_markup: groupPickerKeyboard(nextRequestId()),
+  });
+}
+
+// Add group for user (join userbot if needed, save to DB)
+async function addGroupForUser(
+  context: { send: (text: string, options?: object) => Promise<unknown> },
+  userId: number,
+  group: PendingGroup
+): Promise<void> {
+  const icon = group.isChannel ? "📢" : "👥";
+
+  // Try to join
+  const result = await ensureUserbotInGroup(group.id, group.username, group.inviteLink);
+
+  if (result.success) {
+    // Save to DB
+    queries.addUserGroup(userId, group.id, group.title || "Unknown", group.isChannel);
+    await context.send(`${icon} "${group.title}" добавлена!`, {
+      reply_markup: { remove_keyboard: true },
+    });
+    await showAddGroupPrompt(context, userId);
+  } else {
+    await context.send(`Не удалось добавить "${group.title}": ${result.error}`, {
+      reply_markup: { remove_keyboard: true },
+    });
+    await showAddGroupPrompt(context, userId);
+  }
+}
 
 // Handle text messages (new subscription requests)
 bot.on("message", async (context) => {
@@ -103,6 +252,42 @@ bot.on("message", async (context) => {
   if (!userId) return;
 
   const state = getUserState(userId);
+  const text = context.text;
+
+  // Handle "Готово" button in adding_group state
+  if (text === "Готово" && state.step === "adding_group") {
+    setUserState(userId, { step: "idle" });
+    const groups = queries.getUserGroups(userId);
+    if (groups.length > 0) {
+      await context.send(`Добавлено групп: ${groups.length}. Теперь отправь описание того, что ищешь.`, {
+        reply_markup: { remove_keyboard: true },
+      });
+    } else {
+      await context.send("Группы не добавлены. Используй /addgroup когда будешь готов.", {
+        reply_markup: { remove_keyboard: true },
+      });
+    }
+    return;
+  }
+
+  // Handle invite link input (for /addgroup flow)
+  if (state.step === "awaiting_invite_link" && state.current_pending_group) {
+    const inviteLinkRegex = /t\.me\/(\+|joinchat\/)/;
+    if (inviteLinkRegex.test(text)) {
+      const group: PendingGroup = {
+        ...state.current_pending_group,
+        inviteLink: text.trim(),
+        needsInviteLink: false,
+      };
+      await context.send("Ссылка получена, пробую присоединиться...", {
+        reply_markup: { remove_keyboard: true },
+      });
+      await addGroupForUser(context, userId, group);
+    } else {
+      await context.send("Неверный формат. Отправь ссылку вида t.me/+XXX или нажми Пропустить.");
+    }
+    return;
+  }
 
   // If user is editing keywords
   if (state.step === "editing_keywords" && state.pending_subscription) {
@@ -235,16 +420,11 @@ bot.on("callback_query", async (context) => {
         return;
       }
 
-      // Get available groups from userbot
-      await context.answer({ text: "Загружаю список групп..." });
+      // Get user's groups from DB
+      const userGroups = queries.getUserGroups(userId);
 
-      let groups: { id: number; title: string }[];
-      try {
-        const userGroups = await getUserGroups();
-        groups = userGroups.map((g) => ({ id: g.id, title: g.title }));
-      } catch (error) {
-        botLog.error({ err: error, userId }, "Failed to get groups");
-        // If can't get groups, create subscription without them
+      if (userGroups.length === 0) {
+        // No groups - create subscription without them
         const { original_query, positive_keywords, negative_keywords, llm_description } =
           state.pending_subscription;
 
@@ -258,34 +438,15 @@ bot.on("callback_query", async (context) => {
         invalidateSubscriptionsCache();
 
         setUserState(userId, { step: "idle" });
+        await context.answer({ text: "Подписка создана" });
         await context.editText(
-          "Подписка создана! Не удалось загрузить группы, мониторинг будет по всем доступным."
-        );
-        return;
-      }
-
-      if (groups.length === 0) {
-        // No groups available, create subscription anyway
-        const { original_query, positive_keywords, negative_keywords, llm_description } =
-          state.pending_subscription;
-
-        queries.createSubscription(
-          userId,
-          original_query,
-          positive_keywords,
-          negative_keywords,
-          llm_description
-        );
-        invalidateSubscriptionsCache();
-
-        setUserState(userId, { step: "idle" });
-        await context.editText(
-          "Подписка создана! Userbot не состоит ни в каких группах, добавь его в группы для мониторинга."
+          "Подписка создана!\n\nУ тебя нет добавленных групп. Используй /addgroup для добавления."
         );
         return;
       }
 
       // Move to group selection
+      const groups = userGroups.map((g) => ({ id: g.id, title: g.title }));
       setUserState(userId, {
         ...state,
         step: "selecting_groups",
@@ -293,6 +454,7 @@ bot.on("callback_query", async (context) => {
         selected_groups: [],
       });
 
+      await context.answer({ text: "Выбери группы" });
       await context.editText(
         format`
 ${bold("Выбери группы для мониторинга:")}
@@ -335,6 +497,22 @@ ${bold("Выбери группы для мониторинга:")}
     case "back": {
       setUserState(userId, { step: "idle" });
       await context.answer({ text: "OK" });
+      break;
+    }
+
+    case "skip_invite_link": {
+      if (state.step !== "awaiting_invite_link") {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      // Skip - go back to adding_group
+      await context.answer({ text: "Пропущено" });
+      await context.editText("Группа пропущена.");
+      await showAddGroupPrompt(
+        { send: (text, opts) => bot.api.sendMessage({ chat_id: userId, text, ...opts }) },
+        userId
+      );
       break;
     }
 
@@ -455,9 +633,7 @@ ${bold("Выбери группы для мониторинга:")}
 
       if (selectedGroups.length > 0) {
         const groupNames = selectedGroups.map((g) => g.title).join(", ");
-        await context.editText(
-          `Подписка создана! Мониторинг групп: ${groupNames}`
-        );
+        await context.editText(`Подписка создана! Мониторинг групп: ${groupNames}`);
       } else {
         await context.editText(
           "Подписка создана! Группы не выбраны, мониторинг будет по всем доступным."

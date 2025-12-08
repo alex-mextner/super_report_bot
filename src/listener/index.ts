@@ -366,3 +366,82 @@ export async function scanGroupHistory(
   );
   return matchCount;
 }
+
+// Check if userbot is member of a chat by trying to resolve it
+export async function isUserbotMember(chatId: number): Promise<boolean> {
+  try {
+    // Try to get chat info - if it works, we're a member
+    await mtClient.getChat(chatId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Join a chat by username or invite link
+export async function joinGroupByUserbot(
+  target: string // @username or t.me/+XXX invite link
+): Promise<{ success: true; chatId: number; title: string } | { success: false; error: string }> {
+  try {
+    const chat = await mtClient.joinChat(target);
+    listenerLog.info({ chatId: chat.id, title: chat.title, target }, "Userbot joined chat");
+    return { success: true, chatId: chat.id, title: chat.title || "" };
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    listenerLog.error({ err: error, target }, "Failed to join chat");
+
+    if (errMsg.includes("USER_ALREADY_PARTICIPANT")) {
+      // Already member - try to get chat info
+      try {
+        const chat = await mtClient.getChat(target);
+        return { success: true, chatId: chat.id, title: chat.title || "" };
+      } catch {
+        return { success: false, error: "Already member but cannot get info" };
+      }
+    }
+
+    if (errMsg.includes("INVITE_REQUEST_SENT")) {
+      return { success: false, error: "Запрос отправлен администраторам" };
+    }
+
+    if (errMsg.includes("INVITE_HASH_EXPIRED")) {
+      return { success: false, error: "Ссылка устарела" };
+    }
+
+    if (errMsg.includes("INVITE_HASH_INVALID")) {
+      return { success: false, error: "Неверная ссылка" };
+    }
+
+    return { success: false, error: errMsg || "Join failed" };
+  }
+}
+
+// Ensure userbot is in group (join if needed)
+export async function ensureUserbotInGroup(
+  chatId: number,
+  username?: string,
+  inviteLink?: string
+): Promise<{ success: boolean; error?: string }> {
+  // Check if already a member
+  if (await isUserbotMember(chatId)) {
+    listenerLog.debug({ chatId }, "Already member");
+    return { success: true };
+  }
+
+  // Try join by username
+  if (username) {
+    const cleanUsername = username.replace(/^@/, "");
+    const result = await joinGroupByUserbot(`@${cleanUsername}`);
+    if (result.success) return { success: true };
+    // Don't return error yet, try invite link
+  }
+
+  // Try join by invite link
+  if (inviteLink) {
+    const result = await joinGroupByUserbot(inviteLink);
+    if (result.success) return { success: true };
+    return { success: false, error: result.error };
+  }
+
+  return { success: false, error: "Нет username или invite link для присоединения" };
+}
