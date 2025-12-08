@@ -1,4 +1,4 @@
-import { TelegramClient, Message } from "@mtcute/bun";
+import { TelegramClient, Message, ForumTopic } from "@mtcute/bun";
 import { tl } from "@mtcute/bun";
 import { queries } from "../db/index.ts";
 import { matchMessageAgainstAll, passesNgramFilter } from "../matcher/index.ts";
@@ -375,32 +375,76 @@ async function loadGroupHistory(groupId: number, limit: number): Promise<void> {
 
   for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
     try {
-      // Try to get group title on each attempt (may succeed after reconnect)
-      try {
-        const chat = await mtClient.getChat(groupId);
-        groupTitle = chat.title || "Unknown";
-      } catch {
-        // Ignore - use default title
+      const chat = await mtClient.getChat(groupId);
+      groupTitle = chat.title || "Unknown";
+
+      // Check if this is a forum group with topics
+      const isForum = chat.chatType === "supergroup" && chat.isForum;
+
+      if (isForum) {
+        // Load forum topics first
+        const topics: ForumTopic[] = [];
+        for await (const topic of mtClient.iterForumTopics(groupId)) {
+          topics.push(topic);
+          saveTopic(groupId, topic.id, topic.title);
+        }
+
+        listenerLog.info({ groupId, groupTitle, topicCount: topics.length }, "Loading forum history");
+
+        const limitPerTopic = Math.max(100, Math.ceil(limit / Math.max(topics.length, 1)));
+        let totalCount = 0;
+
+        for (const topic of topics) {
+          let topicCount = 0;
+          for await (const msg of mtClient.iterSearchMessages({
+            chatId: groupId,
+            threadId: topic.id,
+            query: "",
+            limit: limitPerTopic,
+          })) {
+            if (msg.text) {
+              addMessage({
+                id: msg.id,
+                groupId,
+                groupTitle,
+                topicId: topic.id,
+                topicTitle: topic.title,
+                text: msg.text,
+                senderId: msg.sender?.id,
+                senderName: msg.sender?.displayName,
+                date: Math.floor(msg.date.getTime() / 1000),
+              });
+              topicCount++;
+            }
+          }
+          totalCount += topicCount;
+          listenerLog.debug({ topicId: topic.id, topicTitle: topic.title, count: topicCount }, "Topic loaded");
+          await sleep(500); // Rate limit between topics
+        }
+
+        listenerLog.debug({ groupId, groupTitle, messagesLoaded: totalCount }, "Forum history loaded");
+      } else {
+        // Regular group - use iterHistory
+        let count = 0;
+        for await (const msg of mtClient.iterHistory(groupId, { limit })) {
+          if (msg.text) {
+            const topicId = extractTopicId(msg);
+            addMessage({
+              id: msg.id,
+              groupId,
+              groupTitle,
+              topicId,
+              text: msg.text,
+              senderId: msg.sender?.id,
+              senderName: msg.sender?.displayName,
+              date: Math.floor(msg.date.getTime() / 1000),
+            });
+            count++;
+          }
+        }
+        listenerLog.debug({ groupId, groupTitle, messagesLoaded: count }, "History loaded");
       }
 
-      let count = 0;
-      for await (const msg of mtClient.iterHistory(groupId, { limit })) {
-        if (msg.text) {
-          const topicId = extractTopicId(msg);
-          addMessage({
-            id: msg.id,
-            groupId,
-            groupTitle,
-            topicId,
-            text: msg.text,
-            senderId: msg.sender?.id,
-            senderName: msg.sender?.displayName,
-            date: Math.floor(msg.date.getTime() / 1000),
-          });
-          count++;
-        }
-      }
-      listenerLog.debug({ groupId, groupTitle, messagesLoaded: count }, "History loaded");
       return; // success
     } catch (e) {
       // FloodWait — wait the specified time
