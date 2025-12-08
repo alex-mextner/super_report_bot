@@ -2,11 +2,16 @@ import { Bot, format, bold, code } from "gramio";
 import { queries } from "../db/index.ts";
 import { generateKeywords, generateKeywordsFallback } from "../llm/keywords.ts";
 import {
+  generateClarificationQuestions,
+  formatClarificationContext,
+} from "../llm/clarify.ts";
+import {
   confirmKeyboard,
   subscriptionKeyboard,
   groupPickerKeyboard,
   inviteLinkKeyboard,
   groupsKeyboard,
+  skipQuestionKeyboard,
   nextRequestId,
 } from "./keyboards.ts";
 import {
@@ -33,6 +38,56 @@ function getUserState(userId: number): UserState {
 
 function setUserState(userId: number, state: UserState): void {
   userStates.set(userId, state);
+}
+
+// Helper: generate keywords and show confirmation to user
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function generateKeywordsAndShowResult(
+  context: any,
+  userId: number,
+  query: string,
+  clarificationContext?: string
+): Promise<void> {
+  let result: KeywordGenerationResult;
+  try {
+    result = await generateKeywords(query, clarificationContext);
+  } catch (error) {
+    botLog.error({ err: error, userId }, "LLM keyword generation failed");
+    result = generateKeywordsFallback(query);
+    await context.send("Не удалось использовать AI, использую простой алгоритм.");
+  }
+
+  const queryId = `${userId}_${Date.now()}`;
+
+  setUserState(userId, {
+    step: "awaiting_confirmation",
+    pending_subscription: {
+      original_query: query,
+      positive_keywords: result.positive_keywords,
+      negative_keywords: result.negative_keywords,
+      llm_description: result.llm_description,
+    },
+  });
+
+  await context.send(
+    format`
+${bold("Результат анализа:")}
+
+${bold("Позитивные ключевые слова:")}
+${code(result.positive_keywords.join(", "))}
+
+${bold("Негативные ключевые слова:")}
+${code(result.negative_keywords.join(", ") || "нет")}
+
+${bold("Описание для проверки:")}
+${result.llm_description}
+
+Подтверди или измени параметры:
+    `,
+    {
+      reply_markup: confirmKeyboard(queryId),
+    }
+  );
 }
 
 export const bot = new Bot(BOT_TOKEN);
@@ -416,53 +471,73 @@ ${code(updated.negative_keywords.join(", ") || "нет")}
     return;
   }
 
-  // New subscription request
-  const query = context.text;
+  // Handle clarification question answers
+  if (state.step === "clarifying_query" && state.clarification) {
+    const { questions, answers, current_index, original_query } = state.clarification;
 
-  await context.send("Генерирую ключевые слова...");
+    // Save answer to current question
+    answers.push(text);
 
-  let result: KeywordGenerationResult;
-  try {
-    result = await generateKeywords(query);
-  } catch (error) {
-    botLog.error({ err: error, userId }, "LLM keyword generation failed");
-    result = generateKeywordsFallback(query);
-    await context.send("Не удалось использовать AI, использую простой алгоритм.");
+    const nextIndex = current_index + 1;
+
+    if (nextIndex < questions.length) {
+      // More questions to ask
+      setUserState(userId, {
+        ...state,
+        clarification: {
+          ...state.clarification,
+          answers,
+          current_index: nextIndex,
+        },
+      });
+
+      const nextQuestion = questions[nextIndex] ?? "";
+      const questionNumber = `(${nextIndex + 1}/${questions.length})`;
+      await context.send(format`${bold("Уточняющий вопрос")} ${questionNumber}\n\n${nextQuestion}`, {
+        reply_markup: skipQuestionKeyboard(),
+      });
+    } else {
+      // All questions answered — generate keywords with context
+      await context.send("Генерирую ключевые слова на основе твоих ответов...");
+      const clarificationContext = formatClarificationContext(questions, answers);
+      await generateKeywordsAndShowResult(context, userId, original_query, clarificationContext);
+    }
+    return;
   }
 
-  // Generate unique ID for this pending subscription
-  const queryId = `${userId}_${Date.now()}`;
+  // New subscription request — start clarification flow
+  const query = context.text;
 
-  // Save state
+  await context.send("Генерирую уточняющие вопросы...");
+
+  let questions: string[];
+  try {
+    questions = await generateClarificationQuestions(query);
+  } catch (error) {
+    botLog.error({ err: error, userId }, "LLM clarification generation failed");
+    // Fallback: skip clarification, go directly to keyword generation
+    await context.send("Не удалось сгенерировать вопросы, перехожу к генерации ключевых слов...");
+    await generateKeywordsAndShowResult(context, userId, query);
+    return;
+  }
+
+  // Save clarification state
   setUserState(userId, {
-    step: "awaiting_confirmation",
-    pending_subscription: {
+    step: "clarifying_query",
+    clarification: {
       original_query: query,
-      positive_keywords: result.positive_keywords,
-      negative_keywords: result.negative_keywords,
-      llm_description: result.llm_description,
+      questions,
+      answers: [],
+      current_index: 0,
     },
   });
 
-  await context.send(
-    format`
-${bold("Результат анализа:")}
-
-${bold("Позитивные ключевые слова:")}
-${code(result.positive_keywords.join(", "))}
-
-${bold("Негативные ключевые слова:")}
-${code(result.negative_keywords.join(", ") || "нет")}
-
-${bold("Описание для проверки:")}
-${result.llm_description}
-
-Подтверди или измени параметры:
-    `,
-    {
-      reply_markup: confirmKeyboard(queryId),
-    }
-  );
+  // Send first question
+  const firstQuestion = questions[0] ?? "Какие конкретные характеристики важны?";
+  const questionNumber = `(1/${questions.length})`;
+  await context.send(format`${bold("Уточняющий вопрос")} ${questionNumber}\n\n${firstQuestion}`, {
+    reply_markup: skipQuestionKeyboard(),
+  });
 });
 
 // Handle callback queries (button clicks)
@@ -549,6 +624,46 @@ ${bold("Выбери группы для мониторинга:")}
       setUserState(userId, { step: "idle" });
       await context.answer({ text: "Отменено" });
       await context.editText("Отменено. Отправь новый запрос когда будешь готов.");
+      break;
+    }
+
+    case "skip_question": {
+      if (state.step !== "clarifying_query" || !state.clarification) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      const { questions, answers, current_index, original_query } = state.clarification;
+
+      // Add empty answer for skipped question
+      answers.push("");
+
+      const nextIndex = current_index + 1;
+
+      if (nextIndex < questions.length) {
+        // More questions
+        setUserState(userId, {
+          ...state,
+          clarification: {
+            ...state.clarification,
+            answers,
+            current_index: nextIndex,
+          },
+        });
+
+        const nextQuestion = questions[nextIndex] ?? "";
+        const questionNumber = `(${nextIndex + 1}/${questions.length})`;
+        await context.answer({ text: "Пропущено" });
+        await context.editText(format`${bold("Уточняющий вопрос")} ${questionNumber}\n\n${nextQuestion}`, {
+          reply_markup: skipQuestionKeyboard(),
+        });
+      } else {
+        // All questions done — generate keywords
+        await context.answer({ text: "Генерирую..." });
+        await context.editText("Генерирую ключевые слова...");
+        const clarificationContext = formatClarificationContext(questions, answers);
+        await generateKeywordsAndShowResult(context, userId, original_query, clarificationContext);
+      }
       break;
     }
 

@@ -82,15 +82,23 @@ const SYSTEM_PROMPT = `Ты помощник для извлечения клю�
 
 /**
  * Generate keywords from user's free-form search request using DeepSeek R1 via Novita
+ * @param query - Original user query
+ * @param clarificationContext - Optional context from clarification Q&A (formatted string)
  */
-export async function generateKeywords(query: string): Promise<KeywordGenerationResult> {
+export async function generateKeywords(
+  query: string,
+  clarificationContext?: string
+): Promise<KeywordGenerationResult> {
+  // Build user message with optional clarification context
+  const userMessage = clarificationContext ? `${query}${clarificationContext}` : query;
+
   const response = await withRetry(async () => {
     const result = await hf.chatCompletion({
       model: MODELS.DEEPSEEK_R1,
       provider: "novita",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: query },
+        { role: "user", content: userMessage },
       ],
       max_tokens: 2500,
       temperature: 0.6,

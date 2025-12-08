@@ -60,6 +60,7 @@ export interface PendingGroup {
 export interface UserState {
   step:
     | "idle"
+    | "clarifying_query"
     | "awaiting_confirmation"
     | "editing_keywords"
     | "selecting_groups"
@@ -69,6 +70,13 @@ export interface UserState {
     | "editing_sub_positive"
     | "editing_sub_negative"
     | "editing_sub_description";
+  // Clarification flow data
+  clarification?: {
+    original_query: string;
+    questions: string[];
+    answers: string[];
+    current_index: number;
+  };
   pending_subscription?: {
     original_query: string;
     positive_keywords: string[];

@@ -118,3 +118,8 @@ export function groupsKeyboard(
 
   return kb;
 }
+
+// Keyboard for clarification questions
+export function skipQuestionKeyboard(): InlineKeyboard {
+  return new InlineKeyboard().text("Пропустить →", JSON.stringify({ action: "skip_question" }));
+}
