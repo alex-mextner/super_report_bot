@@ -76,34 +76,39 @@ export const confirmKeyboard = (queryId: string, mode: UserMode = "advanced") =>
 export const subscriptionKeyboard = (
   subscriptionId: number,
   hasNegativeKeywords: boolean,
-  hasDisabledNegative: boolean
+  hasDisabledNegative: boolean,
+  mode: UserMode = "advanced"
 ) => {
-  const kb = new InlineKeyboard()
-    .text(
+  const kb = new InlineKeyboard();
+
+  // Editing buttons only for advanced mode
+  if (mode === "advanced") {
+    kb.text(
       "✏️ + слова",
       JSON.stringify({ action: "edit_positive", id: subscriptionId })
     )
-    .text(
-      "✏️ − слова",
-      JSON.stringify({ action: "edit_negative", id: subscriptionId })
-    )
-    .row()
-    .text(
-      "✏️ Описание",
-      JSON.stringify({ action: "edit_description", id: subscriptionId })
-    )
-    .text(
-      "🤖 Скорректировать с ИИ",
-      JSON.stringify({ action: "regenerate_sub", id: subscriptionId })
-    )
-    .row();
+      .text(
+        "✏️ − слова",
+        JSON.stringify({ action: "edit_negative", id: subscriptionId })
+      )
+      .row()
+      .text(
+        "✏️ Описание",
+        JSON.stringify({ action: "edit_description", id: subscriptionId })
+      )
+      .text(
+        "🤖 Скорректировать с ИИ",
+        JSON.stringify({ action: "regenerate_sub", id: subscriptionId })
+      )
+      .row();
 
-  // Toggle button only if there are negative keywords (active or disabled)
-  if (hasNegativeKeywords || hasDisabledNegative) {
-    kb.text(
-      hasNegativeKeywords ? "🚫 Откл. искл." : "✅ Вкл. искл.",
-      JSON.stringify({ action: "toggle_negative", id: subscriptionId })
-    );
+    // Toggle button only if there are negative keywords (active or disabled)
+    if (hasNegativeKeywords || hasDisabledNegative) {
+      kb.text(
+        hasNegativeKeywords ? "🚫 Откл. искл." : "✅ Вкл. искл.",
+        JSON.stringify({ action: "toggle_negative", id: subscriptionId })
+      );
+    }
   }
 
   kb.text(

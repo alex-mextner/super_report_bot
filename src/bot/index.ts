@@ -325,6 +325,7 @@ bot.command("list", async (context) => {
   const userId = context.from?.id;
   if (!userId) return;
 
+  const mode = queries.getUserMode(userId);
   const subscriptions = queries.getUserSubscriptions(userId);
 
   if (subscriptions.length === 0) {
@@ -336,24 +337,31 @@ bot.command("list", async (context) => {
     const hasNeg = sub.negative_keywords.length > 0;
     const hasDisabledNeg = (sub.disabled_negative_keywords?.length ?? 0) > 0;
 
-    let exclusionsText = "нет";
-    if (hasNeg) {
-      exclusionsText = sub.negative_keywords.join(", ");
-    } else if (hasDisabledNeg) {
-      exclusionsText = `(отключены: ${sub.disabled_negative_keywords!.join(", ")})`;
-    }
+    let messageText;
+    if (mode === "advanced") {
+      let exclusionsText = "нет";
+      if (hasNeg) {
+        exclusionsText = sub.negative_keywords.join(", ");
+      } else if (hasDisabledNeg) {
+        exclusionsText = `(отключены: ${sub.disabled_negative_keywords!.join(", ")})`;
+      }
 
-    await context.send(
-      format`
+      messageText = format`
 ${bold("Подписка #" + sub.id)}
 ${bold("Запрос:")} ${sub.original_query}
 ${bold("Ключевые слова:")} ${code(sub.positive_keywords.join(", "))}
 ${bold("Исключения:")} ${code(exclusionsText)}
-      `,
-      {
-        reply_markup: subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg),
-      }
-    );
+      `;
+    } else {
+      messageText = format`
+${bold("Подписка #" + sub.id)}
+${bold("Запрос:")} ${sub.original_query}
+      `;
+    }
+
+    await context.send(messageText, {
+      reply_markup: subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg, mode),
+    });
   }
 });
 
