@@ -58,7 +58,6 @@ import {
 } from "../listener/index.ts";
 import { botLog } from "../logger.ts";
 import type {
-  UserState,
   UserMode,
   KeywordGenerationResult,
   PendingGroup,
@@ -66,8 +65,13 @@ import type {
   RatingExample,
 } from "../types.ts";
 
-// FSM with SQLite persistence (replaces in-memory Map)
-import { getState, setState } from "../fsm/index.ts";
+// FSM with SQLite persistence
+import {
+  send,
+  getCurrentState,
+  getFsmContext,
+  type BotContext,
+} from "../fsm/index.ts";
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 
@@ -75,15 +79,9 @@ if (!BOT_TOKEN) {
   throw new Error("BOT_TOKEN is required");
 }
 
-// User state is now persisted via XState FSM
-// These functions delegate to FSM adapter for backwards compatibility
-function getUserState(userId: number): UserState {
-  return getState(userId);
-}
-
-function setUserState(userId: number, state: UserState): void {
-  setState(userId, state);
-}
+// FSM helper shortcuts
+const ctx = (userId: number): BotContext => getFsmContext(userId);
+const fsmState = (userId: number) => getCurrentState(userId);
 
 // Helper: show single example for rating
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -121,13 +119,13 @@ async function showConfirmation(
 ): Promise<void> {
   const queryId = `${userId}_${Date.now()}`;
 
-  setUserState(userId, {
-    step: "awaiting_confirmation",
-    pending_subscription: {
-      original_query: query,
-      positive_keywords: result.positive_keywords,
-      negative_keywords: result.negative_keywords,
-      llm_description: result.llm_description,
+  send(userId, {
+    type: "KEYWORDS_GENERATED",
+    pendingSub: {
+      originalQuery: query,
+      positiveKeywords: result.positive_keywords,
+      negativeKeywords: result.negative_keywords,
+      llmDescription: result.llm_description,
     },
   });
 
@@ -218,24 +216,29 @@ async function startRatingFlow(
     return;
   }
 
-  // Save state and show first example
-  const state = getUserState(userId);
-  setUserState(userId, {
-    ...state,
-    step: "rating_examples",
-    pending_subscription: {
-      original_query: query,
-      positive_keywords: [],
-      negative_keywords: [],
-      llm_description: "",
+  // Save state and show first example - set pending sub first, then start rating
+  send(userId, {
+    type: "KEYWORDS_GENERATED",
+    pendingSub: {
+      originalQuery: query,
+      positiveKeywords: [],
+      negativeKeywords: [],
+      llmDescription: "",
     },
-    pending_examples: {
-      messages: examples,
+  });
+  send(userId, {
+    type: "START_RATING",
+    examples: {
+      messages: examples.map((e) => ({
+        id: e.id,
+        text: e.text,
+        groupId: e.groupId,
+        groupTitle: e.groupTitle,
+        isGenerated: e.isGenerated,
+      })),
       ratings: [],
-      current_index: 0,
+      currentIndex: 0,
     },
-    draft_keywords: draftKeywords,
-    clarification: state.clarification, // preserve clarification context
   });
 
   await showExampleForRating(context, userId, examples[0]!, 0, examples.length);
@@ -247,19 +250,19 @@ async function finishRatingAndGenerateKeywords(
   context: any,
   userId: number
 ): Promise<void> {
-  const state = getUserState(userId);
+  const c = ctx(userId);
   const mode = queries.getUserMode(userId);
 
-  if (!state.pending_examples || !state.pending_subscription) {
+  if (!c.ratingExamples || !c.pendingSub) {
     await context.send("Сессия истекла. Отправь новый запрос.");
-    setUserState(userId, { step: "idle" });
+    send(userId, { type: "CANCEL" });
     return;
   }
 
-  const { ratings } = state.pending_examples;
-  const query = state.pending_subscription.original_query;
-  const clarificationContext = state.clarification
-    ? formatClarificationContext(state.clarification.questions, state.clarification.answers)
+  const { ratings } = c.ratingExamples;
+  const query = c.pendingSub.originalQuery;
+  const clarificationContext = c.clarification
+    ? formatClarificationContext(c.clarification.questions, c.clarification.answers)
     : undefined;
 
   await context.send("Генерирую ключевые слова с учётом твоих оценок...");
@@ -461,10 +464,7 @@ bot.command("addgroup", async (context) => {
 
   queries.getOrCreateUser(userId);
 
-  setUserState(userId, {
-    step: "adding_group",
-    pending_groups: [],
-  });
+  send(userId, { type: "ADDGROUP" });
 
   await context.send("Выбери группу или канал для добавления:", {
     reply_markup: groupPickerKeyboard(nextRequestId()),
@@ -504,8 +504,7 @@ bot.on("chat_shared", async (context) => {
   const userId = context.from?.id;
   if (!userId) return;
 
-  const state = getUserState(userId);
-  if (state.step !== "adding_group") return;
+  if (fsmState(userId) !== "addingGroup") return;
 
   const chatShared = context.chatShared;
   if (!chatShared) return;
@@ -539,12 +538,8 @@ bot.on("chat_shared", async (context) => {
   };
 
   if (needsInviteLink) {
-    // Ask for invite link
-    setUserState(userId, {
-      ...state,
-      step: "awaiting_invite_link",
-      current_pending_group: newGroup,
-    });
+    // Ask for invite link - FSM transitions to awaitingInviteLink via guard
+    send(userId, { type: "CHAT_SHARED", group: newGroup });
 
     await context.send(
       `Приватная группа "${title}".\n\n` +
@@ -564,7 +559,7 @@ async function showAddGroupPrompt(
   context: { send: (text: string, options?: object) => Promise<unknown> },
   userId: number
 ): Promise<void> {
-  setUserState(userId, { step: "adding_group", pending_groups: [] });
+  send(userId, { type: "ADDGROUP" });
   await context.send('Выбери ещё группу или нажми "Готово":', {
     reply_markup: groupPickerKeyboard(nextRequestId()),
   });
@@ -603,12 +598,13 @@ bot.on("message", async (context) => {
   const userId = context.from?.id;
   if (!userId) return;
 
-  const state = getUserState(userId);
+  const currentState = fsmState(userId);
+  const c = ctx(userId);
   const text = context.text;
 
   // Handle "Готово" button in adding_group state
-  if (text === "Готово" && state.step === "adding_group") {
-    setUserState(userId, { step: "idle" });
+  if (text === "Готово" && currentState === "addingGroup") {
+    send(userId, { type: "DONE_ADDING_GROUPS" });
     const groups = queries.getUserGroups(userId);
     if (groups.length > 0) {
       await context.send(`Добавлено групп: ${groups.length}. Теперь отправь описание того, что ищешь.`, {
@@ -623,14 +619,15 @@ bot.on("message", async (context) => {
   }
 
   // Handle invite link input (for /addgroup flow)
-  if (state.step === "awaiting_invite_link" && state.current_pending_group) {
+  if (currentState === "awaitingInviteLink" && c.currentPendingGroup) {
     const inviteLinkRegex = /t\.me\/(\+|joinchat\/)/;
     if (inviteLinkRegex.test(text)) {
       const group: PendingGroup = {
-        ...state.current_pending_group,
+        ...c.currentPendingGroup,
         inviteLink: text.trim(),
         needsInviteLink: false,
       };
+      send(userId, { type: "INVITE_LINK", link: text.trim() });
       await context.send("Ссылка получена, пробую присоединиться...", {
         reply_markup: { remove_keyboard: true },
       });
@@ -642,7 +639,7 @@ bot.on("message", async (context) => {
   }
 
   // Handle editing existing subscription positive keywords
-  if (state.step === "editing_sub_positive" && state.editing_subscription_id) {
+  if (currentState === "editingSubPositive" && c.editingSubscriptionId) {
     const keywords = text
       .split(",")
       .map((s) => s.trim())
@@ -653,14 +650,14 @@ bot.on("message", async (context) => {
       return;
     }
 
-    queries.updatePositiveKeywords(state.editing_subscription_id, userId, keywords);
-    setUserState(userId, { step: "idle" });
+    queries.updatePositiveKeywords(c.editingSubscriptionId, userId, keywords);
+    send(userId, { type: "TEXT_KEYWORDS", keywords });
     await context.send(`✅ Позитивные слова обновлены: ${keywords.join(", ")}`);
     return;
   }
 
   // Handle editing existing subscription negative keywords
-  if (state.step === "editing_sub_negative" && state.editing_subscription_id) {
+  if (currentState === "editingSubNegative" && c.editingSubscriptionId) {
     const lowerText = text.toLowerCase();
     let keywords: string[];
 
@@ -673,8 +670,8 @@ bot.on("message", async (context) => {
         .filter(Boolean);
     }
 
-    queries.updateNegativeKeywords(state.editing_subscription_id, userId, keywords);
-    setUserState(userId, { step: "idle" });
+    queries.updateNegativeKeywords(c.editingSubscriptionId, userId, keywords);
+    send(userId, { type: "TEXT_KEYWORDS", keywords });
     await context.send(
       keywords.length > 0
         ? `✅ Негативные слова обновлены: ${keywords.join(", ")}`
@@ -684,20 +681,20 @@ bot.on("message", async (context) => {
   }
 
   // Handle editing existing subscription description
-  if (state.step === "editing_sub_description" && state.editing_subscription_id) {
+  if (currentState === "editingSubDescription" && c.editingSubscriptionId) {
     if (text.length < 5) {
       await context.send("Описание слишком короткое.");
       return;
     }
 
-    queries.updateLlmDescription(state.editing_subscription_id, userId, text);
-    setUserState(userId, { step: "idle" });
+    queries.updateLlmDescription(c.editingSubscriptionId, userId, text);
+    send(userId, { type: "TEXT_DESCRIPTION", text });
     await context.send("✅ Описание обновлено");
     return;
   }
 
   // Handle adding positive keywords
-  if (state.step === "adding_positive") {
+  if (currentState === "addingPositive") {
     const newKeywords = text
       .split(",")
       .map((s) => s.trim())
@@ -709,13 +706,12 @@ bot.on("message", async (context) => {
     }
 
     // Pending subscription (during confirmation)
-    if (state.pending_subscription) {
-      const combined = [...state.pending_subscription.positive_keywords, ...newKeywords];
+    if (c.pendingSub) {
+      const combined = [...c.pendingSub.positiveKeywords, ...newKeywords];
       const unique = [...new Set(combined)];
-      const updated = { ...state.pending_subscription, positive_keywords: unique };
       const queryId = `${userId}_${Date.now()}`;
 
-      setUserState(userId, { ...state, pending_subscription: updated, step: "awaiting_confirmation" });
+      send(userId, { type: "TEXT_KEYWORDS", keywords: newKeywords });
       await context.send(
         format`✅ Добавлено: ${newKeywords.join(", ")}
 
@@ -723,7 +719,7 @@ ${bold("Позитивные:")}
 ${code(unique.join(", "))}
 
 ${bold("Негативные:")}
-${code(updated.negative_keywords.join(", ") || "нет")}
+${code(c.pendingSub.negativeKeywords.join(", ") || "нет")}
         `,
         { reply_markup: confirmKeyboard(queryId) }
       );
@@ -731,30 +727,30 @@ ${code(updated.negative_keywords.join(", ") || "нет")}
     }
 
     // Existing subscription
-    if (state.editing_subscription_id) {
-      const sub = queries.getSubscriptionById(state.editing_subscription_id, userId);
+    if (c.editingSubscriptionId) {
+      const sub = queries.getSubscriptionById(c.editingSubscriptionId, userId);
       if (!sub) {
-        setUserState(userId, { step: "idle" });
+        send(userId, { type: "CANCEL" });
         await context.send("Подписка не найдена.");
         return;
       }
 
       const combined = [...sub.positive_keywords, ...newKeywords];
       const unique = [...new Set(combined)];
-      queries.updatePositiveKeywords(state.editing_subscription_id, userId, unique);
+      queries.updatePositiveKeywords(c.editingSubscriptionId, userId, unique);
       invalidateSubscriptionsCache();
 
-      setUserState(userId, { step: "idle" });
+      send(userId, { type: "CANCEL" });
       await context.send(`✅ Добавлено: ${newKeywords.join(", ")}\nТекущие: ${unique.join(", ")}`);
       return;
     }
 
-    setUserState(userId, { step: "idle" });
+    send(userId, { type: "CANCEL" });
     return;
   }
 
   // Handle adding negative keywords
-  if (state.step === "adding_negative") {
+  if (currentState === "addingNegative") {
     const newKeywords = text
       .split(",")
       .map((s) => s.trim())
@@ -766,18 +762,17 @@ ${code(updated.negative_keywords.join(", ") || "нет")}
     }
 
     // Pending subscription (during confirmation)
-    if (state.pending_subscription) {
-      const combined = [...state.pending_subscription.negative_keywords, ...newKeywords];
+    if (c.pendingSub) {
+      const combined = [...c.pendingSub.negativeKeywords, ...newKeywords];
       const unique = [...new Set(combined)];
-      const updated = { ...state.pending_subscription, negative_keywords: unique };
       const queryId = `${userId}_${Date.now()}`;
 
-      setUserState(userId, { ...state, pending_subscription: updated, step: "awaiting_confirmation" });
+      send(userId, { type: "TEXT_KEYWORDS", keywords: newKeywords });
       await context.send(
         format`✅ Добавлено: ${newKeywords.join(", ")}
 
 ${bold("Позитивные:")}
-${code(updated.positive_keywords.join(", "))}
+${code(c.pendingSub.positiveKeywords.join(", "))}
 
 ${bold("Негативные:")}
 ${code(unique.join(", "))}
@@ -788,31 +783,31 @@ ${code(unique.join(", "))}
     }
 
     // Existing subscription
-    if (state.editing_subscription_id) {
-      const sub = queries.getSubscriptionById(state.editing_subscription_id, userId);
+    if (c.editingSubscriptionId) {
+      const sub = queries.getSubscriptionById(c.editingSubscriptionId, userId);
       if (!sub) {
-        setUserState(userId, { step: "idle" });
+        send(userId, { type: "CANCEL" });
         await context.send("Подписка не найдена.");
         return;
       }
 
       const combined = [...sub.negative_keywords, ...newKeywords];
       const unique = [...new Set(combined)];
-      queries.updateNegativeKeywords(state.editing_subscription_id, userId, unique);
+      queries.updateNegativeKeywords(c.editingSubscriptionId, userId, unique);
       invalidateSubscriptionsCache();
 
-      setUserState(userId, { step: "idle" });
+      send(userId, { type: "CANCEL" });
       await context.send(`✅ Добавлено: ${newKeywords.join(", ")}\nТекущие: ${unique.join(", ")}`);
       return;
     }
 
-    setUserState(userId, { step: "idle" });
+    send(userId, { type: "CANCEL" });
     return;
   }
 
   // Handle removing keywords by numbers
-  if (state.step === "removing_positive" || state.step === "removing_negative") {
-    const type = state.step === "removing_positive" ? "positive" : "negative";
+  if (currentState === "removingPositive" || currentState === "removingNegative") {
+    const type = currentState === "removingPositive" ? "positive" : "negative";
 
     // Parse numbers from text (e.g., "1, 3, 5" or "1 3 5")
     const indices = text
@@ -826,11 +821,11 @@ ${code(unique.join(", "))}
     }
 
     // Pending subscription (during confirmation)
-    if (state.pending_subscription) {
+    if (c.pendingSub) {
       const keywords =
         type === "positive"
-          ? [...state.pending_subscription.positive_keywords]
-          : [...state.pending_subscription.negative_keywords];
+          ? [...c.pendingSub.positiveKeywords]
+          : [...c.pendingSub.negativeKeywords];
       const removed: string[] = [];
 
       const sortedIndices = [...new Set(indices)].sort((a, b) => b - a);
@@ -851,21 +846,22 @@ ${code(unique.join(", "))}
         return;
       }
 
-      const updated = {
-        ...state.pending_subscription,
-        [type === "positive" ? "positive_keywords" : "negative_keywords"]: keywords,
-      };
       const queryId = `${userId}_${Date.now()}`;
 
-      setUserState(userId, { ...state, pending_subscription: updated, step: "awaiting_confirmation" });
+      // Send REMOVE_KEYWORD for each removed index (in reverse order)
+      for (const idx of sortedIndices) {
+        send(userId, { type: "REMOVE_KEYWORD", index: idx });
+      }
+
+      const updatedC = ctx(userId);
       await context.send(
         format`✅ Удалено: ${removed.join(", ")}
 
 ${bold("Позитивные:")}
-${code(updated.positive_keywords.join(", "))}
+${code(updatedC.pendingSub?.positiveKeywords.join(", ") || "")}
 
 ${bold("Негативные:")}
-${code(updated.negative_keywords.join(", ") || "нет")}
+${code(updatedC.pendingSub?.negativeKeywords.join(", ") || "нет")}
         `,
         { reply_markup: confirmKeyboard(queryId) }
       );
@@ -873,10 +869,10 @@ ${code(updated.negative_keywords.join(", ") || "нет")}
     }
 
     // Existing subscription
-    if (state.editing_subscription_id) {
-      const sub = queries.getSubscriptionById(state.editing_subscription_id, userId);
+    if (c.editingSubscriptionId) {
+      const sub = queries.getSubscriptionById(c.editingSubscriptionId, userId);
       if (!sub) {
-        setUserState(userId, { step: "idle" });
+        send(userId, { type: "CANCEL" });
         await context.send("Подписка не найдена.");
         return;
       }
@@ -903,52 +899,58 @@ ${code(updated.negative_keywords.join(", ") || "нет")}
       }
 
       if (type === "positive") {
-        queries.updatePositiveKeywords(state.editing_subscription_id, userId, keywords);
+        queries.updatePositiveKeywords(c.editingSubscriptionId, userId, keywords);
       } else {
-        queries.updateNegativeKeywords(state.editing_subscription_id, userId, keywords);
+        queries.updateNegativeKeywords(c.editingSubscriptionId, userId, keywords);
       }
       invalidateSubscriptionsCache();
 
-      setUserState(userId, { step: "idle" });
+      send(userId, { type: "CANCEL" });
       await context.send(
         `✅ Удалено: ${removed.join(", ")}` + (keywords.length > 0 ? `\nОсталось: ${keywords.join(", ")}` : "")
       );
       return;
     }
 
-    setUserState(userId, { step: "idle" });
+    send(userId, { type: "CANCEL" });
     return;
   }
 
   // Handle AI editing flow
-  if (state.step === "editing_sub_ai" && state.pending_ai_edit) {
-    const { current, conversation, subscription_id } = state.pending_ai_edit;
+  if (currentState === "editingSubAi" && c.pendingAiEdit) {
+    const { current, conversation, subscriptionId } = c.pendingAiEdit;
+    // Convert camelCase to snake_case for LLM function
+    const currentSnake = {
+      positive_keywords: current.positiveKeywords,
+      negative_keywords: current.negativeKeywords,
+      llm_description: current.llmDescription,
+    };
 
     await context.send("Обрабатываю запрос...");
 
     try {
-      const result = await interpretEditCommand(text, current, conversation);
+      const result = await interpretEditCommand(text, currentSnake, conversation);
 
       // Get examples for new parameters
       const examples = getExamplesForSubscription(
-        subscription_id,
+        subscriptionId,
         result.positive_keywords,
         result.negative_keywords,
         2
       );
 
       // Format diff
-      const addedPos = result.positive_keywords.filter((k) => !current.positive_keywords.includes(k));
-      const removedPos = current.positive_keywords.filter((k) => !result.positive_keywords.includes(k));
-      const addedNeg = result.negative_keywords.filter((k) => !current.negative_keywords.includes(k));
-      const removedNeg = current.negative_keywords.filter((k) => !result.negative_keywords.includes(k));
+      const addedPos = result.positive_keywords.filter((k: string) => !currentSnake.positive_keywords.includes(k));
+      const removedPos = currentSnake.positive_keywords.filter((k: string) => !result.positive_keywords.includes(k));
+      const addedNeg = result.negative_keywords.filter((k: string) => !currentSnake.negative_keywords.includes(k));
+      const removedNeg = currentSnake.negative_keywords.filter((k: string) => !result.negative_keywords.includes(k));
 
       let diffText = "";
       if (addedPos.length) diffText += `+ Добавлено: ${addedPos.join(", ")}\n`;
       if (removedPos.length) diffText += `- Удалено: ${removedPos.join(", ")}\n`;
       if (addedNeg.length) diffText += `+ Исключения: ${addedNeg.join(", ")}\n`;
       if (removedNeg.length) diffText += `- Из исключений: ${removedNeg.join(", ")}\n`;
-      if (current.llm_description !== result.llm_description) {
+      if (currentSnake.llm_description !== result.llm_description) {
         diffText += `Описание: ${result.llm_description}\n`;
       }
 
@@ -959,21 +961,14 @@ ${code(updated.negative_keywords.join(", ") || "нет")}
         examplesText += `${source}\n"${ex.text}"\n\n`;
       }
 
-      // Update state with proposed changes
-      setUserState(userId, {
-        ...state,
-        pending_ai_edit: {
-          ...state.pending_ai_edit,
-          proposed: {
-            positive_keywords: result.positive_keywords,
-            negative_keywords: result.negative_keywords,
-            llm_description: result.llm_description,
-          },
-          conversation: [
-            ...conversation,
-            { role: "user", content: text },
-            { role: "assistant", content: result.summary },
-          ],
+      // Update FSM state with proposed changes
+      send(userId, { type: "TEXT_AI_COMMAND", text });
+      send(userId, {
+        type: "AI_PROPOSED",
+        proposed: {
+          positiveKeywords: result.positive_keywords,
+          negativeKeywords: result.negative_keywords,
+          llmDescription: result.llm_description,
         },
       });
 
@@ -986,7 +981,7 @@ ${bold("Примеры сообщений:")}
 ${examplesText}
 Можешь продолжить редактирование или применить:`,
         {
-          reply_markup: aiEditKeyboard(subscription_id),
+          reply_markup: aiEditKeyboard(subscriptionId),
         }
       );
     } catch (error) {
@@ -997,34 +992,33 @@ ${examplesText}
   }
 
   // Handle AI correction for pending subscription
-  if (state.step === "correcting_pending_ai" && state.pending_subscription && state.pending_ai_correction) {
-    const { mode, current, conversation } = state.pending_ai_correction;
+  if (currentState === "correctingPendingAi" && c.pendingSub && c.pendingAiCorrection) {
+    const { mode, current, conversation } = c.pendingAiCorrection;
+    // Convert to snake_case for LLM
+    const currentSnake = {
+      positive_keywords: current.positiveKeywords,
+      negative_keywords: current.negativeKeywords,
+      llm_description: current.llmDescription,
+    };
 
     await context.send("Обрабатываю запрос...");
 
     try {
       if (mode === "normal") {
         // Normal mode: correct description only, then regenerate keywords
-        const descResult = await correctDescription(current.llm_description, text);
+        const descResult = await correctDescription(currentSnake.llm_description, text);
 
         // Regenerate keywords based on new description
         const keywordsResult = await generateKeywords(descResult.description);
 
-        // Update state with proposed changes
-        setUserState(userId, {
-          ...state,
-          pending_ai_correction: {
-            ...state.pending_ai_correction,
-            proposed: {
-              positive_keywords: keywordsResult.positive_keywords,
-              negative_keywords: keywordsResult.negative_keywords,
-              llm_description: descResult.description,
-            },
-            conversation: [
-              ...conversation,
-              { role: "user", content: text },
-              { role: "assistant", content: descResult.summary },
-            ],
+        // Update FSM state with proposed changes
+        send(userId, { type: "TEXT_AI_COMMAND", text });
+        send(userId, {
+          type: "AI_CORRECTION_PROPOSED",
+          proposed: {
+            positiveKeywords: keywordsResult.positive_keywords,
+            negativeKeywords: keywordsResult.negative_keywords,
+            llmDescription: descResult.description,
           },
         });
 
@@ -1042,38 +1036,31 @@ ${bold("ИИ:")} ${descResult.summary}
         );
       } else {
         // Advanced mode: full control over keywords
-        const result = await interpretEditCommand(text, current, conversation);
+        const result = await interpretEditCommand(text, currentSnake, conversation);
 
         // Format diff
-        const addedPos = result.positive_keywords.filter((k) => !current.positive_keywords.includes(k));
-        const removedPos = current.positive_keywords.filter((k) => !result.positive_keywords.includes(k));
-        const addedNeg = result.negative_keywords.filter((k) => !current.negative_keywords.includes(k));
-        const removedNeg = current.negative_keywords.filter((k) => !result.negative_keywords.includes(k));
+        const addedPos = result.positive_keywords.filter((k: string) => !currentSnake.positive_keywords.includes(k));
+        const removedPos = currentSnake.positive_keywords.filter((k: string) => !result.positive_keywords.includes(k));
+        const addedNeg = result.negative_keywords.filter((k: string) => !currentSnake.negative_keywords.includes(k));
+        const removedNeg = currentSnake.negative_keywords.filter((k: string) => !result.negative_keywords.includes(k));
 
         let diffText = "";
         if (addedPos.length) diffText += `+ Добавлено: ${addedPos.join(", ")}\n`;
         if (removedPos.length) diffText += `- Удалено: ${removedPos.join(", ")}\n`;
         if (addedNeg.length) diffText += `+ Исключения: ${addedNeg.join(", ")}\n`;
         if (removedNeg.length) diffText += `- Из исключений: ${removedNeg.join(", ")}\n`;
-        if (current.llm_description !== result.llm_description) {
+        if (currentSnake.llm_description !== result.llm_description) {
           diffText += `Описание: ${result.llm_description}\n`;
         }
 
-        // Update state with proposed changes
-        setUserState(userId, {
-          ...state,
-          pending_ai_correction: {
-            ...state.pending_ai_correction,
-            proposed: {
-              positive_keywords: result.positive_keywords,
-              negative_keywords: result.negative_keywords,
-              llm_description: result.llm_description,
-            },
-            conversation: [
-              ...conversation,
-              { role: "user", content: text },
-              { role: "assistant", content: result.summary },
-            ],
+        // Update FSM state with proposed changes
+        send(userId, { type: "TEXT_AI_COMMAND", text });
+        send(userId, {
+          type: "AI_CORRECTION_PROPOSED",
+          proposed: {
+            positiveKeywords: result.positive_keywords,
+            negativeKeywords: result.negative_keywords,
+            llmDescription: result.llm_description,
           },
         });
 
@@ -1095,87 +1082,17 @@ ${bold("ИИ:")} ${result.summary}
     return;
   }
 
-  // If user is editing keywords
-  if (state.step === "editing_keywords" && state.pending_subscription) {
-    const text = context.text;
-    const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-
-    let positiveKeywords: string[] | null = null;
-    let negativeKeywords: string[] | null = null;
-
-    for (const line of lines) {
-      const posMatch = line.match(/^позитивные:\s*(.+)$/i);
-      const negMatch = line.match(/^негативные:\s*(.+)$/i);
-
-      if (posMatch?.[1]) {
-        positiveKeywords = posMatch[1].split(",").map((s) => s.trim()).filter(Boolean);
-      } else if (negMatch?.[1]) {
-        negativeKeywords = negMatch[1].split(",").map((s) => s.trim()).filter(Boolean);
-      }
-    }
-
-    if (positiveKeywords === null && negativeKeywords === null) {
-      await context.send(
-        "Не удалось распознать формат. Используй:\n" +
-          "позитивные: слово1, слово2\n" +
-          "негативные: слово1, слово2"
-      );
-      return;
-    }
-
-    // Update pending subscription
-    const updated = {
-      ...state.pending_subscription,
-      positive_keywords: positiveKeywords ?? state.pending_subscription.positive_keywords,
-      negative_keywords: negativeKeywords ?? state.pending_subscription.negative_keywords,
-    };
-
-    const queryId = `${userId}_${Date.now()}`;
-
-    setUserState(userId, {
-      step: "awaiting_confirmation",
-      pending_subscription: updated,
-    });
-
-    await context.send(
-      format`
-${bold("Обновлённые ключевые слова:")}
-
-${bold("Позитивные:")}
-${code(updated.positive_keywords.join(", "))}
-
-${bold("Негативные:")}
-${code(updated.negative_keywords.join(", ") || "нет")}
-
-Подтверди или измени ещё раз:
-      `,
-      {
-        reply_markup: confirmKeyboard(queryId),
-      }
-    );
-    return;
-  }
-
   // Handle clarification question answers
-  if (state.step === "clarifying_query" && state.clarification) {
-    const { questions, answers, current_index, original_query } = state.clarification;
+  if (currentState === "clarifyingQuery" && c.clarification) {
+    const { questions, answers, currentIndex, originalQuery } = c.clarification;
 
-    // Save answer to current question
-    answers.push(text);
+    // Save answer via FSM event
+    send(userId, { type: "ANSWER", text });
 
-    const nextIndex = current_index + 1;
+    const nextIndex = currentIndex + 1;
 
     if (nextIndex < questions.length) {
       // More questions to ask
-      setUserState(userId, {
-        ...state,
-        clarification: {
-          ...state.clarification,
-          answers,
-          current_index: nextIndex,
-        },
-      });
-
       const nextQuestion = questions[nextIndex] ?? "";
       const questionNumber = `(${nextIndex + 1}/${questions.length})`;
       await context.send(format`${bold("Уточняющий вопрос")} ${questionNumber}\n\n${nextQuestion}`, {
@@ -1184,16 +1101,18 @@ ${code(updated.negative_keywords.join(", ") || "нет")}
     } else {
       // All questions answered — generate draft keywords and start rating flow
       await context.send("Анализирую ответы...");
-      const clarificationContext = formatClarificationContext(questions, answers);
+      const updatedC = ctx(userId);
+      const finalAnswers = updatedC.clarification?.answers || [...answers, text];
+      const clarificationContext = formatClarificationContext(questions, finalAnswers);
 
       let draftKeywords: string[];
       try {
-        draftKeywords = await generateDraftKeywords(original_query);
+        draftKeywords = await generateDraftKeywords(originalQuery);
       } catch {
-        draftKeywords = generateKeywordsFallback(original_query).positive_keywords;
+        draftKeywords = generateKeywordsFallback(originalQuery).positive_keywords;
       }
 
-      await startRatingFlow(context, userId, original_query, draftKeywords, clarificationContext);
+      await startRatingFlow(context, userId, originalQuery, draftKeywords, clarificationContext);
     }
     return;
   }
@@ -1213,13 +1132,13 @@ ${code(updated.negative_keywords.join(", ") || "нет")}
         // Need clarification — show questions
         botLog.debug({ userId, questionsCount: analysis.questions.length }, "Normal mode: asking clarification");
 
-        setUserState(userId, {
-          step: "clarifying_query",
-          clarification: {
-            original_query: query,
+        send(userId, {
+          type: "START_CLARIFICATION",
+          data: {
+            originalQuery: query,
             questions: analysis.questions,
             answers: [],
-            current_index: 0,
+            currentIndex: 0,
           },
         });
 
@@ -1269,13 +1188,13 @@ ${code(updated.negative_keywords.join(", ") || "нет")}
     }
 
     // Save clarification state
-    setUserState(userId, {
-      step: "clarifying_query",
-      clarification: {
-        original_query: query,
+    send(userId, {
+      type: "START_CLARIFICATION",
+      data: {
+        originalQuery: query,
         questions,
         answers: [],
-        current_index: 0,
+        currentIndex: 0,
       },
     });
 
@@ -1300,11 +1219,12 @@ bot.on("callback_query", async (context) => {
     return;
   }
 
-  const state = getUserState(userId);
+  const c = ctx(userId);
+  const currentState = fsmState(userId);
 
   switch (data.action) {
     case "confirm": {
-      if (state.step !== "awaiting_confirmation" || !state.pending_subscription) {
+      if (currentState !== "awaitingConfirmation" || !c.pendingSub) {
         await context.answer({ text: "Сессия истекла. Отправь новый запрос." });
         return;
       }
@@ -1314,19 +1234,19 @@ bot.on("callback_query", async (context) => {
 
       if (userGroups.length === 0) {
         // No groups - create subscription without them
-        const { original_query, positive_keywords, negative_keywords, llm_description } =
-          state.pending_subscription;
+        const { originalQuery, positiveKeywords, negativeKeywords, llmDescription } =
+          c.pendingSub;
 
         const subscriptionId = queries.createSubscription(
           userId,
-          original_query,
-          positive_keywords,
-          negative_keywords,
-          llm_description
+          originalQuery,
+          positiveKeywords,
+          negativeKeywords,
+          llmDescription
         );
 
         // Generate BGE-M3 embeddings in background (non-blocking)
-        generateKeywordEmbeddings(positive_keywords, negative_keywords)
+        generateKeywordEmbeddings(positiveKeywords, negativeKeywords)
           .then((embeddings) => {
             queries.updateKeywordEmbeddings(subscriptionId, embeddings);
             botLog.info({ subscriptionId }, "Keyword embeddings generated");
@@ -1335,7 +1255,7 @@ bot.on("callback_query", async (context) => {
 
         invalidateSubscriptionsCache();
 
-        setUserState(userId, { step: "idle" });
+        send(userId, { type: "CANCEL" });
         await context.answer({ text: "Подписка создана" });
         await context.editText(
           "Подписка создана!\n\nУ тебя нет добавленных групп. Используй /addgroup для добавления."
@@ -1345,12 +1265,7 @@ bot.on("callback_query", async (context) => {
 
       // Move to group selection
       const groups = userGroups.map((g) => ({ id: g.id, title: g.title }));
-      setUserState(userId, {
-        ...state,
-        step: "selecting_groups",
-        available_groups: groups,
-        selected_groups: [],
-      });
+      send(userId, { type: "START_GROUP_SELECTION", available: groups });
 
       await context.answer({ text: "Выбери группы" });
       await context.editText(
@@ -1368,13 +1283,13 @@ ${bold("Выбери группы для мониторинга:")}
 
     case "edit": {
       // Legacy - redirect to positive keywords submenu
-      if (!state.pending_subscription) {
+      if (!c.pendingSub) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
       await context.answer({ text: "Выбери действие" });
       await context.editText(
-        `Позитивные слова: ${state.pending_subscription.positive_keywords.join(", ")}\n\nЧто сделать?`,
+        `Позитивные слова: ${c.pendingSub.positiveKeywords.join(", ")}\n\nЧто сделать?`,
         { reply_markup: keywordEditSubmenuPending("positive") }
       );
       break;
@@ -1382,13 +1297,13 @@ ${bold("Выбери группы для мониторинга:")}
 
     // Pending subscription: show submenu for positive keywords
     case "edit_positive_pending": {
-      if (!state.pending_subscription) {
+      if (!c.pendingSub) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
       await context.answer({ text: "Выбери действие" });
       await context.editText(
-        `Позитивные слова: ${state.pending_subscription.positive_keywords.join(", ")}\n\nЧто сделать?`,
+        `Позитивные слова: ${c.pendingSub.positiveKeywords.join(", ")}\n\nЧто сделать?`,
         { reply_markup: keywordEditSubmenuPending("positive") }
       );
       break;
@@ -1396,13 +1311,13 @@ ${bold("Выбери группы для мониторинга:")}
 
     // Pending subscription: show submenu for negative keywords
     case "edit_negative_pending": {
-      if (!state.pending_subscription) {
+      if (!c.pendingSub) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
       await context.answer({ text: "Выбери действие" });
       await context.editText(
-        `Негативные слова: ${state.pending_subscription.negative_keywords.join(", ") || "нет"}\n\nЧто сделать?`,
+        `Негативные слова: ${c.pendingSub.negativeKeywords.join(", ") || "нет"}\n\nЧто сделать?`,
         { reply_markup: keywordEditSubmenuPending("negative") }
       );
       break;
@@ -1410,44 +1325,44 @@ ${bold("Выбери группы для мониторинга:")}
 
     // Pending: add positive keywords
     case "add_positive_pending": {
-      if (!state.pending_subscription) {
+      if (!c.pendingSub) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
-      setUserState(userId, { ...state, step: "adding_positive" });
+      send(userId, { type: "ADD_POSITIVE" });
       await context.answer({ text: "Отправь слова" });
       await context.editText(
-        `Текущие: ${state.pending_subscription.positive_keywords.join(", ")}\n\nОтправь слова для добавления через запятую:`
+        `Текущие: ${c.pendingSub.positiveKeywords.join(", ")}\n\nОтправь слова для добавления через запятую:`
       );
       break;
     }
 
     // Pending: add negative keywords
     case "add_negative_pending": {
-      if (!state.pending_subscription) {
+      if (!c.pendingSub) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
-      setUserState(userId, { ...state, step: "adding_negative" });
+      send(userId, { type: "ADD_NEGATIVE" });
       await context.answer({ text: "Отправь слова" });
       await context.editText(
-        `Текущие: ${state.pending_subscription.negative_keywords.join(", ") || "нет"}\n\nОтправь слова для добавления через запятую:`
+        `Текущие: ${c.pendingSub.negativeKeywords.join(", ") || "нет"}\n\nОтправь слова для добавления через запятую:`
       );
       break;
     }
 
     // Pending: remove positive keywords (show UI)
     case "remove_positive_pending": {
-      if (!state.pending_subscription) {
+      if (!c.pendingSub) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
-      const keywords = state.pending_subscription.positive_keywords;
+      const keywords = c.pendingSub.positiveKeywords;
       if (keywords.length === 0) {
         await context.answer({ text: "Нет слов для удаления" });
         return;
       }
-      setUserState(userId, { ...state, step: "removing_positive" });
+      send(userId, { type: "REMOVE_POSITIVE" });
       const list = keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
       await context.answer({ text: "Выбери слова" });
       await context.editText(
@@ -1459,16 +1374,16 @@ ${bold("Выбери группы для мониторинга:")}
 
     // Pending: remove negative keywords (show UI)
     case "remove_negative_pending": {
-      if (!state.pending_subscription) {
+      if (!c.pendingSub) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
-      const keywords = state.pending_subscription.negative_keywords;
+      const keywords = c.pendingSub.negativeKeywords;
       if (keywords.length === 0) {
         await context.answer({ text: "Нет слов для удаления" });
         return;
       }
-      setUserState(userId, { ...state, step: "removing_negative" });
+      send(userId, { type: "REMOVE_NEGATIVE" });
       const list = keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
       await context.answer({ text: "Выбери слова" });
       await context.editText(
@@ -1480,7 +1395,7 @@ ${bold("Выбери группы для мониторинга:")}
 
     // Pending: remove keyword by clicking button
     case "rm_kw_pending": {
-      if (!state.pending_subscription) {
+      if (!c.pendingSub) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
@@ -1489,8 +1404,8 @@ ${bold("Выбери группы для мониторинга:")}
 
       const keywords =
         type === "positive"
-          ? [...state.pending_subscription.positive_keywords]
-          : [...state.pending_subscription.negative_keywords];
+          ? [...c.pendingSub.positiveKeywords]
+          : [...c.pendingSub.negativeKeywords];
       const removed = keywords[idx];
       if (!removed) {
         await context.answer({ text: "Слово не найдено" });
@@ -1504,34 +1419,33 @@ ${bold("Выбери группы для мониторинга:")}
         return;
       }
 
-      // Update pending subscription
-      const updated = {
-        ...state.pending_subscription,
-        [type === "positive" ? "positive_keywords" : "negative_keywords"]: keywords,
-      };
-      setUserState(userId, { ...state, pending_subscription: updated });
+      // Remove keyword via FSM event
+      send(userId, { type: "REMOVE_KEYWORD", index: idx });
 
       await context.answer({ text: `Удалено: ${removed}` });
+
+      // Re-read context after FSM update
+      const updatedC = ctx(userId);
 
       if (keywords.length === 0) {
         // No more keywords, go back to confirm
         const queryId = `${userId}_${Date.now()}`;
+        send(userId, { type: "BACK_TO_CONFIRM" });
         await context.editText(
           format`
 ${bold("Ключевые слова:")}
 
 ${bold("Позитивные:")}
-${code(updated.positive_keywords.join(", "))}
+${code(updatedC.pendingSub?.positiveKeywords.join(", ") ?? "")}
 
 ${bold("Негативные:")}
-${code(updated.negative_keywords.join(", ") || "нет")}
+${code(updatedC.pendingSub?.negativeKeywords.join(", ") || "нет")}
 
 ${bold("Описание для LLM:")}
-${updated.llm_description}
+${updatedC.pendingSub?.llmDescription ?? ""}
           `,
           { reply_markup: confirmKeyboard(queryId) }
         );
-        setUserState(userId, { ...state, pending_subscription: updated, step: "awaiting_confirmation" });
       } else {
         const list = keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
         const label = type === "positive" ? "Позитивные" : "Негативные";
@@ -1545,25 +1459,25 @@ ${updated.llm_description}
 
     // Pending: back to confirmation screen
     case "back_to_confirm": {
-      if (!state.pending_subscription) {
+      if (!c.pendingSub) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
       const queryId = `${userId}_${Date.now()}`;
-      setUserState(userId, { ...state, step: "awaiting_confirmation" });
+      send(userId, { type: "BACK_TO_CONFIRM" });
       await context.answer({ text: "OK" });
       await context.editText(
         format`
 ${bold("Ключевые слова:")}
 
 ${bold("Позитивные:")}
-${code(state.pending_subscription.positive_keywords.join(", "))}
+${code(c.pendingSub.positiveKeywords.join(", "))}
 
 ${bold("Негативные:")}
-${code(state.pending_subscription.negative_keywords.join(", ") || "нет")}
+${code(c.pendingSub.negativeKeywords.join(", ") || "нет")}
 
 ${bold("Описание для LLM:")}
-${state.pending_subscription.llm_description}
+${c.pendingSub.llmDescription}
         `,
         { reply_markup: confirmKeyboard(queryId) }
       );
@@ -1571,36 +1485,27 @@ ${state.pending_subscription.llm_description}
     }
 
     case "cancel": {
-      setUserState(userId, { step: "idle" });
+      send(userId, { type: "CANCEL" });
       await context.answer({ text: "Отменено" });
       await context.editText("Отменено. Отправь новый запрос когда будешь готов.");
       break;
     }
 
     case "skip_question": {
-      if (state.step !== "clarifying_query" || !state.clarification) {
+      if (currentState !== "clarifyingQuery" || !c.clarification) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
 
-      const { questions, answers, current_index, original_query } = state.clarification;
+      const { questions, answers, currentIndex, originalQuery } = c.clarification;
 
-      // Add empty answer for skipped question
-      answers.push("");
+      // Skip via FSM event
+      send(userId, { type: "SKIP_QUESTION" });
 
-      const nextIndex = current_index + 1;
+      const nextIndex = currentIndex + 1;
 
       if (nextIndex < questions.length) {
         // More questions
-        setUserState(userId, {
-          ...state,
-          clarification: {
-            ...state.clarification,
-            answers,
-            current_index: nextIndex,
-          },
-        });
-
         const nextQuestion = questions[nextIndex] ?? "";
         const questionNumber = `(${nextIndex + 1}/${questions.length})`;
         await context.answer({ text: "Пропущено" });
@@ -1615,12 +1520,12 @@ ${state.pending_subscription.llm_description}
 
         let draftKeywords: string[];
         try {
-          draftKeywords = await generateDraftKeywords(original_query);
+          draftKeywords = await generateDraftKeywords(originalQuery);
         } catch {
-          draftKeywords = generateKeywordsFallback(original_query).positive_keywords;
+          draftKeywords = generateKeywordsFallback(originalQuery).positive_keywords;
         }
 
-        await startRatingFlow(context, userId, original_query, draftKeywords, clarificationContext);
+        await startRatingFlow(context, userId, originalQuery, draftKeywords, clarificationContext);
       }
       break;
     }
@@ -1642,7 +1547,7 @@ ${state.pending_subscription.llm_description}
         return;
       }
 
-      setUserState(userId, { step: "idle", editing_subscription_id: subscriptionId });
+      send(userId, { type: "CANCEL" }); // Reset to idle
       await context.answer({ text: "Выбери действие" });
       await context.editText(
         `Позитивные слова: ${sub.positive_keywords.join(", ")}\n\nЧто сделать?`,
@@ -1659,7 +1564,7 @@ ${state.pending_subscription.llm_description}
         return;
       }
 
-      setUserState(userId, { step: "idle", editing_subscription_id: subscriptionId });
+      send(userId, { type: "CANCEL" }); // Reset to idle
       await context.answer({ text: "Выбери действие" });
       await context.editText(
         `Негативные слова: ${sub.negative_keywords.join(", ") || "нет"}\n\nЧто сделать?`,
@@ -1676,10 +1581,7 @@ ${state.pending_subscription.llm_description}
         return;
       }
 
-      setUserState(userId, {
-        step: "editing_sub_description",
-        editing_subscription_id: subscriptionId,
-      });
+      send(userId, { type: "EDIT_SUB_DESCRIPTION", subscriptionId });
       await context.answer({ text: "Отправь новое описание" });
       await context.send(
         `Текущее описание:\n${sub.llm_description}\n\n` +
@@ -1731,7 +1633,7 @@ ${bold("Исключения:")} ${code(exclusionsText)}
 
     case "regenerate": {
       // Regenerate keywords for pending subscription
-      if (state.step !== "awaiting_confirmation" || !state.pending_subscription) {
+      if (currentState !== "awaitingConfirmation" || !c.pendingSub) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
@@ -1740,7 +1642,7 @@ ${bold("Исключения:")} ${code(exclusionsText)}
 
       let result: KeywordGenerationResult;
       try {
-        result = await generateKeywords(state.pending_subscription.original_query);
+        result = await generateKeywords(c.pendingSub.originalQuery);
       } catch (error) {
         botLog.error({ err: error, userId }, "LLM regeneration failed");
         await context.send("Ошибка генерации. Попробуй позже.");
@@ -1749,13 +1651,13 @@ ${bold("Исключения:")} ${code(exclusionsText)}
 
       const queryId = `${userId}_${Date.now()}`;
 
-      setUserState(userId, {
-        step: "awaiting_confirmation",
-        pending_subscription: {
-          original_query: state.pending_subscription.original_query,
-          positive_keywords: result.positive_keywords,
-          negative_keywords: result.negative_keywords,
-          llm_description: result.llm_description,
+      send(userId, {
+        type: "SET_PENDING_SUB",
+        pendingSub: {
+          originalQuery: c.pendingSub.originalQuery,
+          positiveKeywords: result.positive_keywords,
+          negativeKeywords: result.negative_keywords,
+          llmDescription: result.llm_description,
         },
       });
 
@@ -1790,15 +1692,14 @@ ${result.llm_description}
       }
 
       // Enter AI editing dialog mode
-      setUserState(userId, {
-        step: "editing_sub_ai",
-        editing_subscription_id: subscriptionId,
-        pending_ai_edit: {
-          subscription_id: subscriptionId,
+      send(userId, {
+        type: "EDIT_SUB_AI",
+        data: {
+          subscriptionId,
           current: {
-            positive_keywords: sub.positive_keywords,
-            negative_keywords: sub.negative_keywords,
-            llm_description: sub.llm_description,
+            positiveKeywords: sub.positive_keywords,
+            negativeKeywords: sub.negative_keywords,
+            llmDescription: sub.llm_description,
           },
           conversation: [],
         },
@@ -1831,20 +1732,20 @@ ${bold("Описание:")} ${sub.llm_description}
     }
 
     case "apply_ai_edit": {
-      if (state.step !== "editing_sub_ai" || !state.pending_ai_edit?.proposed) {
+      if (currentState !== "editingSubAi" || !c.pendingAiEdit?.proposed) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
 
-      const { subscription_id, proposed } = state.pending_ai_edit;
+      const { subscriptionId, proposed } = c.pendingAiEdit;
 
       // Apply changes
-      queries.updatePositiveKeywords(subscription_id, userId, proposed.positive_keywords);
-      queries.updateNegativeKeywords(subscription_id, userId, proposed.negative_keywords);
-      queries.updateLlmDescription(subscription_id, userId, proposed.llm_description);
+      queries.updatePositiveKeywords(subscriptionId, userId, proposed.positiveKeywords);
+      queries.updateNegativeKeywords(subscriptionId, userId, proposed.negativeKeywords);
+      queries.updateLlmDescription(subscriptionId, userId, proposed.llmDescription);
       invalidateSubscriptionsCache();
 
-      setUserState(userId, { step: "idle" });
+      send(userId, { type: "APPLY_AI_EDIT" });
 
       await context.answer({ text: "Применено!" });
       await context.editText("✅ Изменения применены.");
@@ -1852,7 +1753,7 @@ ${bold("Описание:")} ${sub.llm_description}
     }
 
     case "cancel_ai_edit": {
-      setUserState(userId, { step: "idle" });
+      send(userId, { type: "CANCEL" });
       await context.answer({ text: "Отменено" });
       await context.editText("Редактирование отменено.");
       break;
@@ -1860,23 +1761,22 @@ ${bold("Описание:")} ${sub.llm_description}
 
     case "correct_pending": {
       // Enter AI correction mode for pending subscription
-      if (state.step !== "awaiting_confirmation" || !state.pending_subscription) {
+      if (currentState !== "awaitingConfirmation" || !c.pendingSub) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
 
-      const pending = state.pending_subscription;
+      const pending = c.pendingSub;
       const userMode = queries.getUserMode(userId);
 
-      setUserState(userId, {
-        ...state,
-        step: "correcting_pending_ai",
-        pending_ai_correction: {
+      send(userId, {
+        type: "START_AI_CORRECTION",
+        data: {
           mode: userMode,
           current: {
-            positive_keywords: pending.positive_keywords,
-            negative_keywords: pending.negative_keywords,
-            llm_description: pending.llm_description,
+            positiveKeywords: pending.positiveKeywords,
+            negativeKeywords: pending.negativeKeywords,
+            llmDescription: pending.llmDescription,
           },
           conversation: [],
         },
@@ -1890,7 +1790,7 @@ ${bold("Описание:")} ${sub.llm_description}
           format`${bold("Уточнение запроса")}
 
 ${bold("Текущее описание:")}
-${pending.llm_description}
+${pending.llmDescription}
 
 Опиши что ты хочешь найти точнее:
 • "ищу только новые, не б/у"
@@ -1902,16 +1802,16 @@ ${pending.llm_description}
         );
       } else {
         // Advanced mode: full control over keywords
-        const posPreview = pending.positive_keywords.slice(0, 10).join(", ");
-        const posMore = pending.positive_keywords.length > 10 ? ` (+${pending.positive_keywords.length - 10})` : "";
+        const posPreview = pending.positiveKeywords.slice(0, 10).join(", ");
+        const posMore = pending.positiveKeywords.length > 10 ? ` (+${pending.positiveKeywords.length - 10})` : "";
 
         await context.editText(
           format`${bold("Режим ИИ-коррекции")}
 
 ${bold("Текущие параметры:")}
 ${bold("+ слова:")} ${code(posPreview + posMore)}
-${bold("- слова:")} ${code(pending.negative_keywords.join(", ") || "нет")}
-${bold("Описание:")} ${pending.llm_description}
+${bold("- слова:")} ${code(pending.negativeKeywords.join(", ") || "нет")}
+${bold("Описание:")} ${pending.llmDescription}
 
 Напиши что изменить, например:
 • "убери размеры и бренды"
@@ -1926,24 +1826,16 @@ ${bold("Описание:")} ${pending.llm_description}
     }
 
     case "apply_pending_ai": {
-      if (state.step !== "correcting_pending_ai" || !state.pending_ai_correction?.proposed) {
+      if (currentState !== "correctingPendingAi" || !c.pendingAiCorrection?.proposed) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
 
-      const { proposed } = state.pending_ai_correction;
+      const { proposed } = c.pendingAiCorrection;
       const queryId = `${userId}_${Date.now()}`;
 
-      // Update pending subscription with proposed changes
-      setUserState(userId, {
-        step: "awaiting_confirmation",
-        pending_subscription: {
-          original_query: state.pending_subscription!.original_query,
-          positive_keywords: proposed.positive_keywords,
-          negative_keywords: proposed.negative_keywords,
-          llm_description: proposed.llm_description,
-        },
-      });
+      // Apply correction via FSM
+      send(userId, { type: "APPLY_AI_CORRECTION" });
 
       await context.answer({ text: "Применено!" });
 
@@ -1952,13 +1844,13 @@ ${bold("Описание:")} ${pending.llm_description}
 ${bold("Скорректированные ключевые слова:")}
 
 ${bold("Позитивные:")}
-${code(proposed.positive_keywords.join(", "))}
+${code(proposed.positiveKeywords.join(", "))}
 
 ${bold("Негативные:")}
-${code(proposed.negative_keywords.join(", ") || "нет")}
+${code(proposed.negativeKeywords.join(", ") || "нет")}
 
 ${bold("Описание:")}
-${proposed.llm_description}
+${proposed.llmDescription}
 
 Подтверди или измени:
         `,
@@ -1970,19 +1862,16 @@ ${proposed.llm_description}
     }
 
     case "cancel_pending_ai": {
-      if (!state.pending_subscription) {
+      if (!c.pendingSub) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
 
-      const pending = state.pending_subscription;
+      const pending = c.pendingSub;
       const queryId = `${userId}_${Date.now()}`;
 
       // Return to awaiting_confirmation
-      setUserState(userId, {
-        step: "awaiting_confirmation",
-        pending_subscription: pending,
-      });
+      send(userId, { type: "CANCEL" });
 
       await context.answer({ text: "Отменено" });
 
@@ -1991,13 +1880,13 @@ ${proposed.llm_description}
 ${bold("Ключевые слова:")}
 
 ${bold("Позитивные:")}
-${code(pending.positive_keywords.join(", "))}
+${code(pending.positiveKeywords.join(", "))}
 
 ${bold("Негативные:")}
-${code(pending.negative_keywords.join(", ") || "нет")}
+${code(pending.negativeKeywords.join(", ") || "нет")}
 
 ${bold("Описание:")}
-${pending.llm_description}
+${pending.llmDescription}
 
 Подтверди или измени:
         `,
@@ -2009,7 +1898,7 @@ ${pending.llm_description}
     }
 
     case "back": {
-      setUserState(userId, { step: "idle" });
+      send(userId, { type: "CANCEL" });
       await context.answer({ text: "OK" });
       break;
     }
@@ -2023,7 +1912,7 @@ ${pending.llm_description}
         return;
       }
 
-      setUserState(userId, { step: "idle" });
+      send(userId, { type: "CANCEL" });
 
       let exclusionsText = "нет";
       if (sub.negative_keywords.length > 0) {
@@ -2060,10 +1949,7 @@ ${bold("Исключения:")} ${code(exclusionsText)}
         return;
       }
 
-      setUserState(userId, {
-        step: "adding_positive",
-        editing_subscription_id: subscriptionId,
-      });
+      send(userId, { type: "EDIT_SUB_POSITIVE", subscriptionId });
       await context.answer({ text: "Отправь слова" });
       await context.editText(
         `Текущие: ${sub.positive_keywords.join(", ")}\n\nОтправь слова для добавления через запятую:`
@@ -2080,10 +1966,7 @@ ${bold("Исключения:")} ${code(exclusionsText)}
         return;
       }
 
-      setUserState(userId, {
-        step: "adding_negative",
-        editing_subscription_id: subscriptionId,
-      });
+      send(userId, { type: "EDIT_SUB_NEGATIVE", subscriptionId });
       await context.answer({ text: "Отправь слова" });
       await context.editText(
         `Текущие: ${sub.negative_keywords.join(", ") || "нет"}\n\nОтправь слова для добавления через запятую:`
@@ -2105,10 +1988,7 @@ ${bold("Исключения:")} ${code(exclusionsText)}
         return;
       }
 
-      setUserState(userId, {
-        step: "removing_positive",
-        editing_subscription_id: subscriptionId,
-      });
+      send(userId, { type: "EDIT_SUB_POSITIVE", subscriptionId });
 
       const list = sub.positive_keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
       await context.answer({ text: "Выбери слова" });
@@ -2133,10 +2013,7 @@ ${bold("Исключения:")} ${code(exclusionsText)}
         return;
       }
 
-      setUserState(userId, {
-        step: "removing_negative",
-        editing_subscription_id: subscriptionId,
-      });
+      send(userId, { type: "EDIT_SUB_NEGATIVE", subscriptionId });
 
       const list = sub.negative_keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
       await context.answer({ text: "Выбери слова" });
@@ -2203,7 +2080,7 @@ ${bold("Исключения:")} ${code(exclusionsText)}
             ),
           }
         );
-        setUserState(userId, { step: "idle" });
+        send(userId, { type: "CANCEL" });
       } else {
         // Update the keyboard with remaining keywords
         const list = keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
@@ -2217,12 +2094,13 @@ ${bold("Исключения:")} ${code(exclusionsText)}
     }
 
     case "skip_invite_link": {
-      if (state.step !== "awaiting_invite_link") {
+      if (currentState !== "awaitingInviteLink") {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
 
       // Skip - go back to adding_group
+      send(userId, { type: "SKIP_INVITE" });
       await context.answer({ text: "Пропущено" });
       await context.editText("Группа пропущена.");
       await showAddGroupPrompt(
@@ -2233,80 +2111,78 @@ ${bold("Исключения:")} ${code(exclusionsText)}
     }
 
     case "toggle_group": {
-      if (state.step !== "selecting_groups" || !state.available_groups) {
+      if (currentState !== "selectingGroups" || c.availableGroups.length === 0) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
 
       const groupId = Number(data.id);
-      const group = state.available_groups.find((g) => g.id === groupId);
+      const group = c.availableGroups.find((g) => g.id === groupId);
       if (!group) return;
 
-      const selected = state.selected_groups || [];
-      const isSelected = selected.some((g) => g.id === groupId);
+      // Toggle via FSM event
+      send(userId, { type: "TOGGLE_GROUP", groupId });
 
-      const newSelected = isSelected
-        ? selected.filter((g) => g.id !== groupId)
-        : [...selected, group];
+      // Re-read context after update
+      const updatedC = ctx(userId);
+      const isSelected = !c.selectedGroups.some((g) => g.id === groupId);
 
-      setUserState(userId, { ...state, selected_groups: newSelected });
-
-      const selectedIds = new Set(newSelected.map((g) => g.id));
-      await context.answer({ text: isSelected ? "Снято" : "Выбрано" });
+      const selectedIds = new Set(updatedC.selectedGroups.map((g) => g.id));
+      await context.answer({ text: isSelected ? "Выбрано" : "Снято" });
       await context.editText(
         format`
 ${bold("Выбери группы для мониторинга:")}
 
-Выбрано: ${newSelected.length} из ${state.available_groups.length}
+Выбрано: ${updatedC.selectedGroups.length} из ${updatedC.availableGroups.length}
         `,
         {
-          reply_markup: groupsKeyboard(state.available_groups, selectedIds),
+          reply_markup: groupsKeyboard(updatedC.availableGroups, selectedIds),
         }
       );
       break;
     }
 
     case "select_all_groups": {
-      if (state.step !== "selecting_groups" || !state.available_groups) {
+      if (currentState !== "selectingGroups" || c.availableGroups.length === 0) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
 
-      const allGroups = state.available_groups;
-      setUserState(userId, { ...state, selected_groups: [...allGroups] });
+      send(userId, { type: "SELECT_ALL" });
 
-      const selectedIds = new Set(allGroups.map((g) => g.id));
+      const updatedC = ctx(userId);
+      const selectedIds = new Set(updatedC.availableGroups.map((g) => g.id));
       await context.answer({ text: "Выбраны все" });
       await context.editText(
         format`
 ${bold("Выбери группы для мониторинга:")}
 
-Выбрано: ${allGroups.length} из ${allGroups.length}
+Выбрано: ${updatedC.availableGroups.length} из ${updatedC.availableGroups.length}
         `,
         {
-          reply_markup: groupsKeyboard(allGroups, selectedIds),
+          reply_markup: groupsKeyboard(updatedC.availableGroups, selectedIds),
         }
       );
       break;
     }
 
     case "deselect_all_groups": {
-      if (state.step !== "selecting_groups" || !state.available_groups) {
+      if (currentState !== "selectingGroups" || c.availableGroups.length === 0) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
 
-      setUserState(userId, { ...state, selected_groups: [] });
+      send(userId, { type: "DESELECT_ALL" });
 
       await context.answer({ text: "Сняты все" });
       await context.editText(
         format`
 ${bold("Выбери группы для мониторинга:")}
 
-Выбрано: 0 из ${state.available_groups.length}
+Выбрано: 0 из ${c.availableGroups.length}
         `,
         {
-          reply_markup: groupsKeyboard(state.available_groups, new Set()),
+          reply_markup: groupsKeyboard(c.availableGroups, new Set()),
         }
       );
       break;
@@ -2315,35 +2191,35 @@ ${bold("Выбери группы для мониторинга:")}
     case "confirm_groups":
     case "skip_groups": {
       if (
-        state.step !== "selecting_groups" ||
-        !state.pending_subscription ||
-        !state.available_groups
+        currentState !== "selectingGroups" ||
+        !c.pendingSub ||
+        c.availableGroups.length === 0
       ) {
         await context.answer({ text: "Сессия истекла. Отправь новый запрос." });
         return;
       }
 
-      const { original_query, positive_keywords, negative_keywords, llm_description } =
-        state.pending_subscription;
+      const { originalQuery, positiveKeywords, negativeKeywords, llmDescription } =
+        c.pendingSub;
 
       // Create subscription
       const subscriptionId = queries.createSubscription(
         userId,
-        original_query,
-        positive_keywords,
-        negative_keywords,
-        llm_description
+        originalQuery,
+        positiveKeywords,
+        negativeKeywords,
+        llmDescription
       );
 
       // Generate BGE-M3 embeddings in background (non-blocking)
-      generateKeywordEmbeddings(positive_keywords, negative_keywords)
+      generateKeywordEmbeddings(positiveKeywords, negativeKeywords)
         .then((embeddings) => {
           queries.updateKeywordEmbeddings(subscriptionId, embeddings);
           botLog.info({ subscriptionId }, "Keyword embeddings generated");
         })
         .catch((e) => botLog.error({ err: e, subscriptionId }, "Failed to generate embeddings"));
 
-      const selectedGroups = state.selected_groups || [];
+      const selectedGroups = c.selectedGroups;
 
       // Save selected groups
       if (selectedGroups.length > 0) {
@@ -2351,7 +2227,7 @@ ${bold("Выбери группы для мониторинга:")}
       }
 
       invalidateSubscriptionsCache();
-      setUserState(userId, { step: "idle" });
+      send(userId, { type: "CONFIRM_GROUPS" });
 
       await context.answer({ text: "Подписка создана!" });
 
@@ -2404,13 +2280,13 @@ ${bold("Выбери группы для мониторинга:")}
     case "rate_hot":
     case "rate_warm":
     case "rate_cold": {
-      if (state.step !== "rating_examples" || !state.pending_examples) {
+      if (currentState !== "ratingExamples" || !c.ratingExamples) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
 
-      const { messages, ratings, current_index } = state.pending_examples;
-      const currentExample = messages[current_index];
+      const { messages, currentIndex } = c.ratingExamples;
+      const currentExample = messages[currentIndex];
       if (!currentExample) {
         await context.answer({ text: "Ошибка" });
         return;
@@ -2424,28 +2300,16 @@ ${bold("Выбери группы для мониторинга:")}
       };
       const rating = ratingMap[data.action]!;
 
-      // Save rating
-      const newRatings = [
-        ...ratings,
-        { messageId: currentExample.id, text: currentExample.text, rating },
-      ];
-
       const ratingEmoji = { hot: "🔥", warm: "☀️", cold: "❄️" }[rating];
       await context.answer({ text: `${ratingEmoji} Записано` });
 
-      const nextIndex = current_index + 1;
+      // Send rating via FSM event
+      send(userId, { type: "RATE", messageId: currentExample.id, rating });
+
+      const nextIndex = currentIndex + 1;
 
       if (nextIndex < messages.length) {
         // Show next example
-        setUserState(userId, {
-          ...state,
-          pending_examples: {
-            ...state.pending_examples,
-            ratings: newRatings,
-            current_index: nextIndex,
-          },
-        });
-
         await context.editText("Переходим к следующему...");
         await showExampleForRating(
           context,
@@ -2456,15 +2320,6 @@ ${bold("Выбери группы для мониторинга:")}
         );
       } else {
         // All examples rated, generate final keywords
-        setUserState(userId, {
-          ...state,
-          pending_examples: {
-            ...state.pending_examples,
-            ratings: newRatings,
-            current_index: nextIndex,
-          },
-        });
-
         await context.editText("Все примеры оценены!");
         await finishRatingAndGenerateKeywords(context, userId);
       }
@@ -2472,11 +2327,12 @@ ${bold("Выбери группы для мониторинга:")}
     }
 
     case "skip_rating": {
-      if (state.step !== "rating_examples" || !state.pending_examples) {
+      if (currentState !== "ratingExamples" || !c.ratingExamples) {
         await context.answer({ text: "Сессия истекла" });
         return;
       }
 
+      send(userId, { type: "SKIP_RATING" });
       await context.answer({ text: "Пропускаем..." });
       await context.editText("Примеры пропущены.");
       await finishRatingAndGenerateKeywords(context, userId);

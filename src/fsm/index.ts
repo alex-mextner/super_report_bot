@@ -24,15 +24,13 @@ export {
 } from "./context";
 export type { BotEvent } from "./events";
 
-// Adapter for gradual migration
+// Adapter for FSM operations
 export {
   getActor,
   send,
   getCurrentState,
   checkState,
   getFsmContext,
-  getState,
-  setState,
   clearActor,
   getActiveActorsCount,
 } from "./adapter";

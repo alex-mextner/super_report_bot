@@ -3,7 +3,10 @@
     "allow": [
       "Bash(bun test:*)",
       "Bash(bun run:*)",
-      "Bash(bun tsc:*)"
+      "Bash(bun tsc:*)",
+      "Bash(/Users/ultra/.bun/bin/bun run tsc --noEmit)",
+      "Bash(bunx tsc:*)",
+      "Bash(/Users/ultra/.bun/bin/bun x tsc:*)"
     ],
     "deny": [],
     "ask": []
