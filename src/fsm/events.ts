@@ -61,8 +61,12 @@ export type BotEvent =
    *
    * Called by the bot handler after searching groups for similar messages.
    * The examples are shown to the user one by one for hot/warm/cold rating.
+   *
+   * pendingSub is optional - if provided, it's stored in context along with examples.
+   * This allows startRatingFlow to send a single event instead of
+   * KEYWORDS_GENERATED followed by START_RATING.
    */
-  | { type: "START_RATING"; examples: RatingExamplesData }
+  | { type: "START_RATING"; examples: RatingExamplesData; pendingSub?: PendingSubscription }
 
   /**
    * User rated an example message.

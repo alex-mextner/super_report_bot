@@ -537,6 +537,16 @@ export const userMachine = setup({
         ],
 
         /**
+         * Handler wants to initialize rating with examples.
+         * This can happen when we're already in ratingExamples
+         * (e.g., after clarification flow auto-transitions here).
+         * Just update the context with examples data.
+         */
+        START_RATING: {
+          actions: "startRating",
+        },
+
+        /**
          * User doesn't want to rate examples - skip the whole thing.
          * Proceed directly to confirmation.
          */

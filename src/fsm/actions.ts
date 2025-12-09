@@ -140,11 +140,16 @@ export const skipQuestion = {
  * and ask them to rate each one as hot/warm/cold.
  *
  * This initializes the flow with the found examples.
+ * If pendingSub is provided, it's also stored in context.
  */
 export const startRating = {
   ratingExamples: ({ event }: { event: BotEvent }) => {
     if (event.type === "START_RATING") return event.examples;
     return null;
+  },
+  pendingSub: ({ context, event }: { context: BotContext; event: BotEvent }) => {
+    if (event.type === "START_RATING" && event.pendingSub) return event.pendingSub;
+    return context.pendingSub; // Keep existing if not provided
   },
 };
 

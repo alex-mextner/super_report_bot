@@ -338,6 +338,28 @@ describe("State Machine", () => {
       expect(getContext(actor).ratingExamples).toEqual(examples);
     });
 
+    // Bug fix: START_RATING should also set pendingSub when provided
+    // This allows startRatingFlow to send a single event instead of
+    // KEYWORDS_GENERATED followed by START_RATING (which was ignored)
+    test("START_RATING sets both ratingExamples and pendingSub when provided", () => {
+      const actor = createTestActor();
+      const examples = {
+        messages: [{ id: 1, text: "test", groupId: 1, groupTitle: "G", isGenerated: false }],
+        ratings: [],
+        currentIndex: 0,
+      };
+      const pendingSub = {
+        originalQuery: "test query",
+        positiveKeywords: [],
+        negativeKeywords: [],
+        llmDescription: "",
+      };
+      actor.send({ type: "START_RATING", examples, pendingSub });
+      expect(getState(actor)).toBe("ratingExamples");
+      expect(getContext(actor).ratingExamples).toEqual(examples);
+      expect(getContext(actor).pendingSub).toEqual(pendingSub);
+    });
+
     test("START_CLARIFICATION goes to clarifyingQuery with data", () => {
       const actor = createTestActor();
       const data = { originalQuery: "test", questions: ["Q1"], answers: [], currentIndex: 0 };

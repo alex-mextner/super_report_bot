@@ -12,12 +12,14 @@ import {
   getContext,
   getStateValue,
   isInState,
+  loadUserSnapshot,
   type UserActor,
   type StateValue,
 } from "./index";
 import type { BotContext } from "./context";
 import type { BotEvent } from "./events";
 import { queries } from "../db";
+import { botLog } from "../logger";
 
 // In-memory cache of actors (state is persisted to DB)
 const actors = new Map<number, UserActor>();
@@ -31,6 +33,14 @@ export function getActor(telegramId: number): UserActor {
     // Ensure user exists in DB first
     queries.getOrCreateUser(telegramId);
     const mode = queries.getUserMode(telegramId);
+
+    // Debug: check if we have persisted state
+    const persisted = loadUserSnapshot(telegramId);
+    botLog.debug(
+      { userId: telegramId, hasPersistedState: !!persisted, persistedValue: persisted?.value },
+      "Creating actor from persistence"
+    );
+
     actor = createUserActor(telegramId, mode);
     actors.set(telegramId, actor);
   }

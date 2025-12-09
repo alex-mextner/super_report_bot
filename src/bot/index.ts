@@ -83,6 +83,18 @@ if (!BOT_TOKEN) {
 const ctx = (userId: number): BotContext => getFsmContext(userId);
 const fsmState = (userId: number) => getCurrentState(userId);
 
+/**
+ * Reset FSM to idle if stuck in another state.
+ * Call this before starting new flows (commands, new subscription requests).
+ */
+function ensureIdle(userId: number): void {
+  const currentState = fsmState(userId);
+  if (currentState !== "idle") {
+    botLog.debug({ userId, currentState }, "Resetting stuck FSM state to idle");
+    send(userId, { type: "CANCEL" });
+  }
+}
+
 // Helper: show single example for rating
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function showExampleForRating(
@@ -216,18 +228,15 @@ async function startRatingFlow(
     return;
   }
 
-  // Save state and show first example - set pending sub first, then start rating
+  // Save state and show first example - single event sets both pendingSub and ratingExamples
   send(userId, {
-    type: "KEYWORDS_GENERATED",
+    type: "START_RATING",
     pendingSub: {
       originalQuery: query,
       positiveKeywords: [],
       negativeKeywords: [],
       llmDescription: "",
     },
-  });
-  send(userId, {
-    type: "START_RATING",
     examples: {
       messages: examples.map((e) => ({
         id: e.id,
@@ -329,6 +338,7 @@ bot.command("start", async (context) => {
   if (!userId) return;
 
   queries.getOrCreateUser(userId);
+  ensureIdle(userId);
 
   await context.send(format`
 Привет! Я бот для мониторинга сообщений в группах.
@@ -463,6 +473,7 @@ bot.command("addgroup", async (context) => {
   if (!userId) return;
 
   queries.getOrCreateUser(userId);
+  ensureIdle(userId);
 
   send(userId, { type: "ADDGROUP" });
 
@@ -601,6 +612,12 @@ bot.on("message", async (context) => {
   const currentState = fsmState(userId);
   const c = ctx(userId);
   const text = context.text;
+
+  // Debug logging
+  botLog.debug(
+    { userId, currentState, hasClarification: !!c.clarification, text: text.substring(0, 50) },
+    "Message handler: state check"
+  );
 
   // Handle "Готово" button in adding_group state
   if (text === "Готово" && currentState === "addingGroup") {
@@ -1121,6 +1138,9 @@ ${bold("ИИ:")} ${result.summary}
   const query = context.text;
   const mode = queries.getUserMode(userId);
 
+  // Reset FSM to idle if stuck in another state (e.g. from previous session)
+  ensureIdle(userId);
+
   if (mode === "normal") {
     // Normal mode: analyze query first, ask clarification if needed
     await context.send("Анализирую запрос...");
@@ -1142,7 +1162,15 @@ ${bold("ИИ:")} ${result.summary}
           },
         });
 
-        const firstQuestion = analysis.questions[0]!;
+        // Debug: verify state changed
+        const newState = fsmState(userId);
+        const newCtx = ctx(userId);
+        botLog.debug(
+          { userId, newState, hasClarification: !!newCtx.clarification },
+          "After START_CLARIFICATION"
+        );
+
+        const firstQuestion = analysis.questions[0]!
         const questionNumber = `(1/${analysis.questions.length})`;
         await context.send(format`${bold("Уточняющий вопрос")} ${questionNumber}\n\n${firstQuestion}`, {
           reply_markup: skipQuestionKeyboard(),
