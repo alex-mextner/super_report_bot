@@ -8,6 +8,7 @@ import { getMessages, getAllCachedMessages, getCachedGroups, getCachedMessageByI
 import { analyzeMessage, analyzeMessagesBatch, type BatchItem } from "../llm/analyze.ts";
 import { deepAnalyze } from "../llm/deep-analyze.ts";
 import { generateNgrams, generateWordShingles } from "../matcher/normalize.ts";
+import { fetchMediaForMessage } from "../listener/index.ts";
 
 const ADMIN_ID = Number(process.env.ADMIN_ID) || 0;
 
@@ -487,11 +488,18 @@ function buildTelegramLink(groupId: number, messageId: number, topicId?: number)
 // ==============================
 
 // GET /api/products/:messageId/:groupId/media - Get media info for a message
-api.get("/products/:messageId/:groupId/media", (c) => {
+api.get("/products/:messageId/:groupId/media", async (c) => {
   const messageId = Number(c.req.param("messageId"));
   const groupId = Number(c.req.param("groupId"));
 
-  const media = queries.getMediaForMessage(messageId, groupId);
+  let media = queries.getMediaForMessage(messageId, groupId);
+
+  // If no media in DB, try to fetch from Telegram
+  if (media.length === 0) {
+    await fetchMediaForMessage(messageId, groupId);
+    // Re-query after fetching
+    media = queries.getMediaForMessage(messageId, groupId);
+  }
 
   return c.json({
     items: media.map((m) => ({

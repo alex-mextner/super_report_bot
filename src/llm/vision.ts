@@ -1,17 +1,13 @@
 /**
- * Vision LLM verification using Qwen3-VL via HuggingFace Inference API
+ * Vision LLM verification using Qwen VL via HuggingFace Inference API
  *
  * Uses the image to verify if product matches subscription description
  */
 
 import { llmLog } from "../logger.ts";
+import { hf, withRetry } from "./index.ts";
 
-const HF_TOKEN = process.env.HF_TOKEN;
-const QWEN_VL_MODEL = "Qwen/Qwen2.5-VL-72B-Instruct"; // More stable than 235B Thinking
-
-if (!HF_TOKEN) {
-  llmLog.warn("HF_TOKEN not set. Vision verification will not work.");
-}
+const QWEN_VL_MODEL = "Qwen/Qwen3-VL-235B-A22B-Thinking";
 
 export interface VisionVerificationResult {
   isMatch: boolean;
@@ -26,10 +22,6 @@ export async function verifyWithVision(
   imageBuffer: Uint8Array,
   subscriptionDescription: string
 ): Promise<VisionVerificationResult> {
-  if (!HF_TOKEN) {
-    throw new Error("HF_TOKEN not configured");
-  }
-
   const base64Image = Buffer.from(imageBuffer).toString("base64");
   const imageDataUrl = `data:image/jpeg;base64,${base64Image}`;
 
@@ -44,42 +36,25 @@ Be strict but reasonable:
 - Consider visual characteristics, brand, type, condition visible in image`;
 
   try {
-    const response = await fetch(
-      `https://router.huggingface.co/hf-inference/models/${QWEN_VL_MODEL}`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${HF_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          inputs: [
-            {
-              role: "user",
-              content: [
-                { type: "image_url", image_url: { url: imageDataUrl } },
-                { type: "text", text: prompt },
-              ],
-            },
-          ],
-          parameters: {
-            max_new_tokens: 300,
-            temperature: 0.1,
-            return_full_text: false,
+    const response = await withRetry(() =>
+      hf.chatCompletion({
+        model: QWEN_VL_MODEL,
+        provider: "novita",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "image_url", image_url: { url: imageDataUrl } },
+              { type: "text", text: prompt },
+            ],
           },
-        }),
-      }
+        ],
+        max_tokens: 300,
+        temperature: 0.1,
+      })
     );
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`HuggingFace API error (${response.status}): ${errorText}`);
-    }
-
-    const data = (await response.json()) as
-      | { generated_text: string }
-      | Array<{ generated_text: string }>;
-    const content = Array.isArray(data) ? data[0]?.generated_text : data?.generated_text;
+    const content = response.choices[0]?.message?.content;
 
     if (!content) {
       throw new Error("Empty response from vision model");
@@ -147,22 +122,15 @@ function parseVisionResponse(content: string): VisionVerificationResult {
  * Check if vision API is available
  */
 export async function checkVisionHealth(): Promise<boolean> {
-  if (!HF_TOKEN) return false;
-
   try {
-    // Simple status check
-    const response = await fetch(
-      `https://router.huggingface.co/hf-inference/status/${QWEN_VL_MODEL}`,
-      {
-        headers: { Authorization: `Bearer ${HF_TOKEN}` },
-        signal: AbortSignal.timeout(5000),
-      }
-    );
-
-    if (!response.ok) return false;
-
-    const data = (await response.json()) as { state?: string };
-    return data.state === "Loadable" || data.state === "Loaded";
+    // Quick test with minimal request
+    const response = await hf.chatCompletion({
+      model: QWEN_VL_MODEL,
+      provider: "novita",
+      messages: [{ role: "user", content: "ping" }],
+      max_tokens: 1,
+    });
+    return !!response.choices[0]?.message?.content;
   } catch {
     return false;
   }

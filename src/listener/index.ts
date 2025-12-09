@@ -201,6 +201,58 @@ async function saveMediaToDisk(
   }
 }
 
+// Fetch media for existing message (on-demand loading)
+// Returns true if media was fetched/exists, false otherwise
+export async function fetchMediaForMessage(
+  messageId: number,
+  groupId: number
+): Promise<boolean> {
+  // Check if media already exists in DB
+  const existingMedia = queries.getMediaForMessage(messageId, groupId);
+  if (existingMedia.length > 0) {
+    return true; // Already have media
+  }
+
+  // Fetch message from Telegram
+  try {
+    const messages = await mtClient.getMessages(groupId, [messageId]);
+    const msg = messages[0];
+
+    if (!msg) {
+      listenerLog.debug({ messageId, groupId }, "Message not found in Telegram");
+      return false;
+    }
+
+    // Check if it's an album (grouped message)
+    let media: MediaItem[] = [];
+    if (msg.groupedId) {
+      const albumMessages = await mtClient.getMessageGroup({ chatId: groupId, message: messageId });
+      media = await downloadMediaFromAlbum(albumMessages);
+    } else {
+      const singleMedia = await downloadSingleMedia(msg);
+      if (singleMedia) media = singleMedia;
+    }
+
+    if (media.length === 0) {
+      listenerLog.debug({ messageId, groupId }, "No media in message");
+      return false;
+    }
+
+    // Save to disk and DB
+    await saveMediaToDisk(messageId, groupId, media);
+
+    listenerLog.info(
+      { messageId, groupId, count: media.length },
+      "Media fetched on demand"
+    );
+
+    return true;
+  } catch (error) {
+    listenerLog.error({ err: error, messageId, groupId }, "Failed to fetch media on demand");
+    return false;
+  }
+}
+
 // Convert mtcute Message to our IncomingMessage
 async function toIncomingMessage(msg: Message): Promise<IncomingMessage | null> {
   const chat = msg.chat;
