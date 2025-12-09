@@ -1,5 +1,17 @@
 /**
- * Tests for similar message search functionality
+ * SIMILAR MESSAGES — поиск похожих сообщений в кэше
+ *
+ * Используется при создании подписки для показа примеров пользователю.
+ * Ищем в кэше групп сообщения, похожие на запрос пользователя.
+ *
+ * Алгоритм:
+ * 1. Берём keywords из запроса
+ * 2. Считаем n-gram similarity для каждого сообщения в кэше
+ * 3. Фильтруем по negative keywords и минимальной длине (20 символов)
+ * 4. Возвращаем top-N отсортированные по score
+ *
+ * findSimilarWithFallback — прогрессивно снижает порог (0.25 → 0.15 → 0.05)
+ * если мало результатов на строгом пороге.
  */
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";

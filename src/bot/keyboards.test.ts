@@ -1,3 +1,17 @@
+/**
+ * KEYBOARDS — inline keyboards для Telegram бота
+ *
+ * Тесты проверяют ДЕЙСТВИЯ (callback actions), а не UI (текст кнопок, layout).
+ * Это позволяет менять текст кнопок без поломки тестов.
+ *
+ * Каждый callback содержит JSON: { action: "confirm", id: "...", ... }
+ * FSM и handlers обрабатывают actions, не зная про UI.
+ *
+ * Режимы:
+ * - normal: упрощённый UI, только confirm/cancel/ai_correct
+ * - advanced: полный UI с ручным редактированием keywords
+ */
+
 import { describe, test, expect } from "bun:test";
 import {
   confirmKeyboard,

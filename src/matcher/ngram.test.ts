@@ -1,3 +1,23 @@
+/**
+ * N-GRAM MATCHING — быстрый fuzzy search по текстам
+ *
+ * Используется для pre-filter перед дорогим LLM verification.
+ * Комбинирует два подхода:
+ *
+ * 1. Character trigrams (вес 0.3)
+ *    - "hello" → {"hel", "ell", "llo"}
+ *    - Ловит опечатки и морфологические варианты
+ *
+ * 2. Word bigrams (вес 0.7)
+ *    - "hello world" → {"hello world"}
+ *    - Важнее для семантики
+ *
+ * Jaccard similarity: |A ∩ B| / |A ∪ B|
+ *
+ * passesNgramFilter — основная функция, комбинирует keywords и llm_description
+ * с весами 50/50.
+ */
+
 import { describe, test, expect } from "bun:test";
 import {
   calculateNgramSimilarity,

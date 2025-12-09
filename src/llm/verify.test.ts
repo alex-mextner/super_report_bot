@@ -1,3 +1,17 @@
+/**
+ * LLM VERIFICATION — финальная проверка релевантности через AI
+ *
+ * После n-gram filter (быстрый, но неточный) проверяем через DeepSeek:
+ * "Соответствует ли это сообщение описанию подписки?"
+ *
+ * Пороги:
+ * - confidence >= 0.7 → isMatch: true
+ * - confidence < 0.7  → isMatch: false
+ *
+ * Fallback: если DeepSeek недоступен, используем только n-gram score.
+ * Если n-gram score > 0.7 — notify anyway.
+ */
+
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 import type { DeepSeekVerificationResult } from "./deepseek.ts";
 

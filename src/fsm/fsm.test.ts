@@ -1,11 +1,13 @@
 /**
- * ═══════════════════════════════════════════════════════════════════════════════
+ * FSM (Finite State Machine) — ядро бота, управляет диалогами с пользователем.
  *
- *                     FSM TEST SUITE - 100% COVERAGE
+ * Бот ведёт пользователя через несколько flows:
+ * - Создание подписки: запрос → примеры → подтверждение → выбор групп
+ * - Редактирование: изменение ключевых слов существующей подписки
+ * - Добавление групп: /addgroup → share chat → invite link (если приватная)
+ * - AI-коррекция: пользователь просит AI улучшить ключевые слова
  *
- *                Testing every state, transition, guard, and action
- *
- * ═══════════════════════════════════════════════════════════════════════════════
+ * Каждое состояние = экран в боте. Переходы = действия пользователя.
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
@@ -14,53 +16,36 @@ import { userMachine } from "./machine";
 import { createInitialContext, type BotContext } from "./context";
 import * as guards from "./guards";
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//                              TEST HELPERS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Create a test actor with optional context overrides
- */
 function createTestActor(contextOverrides: Partial<BotContext> = {}) {
   const initialContext = createInitialContext(12345, "normal");
   const context = { ...initialContext, ...contextOverrides };
-
   const actor = createActor(userMachine, { input: context });
   actor.start();
   return actor;
 }
 
-/**
- * Get current state value as string
- */
 function getState(actor: ReturnType<typeof createTestActor>): string {
   return actor.getSnapshot().value as string;
 }
 
-/**
- * Get current context
- */
 function getContext(actor: ReturnType<typeof createTestActor>): BotContext {
   return actor.getSnapshot().context;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//                          CONTEXT CREATION TESTS
-// ═══════════════════════════════════════════════════════════════════════════════
-
 describe("createInitialContext", () => {
   test("creates valid context for FSM initialization", () => {
     const ctx = createInitialContext(12345, "advanced");
-
-    // Only check that context is usable by FSM - not every field
     expect(ctx.telegramId).toBe(12345);
     expect(ctx.userMode).toBe("advanced");
-    expect(ctx.pendingSub).toBeNull(); // FSM requires this to be null initially
+    expect(ctx.pendingSub).toBeNull();
   });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//                              GUARDS TESTS
+// GUARDS — условия, определяющие какой переход сработает
+//
+// Пример: при CONFIRM, если hasAvailableGroups=true → selectingGroups,
+//         иначе → idle (подписка сохраняется без выбора групп)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe("Guards", () => {
@@ -90,11 +75,15 @@ describe("Guards", () => {
   });
 
   describe("allExamplesRated", () => {
+    // Guard для автоматического перехода после последнего примера.
+    // Без данных = нечего оценивать = готово.
     test("returns true when no ratingExamples data", () => {
       const ctx = createInitialContext(123);
       expect(guards.allExamplesRated({ context: ctx })).toBe(true);
     });
 
+    // currentIndex указывает на СЛЕДУЮЩИЙ пример для показа.
+    // Если currentIndex >= messages.length — все показаны, переходим дальше.
     test("returns true when all examples rated", () => {
       const ctx = createInitialContext(123);
       ctx.ratingExamples = {
@@ -148,6 +137,8 @@ describe("Guards", () => {
     });
   });
 
+  // Приватная группа без публичного username требует invite link (t.me/+xxx).
+  // Бот не может вступить в такую группу без ссылки-приглашения.
   describe("needsInviteLink", () => {
     test("returns false when no pending group", () => {
       const ctx = createInitialContext(123);
@@ -293,7 +284,18 @@ describe("Guards", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//                         STATE MACHINE TESTS
+// STATE MACHINE — граф состояний бота
+//
+// Состояния (экраны бота):
+//   idle                  — ожидание команды от пользователя
+//   clarifyingQuery       — задаём уточняющие вопросы (advanced mode)
+//   ratingExamples        — показываем примеры для оценки hot/warm/cold
+//   awaitingConfirmation  — показываем сгенерированные ключевые слова
+//   selectingGroups       — выбор групп для мониторинга
+//   addingGroup           — flow добавления новой группы
+//   awaitingInviteLink    — ждём invite link для приватной группы
+//   correctingPendingAi   — AI-коррекция при создании подписки
+//   editing*              — редактирование существующей подписки
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe("State Machine", () => {
@@ -304,11 +306,14 @@ describe("State Machine", () => {
     });
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  //                          IDLE STATE TRANSITIONS
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // IDLE — точка входа, отсюда начинаются все flows
+  // ═══════════════════════════════════════════════════════════════════════════
 
   describe("idle state", () => {
+    // Normal mode: сразу показываем примеры и генерируем keywords.
+    // Advanced mode: сначала задаём уточняющие вопросы от LLM.
+    // Это ключевая развилка — определяет UX для разных типов пользователей.
     test("TEXT_QUERY goes to ratingExamples for normal users", () => {
       const actor = createTestActor({ userMode: "normal" });
       actor.send({ type: "TEXT_QUERY", text: "find phones" });
@@ -401,9 +406,12 @@ describe("State Machine", () => {
     });
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  //                      CLARIFYING_QUERY TRANSITIONS
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CLARIFYING QUERY — уточняющие вопросы (только advanced mode)
+  //
+  // LLM генерирует вопросы типа "Какой бюджет?" или "B2B или B2C?"
+  // Пользователь отвечает или пропускает → после всех вопросов → ratingExamples
+  // ═══════════════════════════════════════════════════════════════════════════
 
   describe("clarifyingQuery state", () => {
     let actor: ReturnType<typeof createTestActor>;
@@ -421,6 +429,8 @@ describe("State Machine", () => {
       });
     });
 
+    // Каждый ANSWER инкрементирует currentIndex и сохраняет ответ.
+    // FSM остаётся в clarifyingQuery пока есть вопросы.
     test("ANSWER stores answer and stays in clarifyingQuery if more questions", () => {
       actor.send({ type: "ANSWER", text: "Answer 1" });
       expect(getState(actor)).toBe("clarifyingQuery");
@@ -428,12 +438,16 @@ describe("State Machine", () => {
       expect(getContext(actor).clarification?.currentIndex).toBe(1);
     });
 
+    // Автопереход после последнего вопроса — guard allQuestionsAnswered
+    // проверяет currentIndex >= questions.length
     test("ANSWER on last question goes to ratingExamples", () => {
       actor.send({ type: "ANSWER", text: "A1" });
       actor.send({ type: "ANSWER", text: "A2" });
       expect(getState(actor)).toBe("ratingExamples");
     });
 
+    // SKIP = пустой ответ. Пользователь может не знать ответ,
+    // но мы всё равно хотим продолжить flow.
     test("SKIP_QUESTION stores empty answer and advances", () => {
       actor.send({ type: "SKIP_QUESTION" });
       expect(getContext(actor).clarification?.answers).toEqual([""]);
@@ -453,9 +467,13 @@ describe("State Machine", () => {
     });
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  //                      RATING_EXAMPLES TRANSITIONS
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // RATING EXAMPLES — оценка примеров сообщений
+  //
+  // Бот показывает похожие сообщения из кэша групп.
+  // Пользователь оценивает: hot (да!), warm (похоже), cold (нет).
+  // Оценки используются для генерации более точных ключевых слов.
+  // ═══════════════════════════════════════════════════════════════════════════
 
   describe("ratingExamples state", () => {
     let actor: ReturnType<typeof createTestActor>;
@@ -512,9 +530,17 @@ describe("State Machine", () => {
     });
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  //                   AWAITING_CONFIRMATION TRANSITIONS
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // AWAITING CONFIRMATION — подтверждение ключевых слов
+  //
+  // Показываем пользователю:
+  //   - Позитивные keywords (что искать)
+  //   - Негативные keywords (что исключить)
+  //   - LLM description (семантическое описание)
+  //
+  // Отсюда можно: подтвердить → выбор групп, редактировать keywords,
+  // попросить AI улучшить, или отменить.
+  // ═══════════════════════════════════════════════════════════════════════════
 
   describe("awaitingConfirmation state", () => {
     let actor: ReturnType<typeof createTestActor>;
@@ -530,11 +556,15 @@ describe("State Machine", () => {
       actor.send({ type: "KEYWORDS_GENERATED", pendingSub });
     });
 
+    // Если у пользователя нет добавленных групп — сохраняем подписку сразу.
+    // Позже он сможет добавить группы через /addgroup.
     test("CONFIRM with no available groups goes to idle", () => {
       actor.send({ type: "CONFIRM" });
       expect(getState(actor)).toBe("idle");
     });
 
+    // Если группы есть — даём выбрать какие мониторить.
+    // Guard hasAvailableGroups определяет этот переход.
     test("CONFIRM with available groups goes to selectingGroups", () => {
       // Set available groups first
       actor.send({
@@ -594,9 +624,12 @@ describe("State Machine", () => {
     });
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  //                  CORRECTING_PENDING_AI TRANSITIONS
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // AI CORRECTION — пользователь просит AI улучшить keywords
+  //
+  // Диалог: "Добавь ещё про скидки" → AI предлагает изменения → Apply/Cancel
+  // Это для НОВЫХ подписок. Для существующих — editingSubAi.
+  // ═══════════════════════════════════════════════════════════════════════════
 
   describe("correctingPendingAi state", () => {
     let actor: ReturnType<typeof createTestActor>;
@@ -638,6 +671,8 @@ describe("State Machine", () => {
       expect(getContext(actor).pendingAiCorrection?.proposed).toEqual(proposed);
     });
 
+    // Apply копирует proposed → pendingSub и возвращает к подтверждению.
+    // После этого пользователь может подтвердить или продолжить редактировать.
     test("APPLY_AI_CORRECTION applies changes and goes to awaitingConfirmation", () => {
       const proposed = {
         positiveKeywords: ["applied"],
@@ -652,6 +687,8 @@ describe("State Machine", () => {
       expect(getContext(actor).pendingAiCorrection).toBeNull();
     });
 
+    // Cancel НЕ применяет изменения — пользователь передумал.
+    // Возвращаемся к подтверждению с исходными keywords.
     test("CANCEL goes to awaitingConfirmation without applying", () => {
       actor.send({ type: "CANCEL" });
       expect(getState(actor)).toBe("awaitingConfirmation");
@@ -659,9 +696,12 @@ describe("State Machine", () => {
     });
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  //                     KEYWORD EDITING TRANSITIONS
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // KEYWORD EDITING — ручное редактирование keywords при создании подписки
+  //
+  // addingPositive/addingNegative — ввод новых keywords
+  // removingPositive/removingNegative — удаление по одному (inline keyboard)
+  // ═══════════════════════════════════════════════════════════════════════════
 
   describe("addingPositive state", () => {
     let actor: ReturnType<typeof createTestActor>;
@@ -739,12 +779,16 @@ describe("State Machine", () => {
       actor.send({ type: "REMOVE_POSITIVE" });
     });
 
+    // Удаление по индексу — inline keyboard показывает "❌ keyword".
+    // После удаления остаёмся в состоянии для продолжения удаления.
     test("REMOVE_KEYWORD removes by index and stays in state", () => {
       actor.send({ type: "REMOVE_KEYWORD", index: 1 });
       expect(getState(actor)).toBe("removingPositive");
       expect(getContext(actor).pendingSub?.positiveKeywords).toEqual(["kw0", "kw2"]);
     });
 
+    // После удаления индексы сдвигаются! kw1 был на index=1,
+    // после удаления kw0 теперь kw1 на index=0.
     test("can remove multiple keywords", () => {
       actor.send({ type: "REMOVE_KEYWORD", index: 0 });
       actor.send({ type: "REMOVE_KEYWORD", index: 0 }); // Now kw1 is at index 0
@@ -780,9 +824,14 @@ describe("State Machine", () => {
     });
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  //                     SELECTING_GROUPS TRANSITIONS
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SELECTING GROUPS — выбор групп для мониторинга
+  //
+  // По умолчанию все группы выбраны. Пользователь может:
+  // - Toggle отдельные группы
+  // - Select All / Deselect All
+  // - Confirm → сохраняем подписку с выбранными группами
+  // ═══════════════════════════════════════════════════════════════════════════
 
   describe("selectingGroups state", () => {
     let actor: ReturnType<typeof createTestActor>;
@@ -806,11 +855,14 @@ describe("State Machine", () => {
       actor.send({ type: "START_GROUP_SELECTION", available: groups });
     });
 
+    // По умолчанию все группы выбраны — так удобнее пользователю,
+    // обычно хочется мониторить всё.
     test("initializes with all groups selected", () => {
       expect(getContext(actor).availableGroups).toEqual(groups);
       expect(getContext(actor).selectedGroups).toEqual(groups);
     });
 
+    // Toggle = checkbox в inline keyboard. Кнопка "✓ Group 1" → "Group 1".
     test("TOGGLE_GROUP deselects selected group", () => {
       actor.send({ type: "TOGGLE_GROUP", groupId: 2 });
       expect(getContext(actor).selectedGroups).toEqual([
@@ -819,6 +871,7 @@ describe("State Machine", () => {
       ]);
     });
 
+    // Повторный toggle возвращает группу обратно.
     test("TOGGLE_GROUP selects deselected group", () => {
       actor.send({ type: "TOGGLE_GROUP", groupId: 2 }); // Deselect
       actor.send({ type: "TOGGLE_GROUP", groupId: 2 }); // Reselect
@@ -854,9 +907,15 @@ describe("State Machine", () => {
     });
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  //                       ADDING_GROUP TRANSITIONS
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADDING GROUP — flow команды /addgroup
+  //
+  // Пользователь шарит чат через Telegram picker:
+  // - Публичная группа → бот пробует вступить сразу
+  // - Приватная → awaitingInviteLink → бот вступает по ссылке
+  //
+  // Можно добавить несколько групп подряд, затем DONE_ADDING_GROUPS.
+  // ═══════════════════════════════════════════════════════════════════════════
 
   describe("addingGroup state", () => {
     let actor: ReturnType<typeof createTestActor>;
@@ -866,6 +925,8 @@ describe("State Machine", () => {
       actor.send({ type: "ADDGROUP" });
     });
 
+    // Публичная группа (@username) — бот может вступить сразу.
+    // Добавляем в pendingGroups, ждём ещё группы или DONE.
     test("CHAT_SHARED with public group adds to pendingGroups", () => {
       const group = { id: 1, title: "Public Group", needsInviteLink: false, isChannel: false };
       actor.send({ type: "CHAT_SHARED", group });
@@ -873,6 +934,8 @@ describe("State Machine", () => {
       expect(getContext(actor).pendingGroups).toEqual([group]);
     });
 
+    // Приватная группа — бот не может вступить без invite link.
+    // Переходим к запросу ссылки t.me/+xxx или t.me/joinchat/xxx.
     test("CHAT_SHARED with private group goes to awaitingInviteLink", () => {
       const group = { id: 2, title: "Private Group", needsInviteLink: true, isChannel: false };
       actor.send({ type: "CHAT_SHARED", group });
@@ -903,10 +966,7 @@ describe("State Machine", () => {
     });
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  //                   AWAITING_INVITE_LINK TRANSITIONS
-  // ─────────────────────────────────────────────────────────────────────────────
-
+  // Приватная группа требует invite link (t.me/+xxx или t.me/joinchat/xxx)
   describe("awaitingInviteLink state", () => {
     let actor: ReturnType<typeof createTestActor>;
 
@@ -937,9 +997,12 @@ describe("State Machine", () => {
     });
   });
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  //                  EDITING SUBSCRIPTION STATES
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // EDITING SUBSCRIPTION — редактирование СУЩЕСТВУЮЩЕЙ подписки
+  //
+  // В отличие от keyword editing (при создании), здесь редактируем
+  // уже сохранённую подписку. Handler обновляет DB напрямую.
+  // ═══════════════════════════════════════════════════════════════════════════
 
   describe("editingSubPositive state", () => {
     let actor: ReturnType<typeof createTestActor>;
@@ -1029,10 +1092,15 @@ describe("State Machine", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//                           EDGE CASES
+// EDGE CASES — граничные случаи, ошибки пользователя
+//
+// FSM должен быть устойчив к невалидным действиям: несуществующие группы,
+// удаление по невалидному индексу, apply без proposal.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe("Edge Cases", () => {
+  // Race condition: пользователь кликает быстрее чем обновляется UI.
+  // Callback может прийти с groupId которого уже нет в списке.
   test("toggle non-existent group does nothing", () => {
     const actor = createTestActor();
     actor.send({
@@ -1048,6 +1116,8 @@ describe("Edge Cases", () => {
     expect(getContext(actor).selectedGroups).toHaveLength(1);
   });
 
+  // Защита от out-of-bounds: inline keyboard может быть устаревшей.
+  // Пользователь удалил keyword, но старая клавиатура ещё показывается.
   test("removing keyword with invalid index does nothing", () => {
     const actor = createTestActor();
     actor.send({
@@ -1064,6 +1134,9 @@ describe("Edge Cases", () => {
     expect(getContext(actor).pendingSub?.positiveKeywords).toEqual(["kw1"]);
   });
 
+  // Guard hasProposedAiCorrection должен вернуть false,
+  // поэтому APPLY_AI_CORRECTION не делает ничего.
+  // Это защита от случайного клика до того как AI ответил.
   test("applying AI correction without proposal does nothing", () => {
     const actor = createTestActor();
     actor.send({

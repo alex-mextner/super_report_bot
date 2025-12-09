@@ -1,7 +1,16 @@
 /**
- * Database race condition tests
+ * DATABASE RACE CONDITIONS — защита от дублей и гонок
  *
- * Tests for concurrent operations to ensure data integrity
+ * Критичные сценарии:
+ *
+ * 1. markMessageMatched — одно сообщение может быть обработано дважды
+ *    (два воркера, retry после таймаута). INSERT OR IGNORE гарантирует
+ *    что пользователь получит только одно уведомление.
+ *
+ * 2. createSubscription — пользователь может быстро кликнуть "создать" дважды.
+ *    Текущее поведение: создаются 2 подписки (нет constraint на дубли).
+ *
+ * SQLite WAL mode обеспечивает concurrent reads при записи.
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
