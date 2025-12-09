@@ -98,6 +98,26 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return dotProduct / denominator;
 }
 
+// Max batch size for BGE server
+const EMBEDDING_BATCH_SIZE = 32;
+
+/**
+ * Get embeddings in batches (handles large keyword lists)
+ */
+async function getEmbeddingsBatched(texts: string[]): Promise<number[][]> {
+  if (texts.length === 0) return [];
+
+  const results: number[][] = [];
+
+  for (let i = 0; i < texts.length; i += EMBEDDING_BATCH_SIZE) {
+    const batch = texts.slice(i, i + EMBEDDING_BATCH_SIZE);
+    const batchEmbeddings = await getEmbeddings(batch);
+    results.push(...batchEmbeddings);
+  }
+
+  return results;
+}
+
 /**
  * Generate embeddings for keywords when creating subscription
  */
@@ -116,7 +136,7 @@ export async function generateKeywordEmbeddings(
     "Generating keyword embeddings"
   );
 
-  const embeddings = await getEmbeddings(allKeywords);
+  const embeddings = await getEmbeddingsBatched(allKeywords);
 
   const pos: KeywordEmbedding[] = positiveKeywords.map((keyword, i) => ({
     keyword,
