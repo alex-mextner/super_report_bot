@@ -36,6 +36,21 @@ const RETRY_BASE_DELAY = 2000; // 2s -> 4s -> 8s -> ... exponential backoff
 const RETRY_MAX_DELAY = 120000; // cap at 2 minutes
 const FUZZY_FALLBACK_THRESHOLD = 0.3; // Threshold for fuzzy search fallback
 
+// Cache for processed album groupedIds to avoid duplicate notifications
+// Key: groupedId (bigint as string), Value: timestamp when added
+const processedAlbums = new Map<string, number>();
+const ALBUM_CACHE_TTL = 30000; // 30 seconds - albums arrive within ~1-2 seconds
+
+// Clean old entries periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, timestamp] of processedAlbums) {
+    if (now - timestamp > ALBUM_CACHE_TTL) {
+      processedAlbums.delete(key);
+    }
+  }
+}, 10000); // Every 10 seconds
+
 /**
  * Calculate fuzzy search score between text and query
  * Uses asymmetric coverage: what fraction of query is found in text
@@ -316,6 +331,20 @@ async function toIncomingMessage(msg: Message): Promise<IncomingMessage | null> 
 
 // Process incoming message
 async function processMessage(msg: Message): Promise<void> {
+  // Skip duplicate album messages — only process the first one
+  // Albums arrive as multiple messages with the same groupedId
+  if (msg.groupedId) {
+    const albumKey = msg.groupedId.toString();
+    if (processedAlbums.has(albumKey)) {
+      listenerLog.debug(
+        { groupedId: albumKey, messageId: msg.id },
+        "Album message skipped (already processing)"
+      );
+      return;
+    }
+    processedAlbums.set(albumKey, Date.now());
+  }
+
   const incomingMsg = await toIncomingMessage(msg);
   if (!incomingMsg) return;
 
