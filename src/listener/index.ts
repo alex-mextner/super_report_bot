@@ -5,7 +5,7 @@ import { matchMessageAgainstAll, passesNgramFilter } from "../matcher/index.ts";
 import { verifyMatch } from "../llm/verify.ts";
 import { notifyUser } from "../bot/index.ts";
 import { listenerLog } from "../logger.ts";
-import type { IncomingMessage, Subscription } from "../types.ts";
+import type { IncomingMessage, Subscription, MediaItem } from "../types.ts";
 import {
   addMessage,
   updateMessage,
@@ -102,10 +102,107 @@ export function invalidateSubscriptionsCache(): void {
   subscriptionsByGroup.clear();
 }
 
-// Convert mtcute Message to our IncomingMessage
-function toIncomingMessage(msg: Message): IncomingMessage | null {
-  if (!msg.text) return null;
+// Download single media from message
+async function downloadSingleMedia(msg: Message): Promise<MediaItem[] | undefined> {
+  if (!msg.media) return undefined;
 
+  try {
+    if (msg.media.type === "photo") {
+      const buffer = await mtClient.downloadAsBuffer(msg.media);
+      return [
+        {
+          type: "photo",
+          buffer,
+          width: msg.media.width,
+          height: msg.media.height,
+          mimeType: "image/jpeg",
+        },
+      ];
+    }
+
+    if (msg.media.type === "video") {
+      const buffer = await mtClient.downloadAsBuffer(msg.media);
+      return [
+        {
+          type: "video",
+          buffer,
+          width: msg.media.width,
+          height: msg.media.height,
+          duration: msg.media.duration,
+          mimeType: msg.media.mimeType || "video/mp4",
+        },
+      ];
+    }
+  } catch (error) {
+    listenerLog.warn({ err: error, msgId: msg.id }, "Failed to download media");
+  }
+
+  return undefined;
+}
+
+// Download all media from album (grouped messages)
+async function downloadMediaFromAlbum(messages: Message[]): Promise<MediaItem[]> {
+  const items: MediaItem[] = [];
+  for (const msg of messages) {
+    const item = await downloadSingleMedia(msg);
+    if (item) items.push(...item);
+  }
+  return items;
+}
+
+// Directory for media storage
+const MEDIA_DIR = "data/media";
+
+// Save media to disk and DB
+async function saveMediaToDisk(
+  messageId: number,
+  groupId: number,
+  media: MediaItem[]
+): Promise<void> {
+  const dir = `${MEDIA_DIR}/${groupId}`;
+
+  // Create directory if not exists
+  try {
+    await Bun.write(`${dir}/.keep`, "");
+  } catch {
+    // Directory might already exist
+  }
+
+  for (const [i, item] of media.entries()) {
+    const ext = item.type === "photo" ? "jpg" : "mp4";
+    const filename = `${messageId}_${i}.${ext}`;
+    const filePath = `${dir}/${filename}`;
+
+    try {
+      await Bun.write(filePath, item.buffer);
+
+      // Save reference to DB
+      queries.saveMedia({
+        message_id: messageId,
+        group_id: groupId,
+        media_index: i,
+        media_type: item.type,
+        file_path: `${groupId}/${filename}`, // relative path
+        width: item.width ?? null,
+        height: item.height ?? null,
+        duration: item.duration ?? null,
+      });
+
+      listenerLog.debug(
+        { messageId, groupId, index: i, type: item.type },
+        "Media saved to disk"
+      );
+    } catch (error) {
+      listenerLog.error(
+        { err: error, messageId, groupId, index: i },
+        "Failed to save media"
+      );
+    }
+  }
+}
+
+// Convert mtcute Message to our IncomingMessage
+async function toIncomingMessage(msg: Message): Promise<IncomingMessage | null> {
   const chat = msg.chat;
   // Only process messages from groups (Chat type, not User)
   if (chat.type !== "chat") {
@@ -117,20 +214,42 @@ function toIncomingMessage(msg: Message): IncomingMessage | null {
     return null; // Skip channels
   }
 
+  // Check if message has text or media
+  const hasMedia = msg.media?.type === "photo" || msg.media?.type === "video";
+  if (!msg.text && !hasMedia) {
+    return null; // Skip messages without text AND without photo/video
+  }
+
+  // Download media if present
+  let media: MediaItem[] | undefined;
+  try {
+    if (msg.groupedId) {
+      // Album — get all grouped messages
+      const group = await mtClient.getMessageGroup({ chatId: chat.id, message: msg.id });
+      media = await downloadMediaFromAlbum(group);
+    } else if (hasMedia) {
+      // Single photo/video
+      media = await downloadSingleMedia(msg);
+    }
+  } catch (error) {
+    listenerLog.warn({ err: error, msgId: msg.id }, "Failed to download media");
+  }
+
   return {
     id: msg.id,
     group_id: chat.id,
     group_title: chat.title || "Unknown",
-    text: msg.text,
+    text: msg.text || "", // Empty string if no text (media-only message)
     sender_name: msg.sender?.displayName || "Unknown",
     sender_username: msg.sender?.username ?? undefined,
     timestamp: msg.date,
+    media,
   };
 }
 
 // Process incoming message
 async function processMessage(msg: Message): Promise<void> {
-  const incomingMsg = toIncomingMessage(msg);
+  const incomingMsg = await toIncomingMessage(msg);
   if (!incomingMsg) return;
 
   listenerLog.debug(
@@ -191,6 +310,11 @@ async function processMessage(msg: Message): Promise<void> {
         // Mark as matched
         queries.markMessageMatched(subscription.id, incomingMsg.id, incomingMsg.group_id);
 
+        // Save media to disk if present
+        if (incomingMsg.media && incomingMsg.media.length > 0) {
+          await saveMediaToDisk(incomingMsg.id, incomingMsg.group_id, incomingMsg.media);
+        }
+
         // Get user telegram_id from subscription
         const userTelegramId = await getUserTelegramId(subscription.user_id);
         if (userTelegramId) {
@@ -202,7 +326,8 @@ async function processMessage(msg: Message): Promise<void> {
             incomingMsg.id,
             incomingMsg.group_id,
             incomingMsg.sender_name,
-            incomingMsg.sender_username
+            incomingMsg.sender_username,
+            incomingMsg.media
           );
           listenerLog.info(
             {
@@ -210,6 +335,7 @@ async function processMessage(msg: Message): Promise<void> {
               userId: userTelegramId,
               subscriptionId: subscription.id,
               groupTitle: incomingMsg.group_title,
+              hasMedia: !!incomingMsg.media?.length,
             },
             "User notified"
           );
@@ -233,6 +359,12 @@ async function processMessage(msg: Message): Promise<void> {
           "Fallback: notifying due to high score"
         );
         queries.markMessageMatched(subscription.id, incomingMsg.id, incomingMsg.group_id);
+
+        // Save media to disk if present
+        if (incomingMsg.media && incomingMsg.media.length > 0) {
+          await saveMediaToDisk(incomingMsg.id, incomingMsg.group_id, incomingMsg.media);
+        }
+
         const userTelegramId = await getUserTelegramId(subscription.user_id);
         if (userTelegramId) {
           await notifyUser(
@@ -243,7 +375,8 @@ async function processMessage(msg: Message): Promise<void> {
             incomingMsg.id,
             incomingMsg.group_id,
             incomingMsg.sender_name,
-            incomingMsg.sender_username
+            incomingMsg.sender_username,
+            incomingMsg.media
           );
         }
       }
@@ -621,9 +754,11 @@ export async function scanGroupHistory(
 
   try {
     for await (const msg of mtClient.iterHistory(groupId, { limit })) {
-      if (!msg.text) continue;
+      // Skip messages without text and without photo/video
+      const hasMedia = msg.media?.type === "photo" || msg.media?.type === "video";
+      if (!msg.text && !hasMedia) continue;
 
-      const incomingMsg = toIncomingMessage(msg);
+      const incomingMsg = await toIncomingMessage(msg);
       if (!incomingMsg) continue;
 
       processedCount++;
@@ -667,6 +802,11 @@ export async function scanGroupHistory(
             matchCount++;
             queries.markMessageMatched(subscription.id, incomingMsg.id, incomingMsg.group_id);
 
+            // Save media to disk if present
+            if (incomingMsg.media && incomingMsg.media.length > 0) {
+              await saveMediaToDisk(incomingMsg.id, incomingMsg.group_id, incomingMsg.media);
+            }
+
             const userTelegramId = await getUserTelegramId(subscription.user_id);
             if (userTelegramId) {
               await notifyUser(
@@ -677,7 +817,8 @@ export async function scanGroupHistory(
                 incomingMsg.id,
                 incomingMsg.group_id,
                 incomingMsg.sender_name,
-                incomingMsg.sender_username
+                incomingMsg.sender_username,
+                incomingMsg.media
               );
             }
           }
@@ -686,6 +827,12 @@ export async function scanGroupHistory(
           if (candidate.score > 0.7) {
             matchCount++;
             queries.markMessageMatched(subscription.id, incomingMsg.id, incomingMsg.group_id);
+
+            // Save media to disk if present
+            if (incomingMsg.media && incomingMsg.media.length > 0) {
+              await saveMediaToDisk(incomingMsg.id, incomingMsg.group_id, incomingMsg.media);
+            }
+
             const userTelegramId = await getUserTelegramId(subscription.user_id);
             if (userTelegramId) {
               await notifyUser(
@@ -696,7 +843,8 @@ export async function scanGroupHistory(
                 incomingMsg.id,
                 incomingMsg.group_id,
                 incomingMsg.sender_name,
-                incomingMsg.sender_username
+                incomingMsg.sender_username,
+                incomingMsg.media
               );
             }
           }

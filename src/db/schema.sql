@@ -143,3 +143,25 @@ CREATE INDEX IF NOT EXISTS idx_products_group ON products(group_id);
 CREATE INDEX IF NOT EXISTS idx_products_date ON products(message_date DESC);
 CREATE INDEX IF NOT EXISTS idx_products_price ON products(price_normalized);
 CREATE INDEX IF NOT EXISTS idx_seller_contacts_product ON seller_contacts(product_id);
+
+-- ===========================================
+-- Message Media (photos and videos)
+-- ===========================================
+
+-- Media files attached to messages
+CREATE TABLE IF NOT EXISTS message_media (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id INTEGER NOT NULL,
+  group_id INTEGER NOT NULL,
+  media_index INTEGER NOT NULL,           -- order in album (0, 1, 2...)
+  media_type TEXT NOT NULL CHECK (media_type IN ('photo', 'video')),
+  file_path TEXT NOT NULL,                -- relative path to file
+  width INTEGER,
+  height INTEGER,
+  duration INTEGER,                       -- for video, in seconds
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(message_id, group_id, media_index)
+);
+
+-- Media indexes
+CREATE INDEX IF NOT EXISTS idx_message_media_msg ON message_media(message_id, group_id);

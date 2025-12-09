@@ -11,6 +11,7 @@ import type {
   SellerContact,
   StoredMessage,
   Topic,
+  StoredMedia,
 } from "../types.ts";
 import { runMigrations } from "./migrations.ts";
 
@@ -263,6 +264,21 @@ const stmts = {
   deleteUserState: db.prepare<void, [number]>(
     `DELETE FROM user_states
      WHERE user_id = (SELECT id FROM users WHERE telegram_id = ?)`
+  ),
+
+  // Message media
+  insertMedia: db.prepare<void, [number, number, number, string, string, number | null, number | null, number | null]>(
+    `INSERT OR IGNORE INTO message_media (message_id, group_id, media_index, media_type, file_path, width, height, duration)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ),
+  getMediaForMessage: db.prepare<StoredMedia, [number, number]>(
+    `SELECT * FROM message_media WHERE message_id = ? AND group_id = ? ORDER BY media_index`
+  ),
+  hasMediaForMessage: db.prepare<{ found: number }, [number, number]>(
+    `SELECT 1 as found FROM message_media WHERE message_id = ? AND group_id = ? LIMIT 1`
+  ),
+  deleteMediaForMessage: db.prepare<void, [number, number]>(
+    `DELETE FROM message_media WHERE message_id = ? AND group_id = ?`
   ),
 };
 
@@ -695,6 +711,41 @@ export const queries = {
 
   deleteUserState(telegramId: number): void {
     stmts.deleteUserState.run(telegramId);
+  },
+
+  // === Message Media ===
+  saveMedia(data: {
+    message_id: number;
+    group_id: number;
+    media_index: number;
+    media_type: "photo" | "video";
+    file_path: string;
+    width: number | null;
+    height: number | null;
+    duration: number | null;
+  }): void {
+    stmts.insertMedia.run(
+      data.message_id,
+      data.group_id,
+      data.media_index,
+      data.media_type,
+      data.file_path,
+      data.width,
+      data.height,
+      data.duration
+    );
+  },
+
+  getMediaForMessage(messageId: number, groupId: number): StoredMedia[] {
+    return stmts.getMediaForMessage.all(messageId, groupId);
+  },
+
+  hasMediaForMessage(messageId: number, groupId: number): boolean {
+    return stmts.hasMediaForMessage.get(messageId, groupId) !== null;
+  },
+
+  deleteMediaForMessage(messageId: number, groupId: number): void {
+    stmts.deleteMediaForMessage.run(messageId, groupId);
   },
 };
 

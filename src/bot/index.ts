@@ -63,6 +63,7 @@ import type {
   PendingGroup,
   ExampleRating,
   RatingExample,
+  MediaItem,
 } from "../types.ts";
 
 // FSM with SQLite persistence
@@ -2542,6 +2543,54 @@ function buildMessageLink(groupId: number, messageId: number): string {
 }
 
 /**
+ * Build caption for notification message
+ */
+function buildNotificationCaption(
+  groupTitle: string,
+  subscriptionQuery: string,
+  messageText: string,
+  senderName?: string,
+  senderUsername?: string,
+  maxLength: number = 1000 // Telegram caption limit is 1024
+): string {
+  let authorLine = "";
+  if (senderName) {
+    authorLine = senderUsername
+      ? `\nАвтор: ${senderName} (@${senderUsername})`
+      : `\nАвтор: ${senderName}`;
+  }
+
+  const prefix = `🔔 Найдено совпадение!\n\nГруппа: ${groupTitle}\n\nЗапрос: ${subscriptionQuery}${authorLine}\n\nСообщение:\n`;
+  const availableForText = maxLength - prefix.length - 3; // -3 for "..."
+  const truncatedText = messageText.length > availableForText
+    ? messageText.slice(0, availableForText) + "..."
+    : messageText;
+
+  return prefix + truncatedText;
+}
+
+/**
+ * Build inline keyboard for notification
+ */
+function buildNotificationKeyboard(
+  messageId?: number,
+  groupId?: number
+): { inline_keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> } | undefined {
+  if (!messageId || !groupId) return undefined;
+
+  const messageUrl = buildMessageLink(groupId, messageId);
+  return {
+    inline_keyboard: [
+      [{ text: "📎 Перейти к посту", url: messageUrl }],
+      [{
+        text: "🔍 Анализ цены",
+        callback_data: JSON.stringify({ action: "analyze", msgId: messageId, grpId: groupId }),
+      }],
+    ],
+  };
+}
+
+/**
  * Send notification to user about matched message
  */
 export async function notifyUser(
@@ -2552,42 +2601,87 @@ export async function notifyUser(
   messageId?: number,
   groupId?: number,
   senderName?: string,
-  senderUsername?: string
+  senderUsername?: string,
+  media?: MediaItem[]
 ): Promise<void> {
   try {
-    // Build author line
-    let authorLine = "";
-    if (senderName) {
-      authorLine = senderUsername
-        ? `\nАвтор: ${senderName} (@${senderUsername})`
-        : `\nАвтор: ${senderName}`;
+    const keyboard = buildNotificationKeyboard(messageId, groupId);
+
+    // If we have media, send with photo/video
+    if (media && media.length > 0) {
+      const caption = buildNotificationCaption(
+        groupTitle,
+        subscriptionQuery,
+        messageText,
+        senderName,
+        senderUsername,
+        1000 // Leave some room for Telegram formatting
+      );
+
+      if (media.length === 1) {
+        // Single photo or video
+        const item = media[0]!;
+        const blob = new Blob([item.buffer], { type: item.mimeType });
+
+        if (item.type === "photo") {
+          await bot.api.sendPhoto({
+            chat_id: telegramId,
+            photo: blob,
+            caption,
+            reply_markup: keyboard,
+          });
+        } else {
+          await bot.api.sendVideo({
+            chat_id: telegramId,
+            video: blob,
+            caption,
+            reply_markup: keyboard,
+          });
+        }
+      } else {
+        // Album (2-10 media items)
+        const mediaGroup = media.slice(0, 10).map((item, i) => {
+          const blob = new Blob([item.buffer], { type: item.mimeType });
+          return {
+            type: item.type as "photo" | "video",
+            media: blob,
+            caption: i === 0 ? caption : undefined,
+          };
+        });
+
+        await bot.api.sendMediaGroup({
+          chat_id: telegramId,
+          media: mediaGroup as Parameters<typeof bot.api.sendMediaGroup>[0]["media"],
+        });
+
+        // Send keyboard separately (Telegram API limitation for media groups)
+        if (keyboard) {
+          await bot.api.sendMessage({
+            chat_id: telegramId,
+            text: "👆 Детали",
+            reply_markup: keyboard,
+          });
+        }
+      }
+    } else {
+      // Text-only notification
+      const caption = buildNotificationCaption(
+        groupTitle,
+        subscriptionQuery,
+        messageText,
+        senderName,
+        senderUsername,
+        4000 // Telegram message limit is 4096
+      );
+
+      await bot.api.sendMessage({
+        chat_id: telegramId,
+        text: caption,
+        reply_markup: keyboard,
+      });
     }
 
-    // Build keyboard with URL button and analyze button
-    let keyboard: { inline_keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> } | undefined;
-    if (messageId && groupId) {
-      const messageUrl = buildMessageLink(groupId, messageId);
-      keyboard = {
-        inline_keyboard: [
-          [
-            { text: "📎 Перейти к посту", url: messageUrl },
-          ],
-          [
-            {
-              text: "🔍 Анализ цены",
-              callback_data: JSON.stringify({ action: "analyze", msgId: messageId, grpId: groupId }),
-            },
-          ],
-        ],
-      };
-    }
-
-    await bot.api.sendMessage({
-      chat_id: telegramId,
-      text: `🔔 Найдено совпадение!\n\nГруппа: ${groupTitle}\n\nЗапрос: ${subscriptionQuery}${authorLine}\n\nСообщение:\n${messageText.slice(0, 500)}${messageText.length > 500 ? "..." : ""}`,
-      reply_markup: keyboard,
-    });
-    botLog.debug({ userId: telegramId, groupTitle }, "Notification sent");
+    botLog.debug({ userId: telegramId, groupTitle, hasMedia: !!media?.length }, "Notification sent");
   } catch (error) {
     botLog.error({ err: error, userId: telegramId }, "Failed to notify user");
   }

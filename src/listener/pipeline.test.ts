@@ -38,6 +38,7 @@ function createTestMessage(overrides: Partial<IncomingMessage> = {}): IncomingMe
     text: "Продаю iPhone 15 Pro Max 256gb в идеальном состоянии, цена 80000",
     sender_name: "Test User",
     sender_username: "testuser",
+    timestamp: new Date(),
     ...overrides,
   };
 }

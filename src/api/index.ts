@@ -482,6 +482,76 @@ function buildTelegramLink(groupId: number, messageId: number, topicId?: number)
   return `https://t.me/c/${cleanChatId}/${messageId}`;
 }
 
+// ==============================
+// Media endpoints
+// ==============================
+
+// GET /api/products/:messageId/:groupId/media - Get media info for a message
+api.get("/products/:messageId/:groupId/media", (c) => {
+  const messageId = Number(c.req.param("messageId"));
+  const groupId = Number(c.req.param("groupId"));
+
+  const media = queries.getMediaForMessage(messageId, groupId);
+
+  return c.json({
+    items: media.map((m) => ({
+      index: m.media_index,
+      type: m.media_type,
+      path: m.file_path,
+      width: m.width,
+      height: m.height,
+      duration: m.duration,
+      url: `/api/media/${m.file_path}`,
+    })),
+  });
+});
+
+// GET /api/media/:groupId/:filename - Serve media file
+api.get("/media/:groupId/:filename", async (c) => {
+  const groupId = c.req.param("groupId");
+  const filename = c.req.param("filename");
+
+  // Validate filename to prevent path traversal
+  if (filename.includes("..") || filename.includes("/")) {
+    return c.json({ error: "Invalid filename" }, 400);
+  }
+
+  const filePath = `data/media/${groupId}/${filename}`;
+  const file = Bun.file(filePath);
+
+  if (!(await file.exists())) {
+    return c.json({ error: "Media not found" }, 404);
+  }
+
+  // Determine content type
+  const ext = filename.split(".").pop()?.toLowerCase();
+  const contentType =
+    ext === "jpg" || ext === "jpeg"
+      ? "image/jpeg"
+      : ext === "png"
+        ? "image/png"
+        : ext === "mp4"
+          ? "video/mp4"
+          : "application/octet-stream";
+
+  return new Response(file, {
+    headers: {
+      "Content-Type": contentType,
+      "Cache-Control": "public, max-age=31536000", // Cache for 1 year
+    },
+  });
+});
+
+// GET /api/media/check/:messageId/:groupId - Check if message has media
+api.get("/media/check/:messageId/:groupId", (c) => {
+  const messageId = Number(c.req.param("messageId"));
+  const groupId = Number(c.req.param("groupId"));
+
+  const hasMedia = queries.hasMediaForMessage(messageId, groupId);
+
+  return c.json({ hasMedia });
+});
+
 // Mount API routes
 app.route("/api", api);
 

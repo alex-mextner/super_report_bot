@@ -1,5 +1,6 @@
 import { llmLog } from "../logger.ts";
 import { verifyWithDeepSeek } from "./deepseek.ts";
+import { verifyWithVision } from "./vision.ts";
 import type { Subscription, IncomingMessage } from "../types.ts";
 
 export interface VerificationResult {
@@ -10,10 +11,12 @@ export interface VerificationResult {
 
 // Minimum confidence threshold for DeepSeek verification
 const DEEPSEEK_CONFIDENCE_THRESHOLD = 0.7;
+// Minimum confidence threshold for Vision verification to be decisive
+const VISION_CONFIDENCE_THRESHOLD = 0.75;
 
 /**
- * Verify if a message matches a subscription using DeepSeek LLM
- * Replaces BART-MNLI with DeepSeek-V3.2 for better Russian language support
+ * Verify if a message matches a subscription
+ * Uses Vision model first if photo is present, then falls back to text-based DeepSeek
  */
 export async function verifyMatch(
   message: IncomingMessage,
@@ -22,6 +25,45 @@ export async function verifyMatch(
   const text = message.text;
   const description = subscription.llm_description;
 
+  // Try Vision verification first if there's a photo
+  const hasPhoto = message.media?.some((m) => m.type === "photo");
+  if (hasPhoto) {
+    try {
+      const firstPhoto = message.media!.find((m) => m.type === "photo")!;
+      const visionResult = await verifyWithVision(firstPhoto.buffer, description);
+
+      llmLog.debug(
+        {
+          subscriptionId: subscription.id,
+          visionConfidence: visionResult.confidence.toFixed(3),
+          visionMatch: visionResult.isMatch,
+        },
+        "Vision verification result"
+      );
+
+      // If Vision is confident enough, use its result
+      if (visionResult.confidence >= VISION_CONFIDENCE_THRESHOLD) {
+        return {
+          isMatch: visionResult.isMatch,
+          confidence: visionResult.confidence,
+          label: visionResult.isMatch ? "vision_match" : "vision_no_match",
+        };
+      }
+      // Otherwise, fall through to text verification
+      llmLog.debug(
+        { subscriptionId: subscription.id },
+        "Vision uncertain, falling back to text"
+      );
+    } catch (error) {
+      llmLog.warn(
+        { err: error, subscriptionId: subscription.id },
+        "Vision verification failed, falling back to text"
+      );
+      // Continue to text-based verification
+    }
+  }
+
+  // Text-based verification with DeepSeek
   try {
     const result = await verifyWithDeepSeek(text, description);
 
@@ -48,7 +90,7 @@ export async function verifyMatch(
     return {
       isMatch,
       confidence: result.confidence,
-      label: result.isMatch ? "match" : "no_match",
+      label: result.isMatch ? "text_match" : "text_no_match",
     };
   } catch (error) {
     llmLog.error(
