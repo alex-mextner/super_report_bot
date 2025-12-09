@@ -247,6 +247,23 @@ const stmts = {
   getTopic: db.prepare<Topic, [number, number]>(
     "SELECT * FROM topics WHERE group_id = ? AND topic_id = ?"
   ),
+
+  // User states (FSM persistence)
+  getUserState: db.prepare<{ snapshot: string }, [number]>(
+    `SELECT snapshot FROM user_states
+     WHERE user_id = (SELECT id FROM users WHERE telegram_id = ?)`
+  ),
+  upsertUserState: db.prepare<void, [string, number]>(
+    `INSERT INTO user_states (user_id, snapshot, updated_at)
+     SELECT id, ?, datetime('now') FROM users WHERE telegram_id = ?
+     ON CONFLICT(user_id) DO UPDATE SET
+       snapshot = excluded.snapshot,
+       updated_at = excluded.updated_at`
+  ),
+  deleteUserState: db.prepare<void, [number]>(
+    `DELETE FROM user_states
+     WHERE user_id = (SELECT id FROM users WHERE telegram_id = ?)`
+  ),
 };
 
 // Helper to parse JSON fields from subscription
@@ -664,6 +681,20 @@ export const queries = {
 
   getTopic(groupId: number, topicId: number): Topic | null {
     return stmts.getTopic.get(groupId, topicId) || null;
+  },
+
+  // === User States (FSM persistence) ===
+  getUserStateSnapshot(telegramId: number): string | null {
+    const row = stmts.getUserState.get(telegramId);
+    return row?.snapshot ?? null;
+  },
+
+  saveUserStateSnapshot(telegramId: number, snapshot: string): void {
+    stmts.upsertUserState.run(snapshot, telegramId);
+  },
+
+  deleteUserState(telegramId: number): void {
+    stmts.deleteUserState.run(telegramId);
   },
 };
 

@@ -66,21 +66,23 @@ import type {
   RatingExample,
 } from "../types.ts";
 
+// FSM with SQLite persistence (replaces in-memory Map)
+import { getState, setState } from "../fsm/index.ts";
+
 const BOT_TOKEN = process.env.BOT_TOKEN;
 
 if (!BOT_TOKEN) {
   throw new Error("BOT_TOKEN is required");
 }
 
-// In-memory user state (for conversation flow)
-const userStates = new Map<number, UserState>();
-
+// User state is now persisted via XState FSM
+// These functions delegate to FSM adapter for backwards compatibility
 function getUserState(userId: number): UserState {
-  return userStates.get(userId) || { step: "idle" };
+  return getState(userId);
 }
 
 function setUserState(userId: number, state: UserState): void {
-  userStates.set(userId, state);
+  setState(userId, state);
 }
 
 // Helper: show single example for rating
