@@ -1,4 +1,5 @@
 import { Bot, format, bold, code } from "gramio";
+import type { CallbackQueryContext } from "@gramio/contexts";
 import { queries } from "../db/index.ts";
 import {
   generateKeywords,
@@ -83,6 +84,23 @@ if (!BOT_TOKEN) {
 // FSM helper shortcuts
 const ctx = (userId: number): BotContext => getFsmContext(userId);
 const fsmState = (userId: number) => getCurrentState(userId);
+
+/**
+ * Edit callback message text or caption depending on message type.
+ * Uses editText for text messages, editCaption for media messages.
+ */
+async function editCallbackMessage(
+  context: CallbackQueryContext<typeof bot>,
+  text: string,
+  options?: { parse_mode?: "HTML" | "Markdown"; link_preview_options?: { is_disabled: boolean } }
+): Promise<void> {
+  const isTextMessage = context.message?.text !== undefined;
+  if (isTextMessage) {
+    await context.editText(text, options);
+  } else {
+    await context.editCaption(text, options);
+  }
+}
 
 /**
  * Reset FSM to idle if stuck in another state.
@@ -2431,13 +2449,13 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
       }
 
       await context.answer({ text: "Анализирую..." });
-      await context.editText("⏳ Анализирую объявление...\nЭто может занять 10-30 секунд.");
+      await editCallbackMessage(context, "⏳ Анализирую объявление...\nЭто может занять 10-30 секунд.");
 
       try {
         // Get message text from DB
         const storedMsg = queries.getMessage(msgId, grpId);
         if (!storedMsg) {
-          await context.editText("Сообщение не найдено в базе данных.");
+          await editCallbackMessage(context, "Сообщение не найдено в базе данных.");
           return;
         }
 
@@ -2448,7 +2466,7 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
         // Format result
         if (!result.isListing) {
           const reason = result.notListingReason || "Не удалось определить тип";
-          await context.editText(`❌ Это не объявление\n\nПричина: ${reason}`);
+          await editCallbackMessage(context, `❌ Это не объявление\n\nПричина: ${reason}`);
           break;
         }
 
@@ -2521,10 +2539,10 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
         // Overall verdict
         resultText += `<b>📝 Итог:</b>\n${result.overallVerdict}`;
 
-        await context.editText(resultText, { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
+        await editCallbackMessage(context, resultText, { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
       } catch (error) {
         botLog.error({ err: error }, "Deep analysis failed");
-        await context.editText("Ошибка анализа. Попробуйте позже.");
+        await editCallbackMessage(context, "Ошибка анализа. Попробуйте позже.");
       }
       break;
     }
