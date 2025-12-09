@@ -8,7 +8,8 @@
       "Bash(bunx tsc:*)",
       "Bash(/Users/ultra/.bun/bin/bun x tsc:*)",
       "Bash(/Users/ultra/.bun/bin/bun test:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

@@ -63,4 +63,10 @@ bun run dev       # With hot reload
 
 ## License
 
-MIT
+[Elastic License 2.0](LICENSE)
+
+You may use this code for personal or internal purposes. You may **not** use it to provide a competing commercial Telegram bot service.
+
+---
+
+**Official bot:** [@super_report_bot](https://t.me/super_report_bot)
