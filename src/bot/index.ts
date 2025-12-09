@@ -32,6 +32,7 @@ import {
   ratingKeyboard,
   settingsKeyboard,
 } from "./keyboards.ts";
+import { runWithRecovery } from "./operations.ts";
 import { interpretEditCommand } from "../llm/edit.ts";
 import { generateKeywordEmbeddings, checkBgeHealth } from "../llm/embeddings.ts";
 
@@ -221,7 +222,12 @@ async function startRatingFlow(
   if (examples.length < 3) {
     botLog.debug({ userId, existing: examples.length }, "Generating synthetic examples");
     try {
-      const generated = await generateExampleMessages(query);
+      const generated = await runWithRecovery(
+        userId,
+        "GENERATE_EXAMPLES",
+        undefined,
+        () => generateExampleMessages(query)
+      );
       const synthetic = generatedToRatingExamples(generated);
       examples = [...examples, ...synthetic].slice(0, 3);
     } catch (error) {
@@ -233,15 +239,22 @@ async function startRatingFlow(
     // No examples at all, skip to keyword generation
     botLog.debug({ userId }, "No examples available, skipping rating flow");
     const mode = queries.getUserMode(userId);
-    await context.send("Примеры не найдены, генерирую ключевые слова...");
+    const progressMsg = await context.send("Примеры не найдены, генерирую ключевые слова...");
+    const messageId = progressMsg?.message?.message_id;
 
-    let result: KeywordGenerationResult;
-    try {
-      result = await generateKeywords(query, clarificationContext);
-    } catch (error) {
-      botLog.error({ err: error, userId }, "LLM keyword generation failed");
-      result = generateKeywordsFallback(query);
-    }
+    const result = await runWithRecovery(
+      userId,
+      "GENERATE_KEYWORDS",
+      messageId,
+      async (): Promise<KeywordGenerationResult> => {
+        try {
+          return await generateKeywords(query, clarificationContext);
+        } catch (error) {
+          botLog.error({ err: error, userId }, "LLM keyword generation failed");
+          return generateKeywordsFallback(query);
+        }
+      }
+    );
 
     await showConfirmation(context, userId, result, query, mode);
     return;
@@ -293,36 +306,43 @@ async function finishRatingAndGenerateKeywords(
     ? formatClarificationContext(c.clarification.questions, c.clarification.answers)
     : undefined;
 
-  await context.send("Генерирую ключевые слова с учётом твоих оценок...");
+  const progressMsg = await context.send("Генерирую ключевые слова с учётом твоих оценок...");
+  const messageId = progressMsg?.message?.message_id;
 
-  let result: KeywordGenerationResult;
-
-  if (ratings.length > 0) {
-    // Generate with ratings feedback
-    try {
-      result = await generateKeywordsWithRatings(
-        query,
-        ratings.map((r) => ({ text: r.text, rating: r.rating })),
-        clarificationContext
-      );
-    } catch (error) {
-      botLog.error({ err: error, userId }, "LLM generation with ratings failed");
-      // Fallback to regular generation
-      try {
-        result = await generateKeywords(query, clarificationContext);
-      } catch {
-        result = generateKeywordsFallback(query);
+  // Run LLM generation with recovery tracking
+  const result = await runWithRecovery(
+    userId,
+    "GENERATE_KEYWORDS",
+    messageId,
+    async (): Promise<KeywordGenerationResult> => {
+      if (ratings.length > 0) {
+        // Generate with ratings feedback
+        try {
+          return await generateKeywordsWithRatings(
+            query,
+            ratings.map((r) => ({ text: r.text, rating: r.rating })),
+            clarificationContext
+          );
+        } catch (error) {
+          botLog.error({ err: error, userId }, "LLM generation with ratings failed");
+          // Fallback to regular generation
+          try {
+            return await generateKeywords(query, clarificationContext);
+          } catch {
+            return generateKeywordsFallback(query);
+          }
+        }
+      } else {
+        // No ratings, use regular generation
+        try {
+          return await generateKeywords(query, clarificationContext);
+        } catch (error) {
+          botLog.error({ err: error, userId }, "LLM keyword generation failed");
+          return generateKeywordsFallback(query);
+        }
       }
     }
-  } else {
-    // No ratings, use regular generation
-    try {
-      result = await generateKeywords(query, clarificationContext);
-    } catch (error) {
-      botLog.error({ err: error, userId }, "LLM keyword generation failed");
-      result = generateKeywordsFallback(query);
-    }
-  }
+  );
 
   await showConfirmation(context, userId, result, query, mode);
 }
@@ -336,15 +356,22 @@ async function generateKeywordsAndShowResult(
   clarificationContext?: string
 ): Promise<void> {
   const mode = queries.getUserMode(userId);
+  const progressMsg = await context.send("Генерирую ключевые слова...");
+  const messageId = progressMsg?.message?.message_id;
 
-  let result: KeywordGenerationResult;
-  try {
-    result = await generateKeywords(query, clarificationContext);
-  } catch (error) {
-    botLog.error({ err: error, userId }, "LLM keyword generation failed");
-    result = generateKeywordsFallback(query);
-    await context.send("Не удалось использовать AI, использую простой алгоритм.");
-  }
+  const result = await runWithRecovery(
+    userId,
+    "GENERATE_KEYWORDS",
+    messageId,
+    async (): Promise<KeywordGenerationResult> => {
+      try {
+        return await generateKeywords(query, clarificationContext);
+      } catch (error) {
+        botLog.error({ err: error, userId }, "LLM keyword generation failed");
+        return generateKeywordsFallback(query);
+      }
+    }
+  );
 
   await showConfirmation(context, userId, result, query, mode);
 }
@@ -965,7 +992,12 @@ ${code(updatedC.pendingSub?.negativeKeywords.join(", ") || "нет")}
     await context.send("Корректирую (может занять до минуты)...");
 
     try {
-      const result = await interpretEditCommand(text, currentSnake, conversation);
+      const result = await runWithRecovery(
+        userId,
+        "AI_EDIT",
+        undefined, // MessageContext.send() doesn't return message_id
+        () => interpretEditCommand(text, currentSnake, conversation)
+      );
 
       // Get examples for new parameters
       const examples = getExamplesForSubscription(
@@ -1042,14 +1074,21 @@ ${examplesText}
     try {
       if (mode === "normal") {
         // Normal mode: correct description only, then regenerate keywords
-        const descResult = await correctDescription(
-          c.pendingSub.originalQuery,
-          currentSnake.llm_description,
-          text
+        const { descResult, keywordsResult } = await runWithRecovery(
+          userId,
+          "AI_CORRECT",
+          undefined, // MessageContext.send() doesn't return message_id
+          async () => {
+            const descResult = await correctDescription(
+              c.pendingSub!.originalQuery,
+              currentSnake.llm_description,
+              text
+            );
+            // Regenerate keywords based on new description
+            const keywordsResult = await generateKeywords(descResult.description);
+            return { descResult, keywordsResult };
+          }
         );
-
-        // Regenerate keywords based on new description
-        const keywordsResult = await generateKeywords(descResult.description);
 
         // Update FSM state with proposed changes
         send(userId, { type: "TEXT_AI_COMMAND", text });
@@ -1076,7 +1115,12 @@ ${bold("ИИ:")} ${descResult.summary}
         );
       } else {
         // Advanced mode: full control over keywords
-        const result = await interpretEditCommand(text, currentSnake, conversation);
+        const result = await runWithRecovery(
+          userId,
+          "AI_CORRECT",
+          undefined,
+          () => interpretEditCommand(text, currentSnake, conversation)
+        );
 
         // Format diff
         const addedPos = result.positive_keywords.filter((k: string) => !currentSnake.positive_keywords.includes(k));
@@ -1147,7 +1191,12 @@ ${bold("ИИ:")} ${result.summary}
 
       let draftKeywords: string[];
       try {
-        draftKeywords = await generateDraftKeywords(originalQuery);
+        draftKeywords = await runWithRecovery(
+          userId,
+          "GENERATE_KEYWORDS",
+          undefined,
+          () => generateDraftKeywords(originalQuery)
+        );
       } catch {
         draftKeywords = generateKeywordsFallback(originalQuery).positive_keywords;
       }
@@ -1166,10 +1215,18 @@ ${bold("ИИ:")} ${result.summary}
 
   if (mode === "normal") {
     // Normal mode: analyze query first, ask clarification if needed
+    // Save query for recovery before starting LLM call
+    send(userId, { type: "SAVE_QUERY", query });
+
     await context.send("Анализирую запрос...");
 
     try {
-      const analysis = await analyzeQueryAndGenerateQuestions(query);
+      const analysis = await runWithRecovery(
+        userId,
+        "GENERATE_QUESTIONS",
+        undefined,
+        () => analyzeQueryAndGenerateQuestions(query)
+      );
 
       if (analysis.needsClarification && analysis.questions.length > 0) {
         // Need clarification — show questions
@@ -1208,7 +1265,12 @@ ${bold("ИИ:")} ${result.summary}
     // No clarification needed — go to draft keywords + rating
     let draftKeywords: string[];
     try {
-      draftKeywords = await generateDraftKeywords(query);
+      draftKeywords = await runWithRecovery(
+        userId,
+        "GENERATE_KEYWORDS",
+        undefined,
+        () => generateDraftKeywords(query)
+      );
     } catch (error) {
       botLog.error({ err: error, userId }, "Draft keywords generation failed");
       draftKeywords = generateKeywordsFallback(query).positive_keywords;
@@ -1217,11 +1279,19 @@ ${bold("ИИ:")} ${result.summary}
     await startRatingFlow(context, userId, query, draftKeywords);
   } else {
     // Advanced mode: start with clarification questions
+    // Save query for recovery before starting LLM call
+    send(userId, { type: "SAVE_QUERY", query });
+
     await context.send("Генерирую уточняющие вопросы...");
 
     let questions: string[];
     try {
-      questions = await generateClarificationQuestions(query);
+      questions = await runWithRecovery(
+        userId,
+        "GENERATE_QUESTIONS",
+        undefined,
+        () => generateClarificationQuestions(query)
+      );
     } catch (error) {
       botLog.error({ err: error, userId }, "LLM clarification generation failed");
       // Fallback: skip clarification, go to draft keywords + rating
@@ -1229,7 +1299,12 @@ ${bold("ИИ:")} ${result.summary}
 
       let draftKeywords: string[];
       try {
-        draftKeywords = await generateDraftKeywords(query);
+        draftKeywords = await runWithRecovery(
+          userId,
+          "GENERATE_KEYWORDS",
+          undefined,
+          () => generateDraftKeywords(query)
+        );
       } catch {
         draftKeywords = generateKeywordsFallback(query).positive_keywords;
       }
@@ -1571,7 +1646,12 @@ ${c.pendingSub.llmDescription}
 
         let draftKeywords: string[];
         try {
-          draftKeywords = await generateDraftKeywords(originalQuery);
+          draftKeywords = await runWithRecovery(
+            userId,
+            "GENERATE_KEYWORDS",
+            undefined,
+            () => generateDraftKeywords(originalQuery)
+          );
         } catch {
           draftKeywords = generateKeywordsFallback(originalQuery).positive_keywords;
         }
@@ -1691,14 +1771,24 @@ ${bold("Исключения:")} ${code(exclusionsText)}
 
       await context.answer({ text: "Генерирую..." });
 
-      let result: KeywordGenerationResult;
-      try {
-        result = await generateKeywords(c.pendingSub.originalQuery);
-      } catch (error) {
-        botLog.error({ err: error, userId }, "LLM regeneration failed");
+      const result = await runWithRecovery(
+        userId,
+        "GENERATE_KEYWORDS",
+        undefined, // callback query doesn't have message_id for progress
+        async (): Promise<KeywordGenerationResult> => {
+          try {
+            return await generateKeywords(c.pendingSub!.originalQuery);
+          } catch (error) {
+            botLog.error({ err: error, userId }, "LLM regeneration failed");
+            throw error;
+          }
+        }
+      ).catch(async () => {
         await context.send("Ошибка генерации. Попробуй позже.");
-        return;
-      }
+        return null;
+      });
+
+      if (!result) return;
 
       const queryId = `${userId}_${Date.now()}`;
 

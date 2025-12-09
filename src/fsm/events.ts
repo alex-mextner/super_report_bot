@@ -30,6 +30,7 @@ import type {
   AiCorrectionData,
   RatingExamplesData,
   ClarificationData,
+  PendingOperation,
 } from "./context";
 
 /**
@@ -431,4 +432,32 @@ export type BotEvent =
    *
    * Used during intermediate processing before finalization.
    */
-  | { type: "UPDATE_DRAFT_KEYWORDS"; keywords: string[] };
+  | { type: "UPDATE_DRAFT_KEYWORDS"; keywords: string[] }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //                       OPERATION RECOVERY EVENTS
+  //
+  //                  Track long-running operations for recovery
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Mark that a long-running operation (LLM call) has started.
+   *
+   * This is persisted to the database, so if the bot restarts mid-operation,
+   * we can recover and retry the operation.
+   */
+  | { type: "START_OPERATION"; operation: PendingOperation }
+
+  /**
+   * Clear the pending operation marker.
+   *
+   * Called after an operation completes (success or failure).
+   */
+  | { type: "CLEAR_OPERATION" }
+
+  /**
+   * Save the original query before starting analysis.
+   *
+   * This allows recovery to retry the analysis if bot restarts mid-operation.
+   */
+  | { type: "SAVE_QUERY"; query: string };

@@ -23,6 +23,36 @@ import type { UserMode, ExampleRating, PendingGroup } from "../types";
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
+ *                          PENDING OPERATION
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * Tracks long-running async operations (LLM calls) that could be interrupted
+ * by a bot restart. When the bot restarts, it checks for pending operations
+ * and resumes them automatically.
+ *
+ * Example: User sends a query, bot shows "Generating keywords...", then crashes.
+ * On restart, bot sees pendingOperation and retries the keyword generation.
+ */
+export type PendingOperationType =
+  | "GENERATE_KEYWORDS"
+  | "GENERATE_QUESTIONS"
+  | "AI_CORRECT"
+  | "AI_EDIT"
+  | "GENERATE_EXAMPLES";
+
+export interface PendingOperation {
+  /** What type of operation was interrupted */
+  type: PendingOperationType;
+
+  /** When the operation started (timestamp) */
+  startedAt: number;
+
+  /** Message ID to edit with progress/result (the "Generating..." message) */
+  messageId?: number;
+}
+
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
  *                          PENDING SUBSCRIPTION
  * ─────────────────────────────────────────────────────────────────────────────
  *
@@ -402,6 +432,16 @@ export interface BotContext {
    * Different from pendingAiEdit - this is BEFORE saving to DB.
    */
   pendingAiCorrection: AiCorrectionData | null;
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //                    OPERATION RECOVERY
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Tracks an in-progress async operation (LLM call) for recovery on restart.
+   * Set before starting a long operation, cleared after completion.
+   */
+  pendingOperation: PendingOperation | null;
 }
 
 /**
@@ -446,5 +486,8 @@ export function createInitialContext(
 
     // AI correction - no session
     pendingAiCorrection: null,
+
+    // Operation recovery - no pending operation
+    pendingOperation: null,
   };
 }

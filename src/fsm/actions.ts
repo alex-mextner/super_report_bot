@@ -57,6 +57,7 @@ export const clearContext = {
   editingSubscriptionId: () => null as BotContext["editingSubscriptionId"],
   pendingAiEdit: () => null as BotContext["pendingAiEdit"],
   pendingAiCorrection: () => null as BotContext["pendingAiCorrection"],
+  pendingOperation: () => null as BotContext["pendingOperation"],
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -675,5 +676,55 @@ export const setUserMode = {
   userMode: ({ event }: { event: BotEvent }) => {
     if (event.type === "SET_USER_MODE") return event.mode;
     return "normal" as const;
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//                      OPERATION RECOVERY ACTIONS
+//
+//         Track long-running operations so we can resume them after restart
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Mark that a long-running operation has started.
+ *
+ * Called before starting LLM calls like keyword generation or AI correction.
+ * The operation info is persisted to the database, so if the bot crashes,
+ * we can find and resume these operations on startup.
+ */
+export const startOperation = {
+  pendingOperation: ({ event }: { event: BotEvent }) => {
+    if (event.type === "START_OPERATION") return event.operation;
+    return null;
+  },
+};
+
+/**
+ * Clear the pending operation marker.
+ *
+ * Called after an operation completes (whether success or failure).
+ * Indicates that no operation is in progress for this user.
+ */
+export const clearOperation = {
+  pendingOperation: () => null as BotContext["pendingOperation"],
+};
+
+/**
+ * Save the original query before analysis starts.
+ *
+ * This allows recovery to retry the analysis with the same query
+ * if the bot restarts mid-operation.
+ */
+export const saveQuery = {
+  pendingSub: ({ context, event }: { context: BotContext; event: BotEvent }) => {
+    if (event.type === "SAVE_QUERY") {
+      return {
+        originalQuery: event.query,
+        positiveKeywords: context.pendingSub?.positiveKeywords ?? [],
+        negativeKeywords: context.pendingSub?.negativeKeywords ?? [],
+        llmDescription: context.pendingSub?.llmDescription ?? "",
+      };
+    }
+    return context.pendingSub;
   },
 };

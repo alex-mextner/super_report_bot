@@ -290,6 +290,20 @@ export const userMachine = setup({
 
     /** Change user's mode (normal/advanced) */
     setUserMode: assign(actions.setUserMode),
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // OPERATION RECOVERY ACTIONS
+    // Track long-running operations for auto-recovery after restart
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /** Mark that a long-running operation has started */
+    startOperation: assign(actions.startOperation),
+
+    /** Clear the pending operation marker */
+    clearOperation: assign(actions.clearOperation),
+
+    /** Save the original query before analysis */
+    saveQuery: assign(actions.saveQuery),
   },
 }).createMachine({
   /**
@@ -315,6 +329,41 @@ export const userMachine = setup({
    * This allows each user to have their own isolated state machine instance.
    */
   context: ({ input }) => input as BotContext,
+
+  /**
+   * ═══════════════════════════════════════════════════════════════════════════════
+   *                            GLOBAL EVENT HANDLERS
+   * ═══════════════════════════════════════════════════════════════════════════════
+   *
+   * These events can be handled from ANY state. They update context without
+   * changing the current state - useful for cross-cutting concerns like
+   * operation tracking.
+   */
+  on: {
+    /**
+     * Mark that a long-running operation (LLM call) has started.
+     * Used for recovery after bot restart.
+     */
+    START_OPERATION: {
+      actions: "startOperation",
+    },
+
+    /**
+     * Clear the pending operation marker.
+     * Called when an operation completes.
+     */
+    CLEAR_OPERATION: {
+      actions: "clearOperation",
+    },
+
+    /**
+     * Save the original query before analysis.
+     * Allows recovery to retry with the same query.
+     */
+    SAVE_QUERY: {
+      actions: "saveQuery",
+    },
+  },
 
   /**
    * ═══════════════════════════════════════════════════════════════════════════════
@@ -548,10 +597,13 @@ export const userMachine = setup({
 
         /**
          * User doesn't want to rate examples - skip the whole thing.
-         * Proceed directly to confirmation.
+         * Stay in ratingExamples while LLM generates keywords.
+         * KEYWORDS_GENERATED will transition to awaitingConfirmation.
+         * This prevents race condition where bot restarts after SKIP_RATING
+         * but before LLM finishes, leaving user with empty keywords.
          */
         SKIP_RATING: {
-          target: "awaitingConfirmation",
+          // No target - stay in ratingExamples until KEYWORDS_GENERATED
         },
 
         /**

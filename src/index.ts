@@ -12,6 +12,7 @@
  */
 
 import { bot } from "./bot/index.ts";
+import { recoverPendingOperations } from "./bot/recovery.ts";
 import { startListener, stopListener, invalidateSubscriptionsCache } from "./listener/index.ts";
 import { startApiServer } from "./api/index.ts";
 import { logger } from "./logger.ts";
@@ -53,6 +54,9 @@ async function main() {
   logger.info({ component: "bot" }, "Starting gramio bot...");
   bot.start();
   logger.info({ component: "bot" }, "Bot started");
+
+  // Recover any interrupted operations from previous run (non-blocking)
+  recoverPendingOperations(bot);
 
   // Start MTProto listener
   try {

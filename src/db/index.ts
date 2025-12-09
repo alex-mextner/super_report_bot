@@ -265,6 +265,11 @@ const stmts = {
     `DELETE FROM user_states
      WHERE user_id = (SELECT id FROM users WHERE telegram_id = ?)`
   ),
+  getUsersWithPendingOperations: db.prepare<{ telegram_id: number; snapshot: string }, []>(
+    `SELECT u.telegram_id, us.snapshot FROM user_states us
+     JOIN users u ON us.user_id = u.id
+     WHERE us.snapshot LIKE '%"pendingOperation":{%'`
+  ),
 
   // Message media
   insertMedia: db.prepare<void, [number, number, number, string, string, number | null, number | null, number | null]>(
@@ -711,6 +716,13 @@ export const queries = {
 
   deleteUserState(telegramId: number): void {
     stmts.deleteUserState.run(telegramId);
+  },
+
+  getUsersWithPendingOperations(): { telegramId: number; snapshot: string }[] {
+    return stmts.getUsersWithPendingOperations.all().map((row) => ({
+      telegramId: row.telegram_id,
+      snapshot: row.snapshot,
+    }));
   },
 
   // === Message Media ===
