@@ -1,5 +1,5 @@
-import { hf, MODELS, withRetry } from "./index.ts";
 import { llmLog } from "../logger.ts";
+import { verifyWithDeepSeek } from "./deepseek.ts";
 import type { Subscription, IncomingMessage } from "../types.ts";
 
 export interface VerificationResult {
@@ -8,15 +8,12 @@ export interface VerificationResult {
   label: string;
 }
 
-interface ZeroShotResult {
-  labels: string[];
-  scores: number[];
-  sequence: string;
-}
+// Minimum confidence threshold for DeepSeek verification
+const DEEPSEEK_CONFIDENCE_THRESHOLD = 0.7;
 
 /**
- * Verify if a message matches a subscription using zero-shot classification
- * Uses BART-MNLI for natural language inference
+ * Verify if a message matches a subscription using DeepSeek LLM
+ * Replaces BART-MNLI with DeepSeek-V3.2 for better Russian language support
  */
 export async function verifyMatch(
   message: IncomingMessage,
@@ -25,56 +22,47 @@ export async function verifyMatch(
   const text = message.text;
   const description = subscription.llm_description;
 
-  // Zero-shot classification: does the message match the description?
-  const results = await withRetry(async () => {
-    return await hf.zeroShotClassification({
-      model: MODELS.BART_MNLI,
-      inputs: text,
-      parameters: {
-        candidate_labels: [
-          `This message matches: ${description}`,
-          "This message does not match the search criteria",
-        ],
-      },
-    });
-  });
+  try {
+    const result = await verifyWithDeepSeek(text, description);
 
-  // Result can be single object or array depending on input type
-  const result = Array.isArray(results)
-    ? (results as unknown as ZeroShotResult[])[0]
-    : (results as unknown as ZeroShotResult);
-  if (!result || !Array.isArray(result.labels) || !Array.isArray(result.scores)) {
-    llmLog.warn({ result }, "Invalid zero-shot result structure");
-    return { isMatch: false, confidence: 0, label: "invalid_response" };
+    const isMatch = result.isMatch && result.confidence >= DEEPSEEK_CONFIDENCE_THRESHOLD;
+
+    // Log with appropriate level based on confidence
+    const logData = {
+      subscriptionId: subscription.id,
+      confidence: result.confidence.toFixed(3),
+      isMatch,
+      textPreview: text.slice(0, 80),
+      description: description.slice(0, 50),
+    };
+
+    if (isMatch) {
+      llmLog.debug(logData, "DeepSeek match");
+    } else if (result.confidence >= 0.5) {
+      // Near-threshold rejection — log at info level for monitoring
+      llmLog.info(logData, "DeepSeek near-threshold rejection");
+    } else {
+      llmLog.debug(logData, "DeepSeek no match");
+    }
+
+    return {
+      isMatch,
+      confidence: result.confidence,
+      label: result.isMatch ? "match" : "no_match",
+    };
+  } catch (error) {
+    llmLog.error(
+      { subscriptionId: subscription.id, error },
+      "DeepSeek verification failed"
+    );
+
+    // Return no match on error (safe fallback)
+    return {
+      isMatch: false,
+      confidence: 0,
+      label: "error",
+    };
   }
-
-  const matchIndex = result.labels.findIndex((l) => l.includes("matches"));
-  const matchScore = matchIndex >= 0 ? result.scores[matchIndex] ?? 0 : 0;
-  const isMatch = matchScore > 0.6;
-
-  // Log with appropriate level based on confidence
-  const logData = {
-    subscriptionId: subscription.id,
-    confidence: matchScore.toFixed(3),
-    isMatch,
-    textPreview: text.slice(0, 80),
-    description: description.slice(0, 50),
-  };
-
-  if (isMatch) {
-    llmLog.debug(logData, "LLM match");
-  } else if (matchScore >= 0.5) {
-    // Near-threshold rejection — log at info level for monitoring
-    llmLog.info(logData, "LLM near-threshold rejection (0.5-0.6)");
-  } else {
-    llmLog.debug(logData, "LLM no match");
-  }
-
-  return {
-    isMatch,
-    confidence: matchScore,
-    label: result.labels[0] ?? "unknown",
-  };
 }
 
 /**

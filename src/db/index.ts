@@ -3,6 +3,7 @@ import type {
   User,
   UserMode,
   Subscription,
+  KeywordEmbeddings,
   MonitoredGroup,
   MatchedMessage,
   Category,
@@ -129,6 +130,12 @@ const stmts = {
      SET negative_keywords = ?, disabled_negative_keywords = ?
      WHERE id = ? AND user_id = (SELECT id FROM users WHERE telegram_id = ?)`
   ),
+  updateKeywordEmbeddings: db.prepare<void, [string, number]>(
+    `UPDATE subscriptions SET keyword_embeddings = ? WHERE id = ?`
+  ),
+  getSubscriptionsWithoutEmbeddings: db.prepare<Subscription, []>(
+    `SELECT * FROM subscriptions WHERE is_active = 1 AND keyword_embeddings IS NULL`
+  ),
 
   // Get all unique group IDs from active subscription groups
   getAllSubscriptionGroupIds: db.prepare<{ group_id: number }, []>(
@@ -242,11 +249,14 @@ const stmts = {
 function parseSubscription(row: Subscription): Subscription {
   const rawDisabled = (row as unknown as { disabled_negative_keywords?: string })
     .disabled_negative_keywords;
+  const rawEmbeddings = (row as unknown as { keyword_embeddings?: string })
+    .keyword_embeddings;
   return {
     ...row,
     positive_keywords: JSON.parse(row.positive_keywords as unknown as string),
     negative_keywords: JSON.parse(row.negative_keywords as unknown as string),
     disabled_negative_keywords: rawDisabled ? JSON.parse(rawDisabled) : [],
+    keyword_embeddings: rawEmbeddings ? JSON.parse(rawEmbeddings) : undefined,
   };
 }
 
@@ -444,6 +454,15 @@ export const queries = {
   // Get all unique group IDs from active subscriptions
   getAllSubscriptionGroupIds(): number[] {
     return stmts.getAllSubscriptionGroupIds.all().map((row) => row.group_id);
+  },
+
+  // Keyword embeddings
+  updateKeywordEmbeddings(subscriptionId: number, embeddings: KeywordEmbeddings): void {
+    stmts.updateKeywordEmbeddings.run(JSON.stringify(embeddings), subscriptionId);
+  },
+
+  getSubscriptionsWithoutEmbeddings(): Subscription[] {
+    return stmts.getSubscriptionsWithoutEmbeddings.all().map(parseSubscription);
   },
 
   // === WebApp: Categories ===

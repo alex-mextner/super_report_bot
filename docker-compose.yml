@@ -1,0 +1,45 @@
+version: "3.8"
+
+services:
+  bge-server:
+    build:
+      context: ./bge-server
+      dockerfile: Dockerfile
+    container_name: bge-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - MAX_BATCH_SIZE=32
+    # BGE-M3 needs ~2-3GB RAM
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s  # Model loading takes time
+
+  # Bot service (uncomment when ready)
+  # bot:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: super-report-bot
+  #   restart: unless-stopped
+  #   depends_on:
+  #     bge-server:
+  #       condition: service_healthy
+  #   environment:
+  #     - BOT_TOKEN=${BOT_TOKEN}
+  #     - API_ID=${API_ID}
+  #     - API_HASH=${API_HASH}
+  #     - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+  #     - BGE_URL=http://bge-server:8080
+  #   volumes:
+  #     - ./data:/app/data
+  #     - ./userbot.session:/app/userbot.session

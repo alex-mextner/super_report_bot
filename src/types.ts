@@ -9,6 +9,18 @@ export interface User {
   created_at: string;
 }
 
+// Keyword embedding for semantic matching
+export interface KeywordEmbedding {
+  keyword: string;
+  vec: number[];
+}
+
+// Embeddings for all keywords in a subscription
+export interface KeywordEmbeddings {
+  pos: KeywordEmbedding[];
+  neg: KeywordEmbedding[];
+}
+
 export interface Subscription {
   id: number;
   user_id: number;
@@ -17,6 +29,7 @@ export interface Subscription {
   negative_keywords: string[]; // stored as JSON in DB
   disabled_negative_keywords?: string[]; // stored as JSON in DB, for toggle feature
   llm_description: string;
+  keyword_embeddings?: KeywordEmbeddings; // stored as JSON in DB, for BGE-M3 semantic matching
   is_active: number; // SQLite boolean
   created_at: string;
 }

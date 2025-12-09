@@ -646,7 +646,7 @@ const PRICE_PATTERNS: Array<{ pattern: RegExp; currency: string; multiplier?: nu
 function extractPriceFromText(text: string): { price: number; currency: string } | null {
   for (const { pattern, currency, multiplier } of PRICE_PATTERNS) {
     const match = text.match(pattern);
-    if (match) {
+    if (match && match[1]) {
       const numStr = match[1].replace(/\s/g, "");
       const num = parseInt(numStr, 10);
       if (!isNaN(num)) {

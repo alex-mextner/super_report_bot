@@ -146,8 +146,8 @@ async function processMessage(msg: Message): Promise<void> {
   const subscriptions = getSubscriptionsForGroup(incomingMsg.group_id);
   if (subscriptions.length === 0) return;
 
-  // Stage 1-2: BM25 + N-gram matching
-  const candidates = matchMessageAgainstAll(incomingMsg, subscriptions);
+  // Stage 1-2: N-gram + BGE-M3 semantic matching
+  const candidates = await matchMessageAgainstAll(incomingMsg, subscriptions);
   if (candidates.length === 0) return;
 
   listenerLog.info(
@@ -622,7 +622,7 @@ export async function scanGroupHistory(
       }
 
       // Check against the specific subscription
-      const candidates = matchMessageAgainstAll(incomingMsg, [subscription]);
+      const candidates = await matchMessageAgainstAll(incomingMsg, [subscription]);
       if (candidates.length === 0) continue;
 
       candidateCount++;
@@ -776,8 +776,8 @@ export async function scanFromCache(
         timestamp: new Date(msg.date * 1000),
       };
 
-      // N-gram filter
-      const candidates = matchMessageAgainstAll(incomingMsg, [subscription]);
+      // N-gram + semantic matching
+      const candidates = await matchMessageAgainstAll(incomingMsg, [subscription]);
       if (candidates.length === 0) continue;
       ngramPassedCount++;
 

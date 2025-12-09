@@ -1,5 +1,6 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 import type { VerificationResult } from "./verify.ts";
+import type { DeepSeekVerificationResult } from "./deepseek.ts";
 
 // Unit tests for VerificationResult type structure
 describe("VerificationResult", () => {
@@ -39,14 +40,11 @@ describe("VerificationResult", () => {
   });
 });
 
-// Helper to create mock zero-shot result
-const createZeroShotResult = (matchScore: number) => ({
-  labels: [
-    `This message matches: test description`,
-    "This message does not match the search criteria",
-  ],
-  scores: [matchScore, 1 - matchScore],
-  sequence: "test text",
+// Helper to create mock DeepSeek result
+const createDeepSeekResult = (isMatch: boolean, confidence: number): DeepSeekVerificationResult => ({
+  isMatch,
+  confidence,
+  reasoning: isMatch ? "Message matches criteria" : "Message does not match",
 });
 
 const createMockMessage = (text: string) => ({
@@ -69,25 +67,24 @@ const createMockSubscription = (id: number, llm_description: string) => ({
   created_at: "2024-01-01 00:00:00",
 });
 
-// Mock the HuggingFace module
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let mockZeroShotClassification: ReturnType<typeof mock<any>> = mock(() => Promise.resolve(createZeroShotResult(0.8)));
+// Mock the DeepSeek module
+type DeepSeekMockFn = (text: string, description: string) => Promise<DeepSeekVerificationResult>;
+let mockVerifyWithDeepSeek: ReturnType<typeof mock<DeepSeekMockFn>>;
 
-mock.module("@huggingface/inference", () => ({
-  InferenceClient: class MockInferenceClient {
-    zeroShotClassification = (...args: unknown[]) => mockZeroShotClassification(...args);
-  },
+mock.module("./deepseek.ts", () => ({
+  verifyWithDeepSeek: (text: string, description: string) => mockVerifyWithDeepSeek(text, description),
+  checkDeepSeekHealth: () => Promise.resolve(true),
 }));
 
-// Tests for verifyMatch with mocked HuggingFace API
-describe("verifyMatch with mocked HF API", () => {
+// Tests for verifyMatch with mocked DeepSeek API
+describe("verifyMatch with mocked DeepSeek API", () => {
   beforeEach(() => {
     // Reset mock implementation before each test
-    mockZeroShotClassification = mock(() => Promise.resolve(createZeroShotResult(0.8)));
+    mockVerifyWithDeepSeek = mock(() => Promise.resolve(createDeepSeekResult(true, 0.8)));
   });
 
-  test("returns isMatch: true when confidence > 0.6", async () => {
-    mockZeroShotClassification = mock(() => Promise.resolve(createZeroShotResult(0.75)));
+  test("returns isMatch: true when DeepSeek returns match with confidence >= 0.7", async () => {
+    mockVerifyWithDeepSeek = mock(() => Promise.resolve(createDeepSeekResult(true, 0.85)));
 
     // Re-import to pick up mocked module
     const { verifyMatch } = await import("./verify.ts");
@@ -97,11 +94,11 @@ describe("verifyMatch with mocked HF API", () => {
     const result = await verifyMatch(message, subscription);
 
     expect(result.isMatch).toBe(true);
-    expect(result.confidence).toBe(0.75);
+    expect(result.confidence).toBe(0.85);
   });
 
-  test("returns isMatch: false when confidence < 0.6", async () => {
-    mockZeroShotClassification = mock(() => Promise.resolve(createZeroShotResult(0.45)));
+  test("returns isMatch: false when DeepSeek returns no match", async () => {
+    mockVerifyWithDeepSeek = mock(() => Promise.resolve(createDeepSeekResult(false, 0.3)));
 
     const { verifyMatch } = await import("./verify.ts");
     const message = createMockMessage("Куплю запчасти для телефона");
@@ -110,11 +107,12 @@ describe("verifyMatch with mocked HF API", () => {
     const result = await verifyMatch(message, subscription);
 
     expect(result.isMatch).toBe(false);
-    expect(result.confidence).toBe(0.45);
+    expect(result.confidence).toBe(0.3);
   });
 
-  test("returns isMatch: false when confidence exactly 0.6 (boundary)", async () => {
-    mockZeroShotClassification = mock(() => Promise.resolve(createZeroShotResult(0.6)));
+  test("returns isMatch: false when confidence below 0.7 threshold even if DeepSeek says match", async () => {
+    // DeepSeek says match but confidence is too low
+    mockVerifyWithDeepSeek = mock(() => Promise.resolve(createDeepSeekResult(true, 0.5)));
 
     const { verifyMatch } = await import("./verify.ts");
     const message = createMockMessage("Телефон в хорошем состоянии");
@@ -122,13 +120,13 @@ describe("verifyMatch with mocked HF API", () => {
 
     const result = await verifyMatch(message, subscription);
 
-    // > 0.6, not >= 0.6, so 0.6 should be false
+    // isMatch should be false because confidence < 0.7
     expect(result.isMatch).toBe(false);
-    expect(result.confidence).toBe(0.6);
+    expect(result.confidence).toBe(0.5);
   });
 
-  test("returns isMatch: true when confidence just above threshold (0.61)", async () => {
-    mockZeroShotClassification = mock(() => Promise.resolve(createZeroShotResult(0.61)));
+  test("returns isMatch: true when confidence exactly 0.7 (boundary)", async () => {
+    mockVerifyWithDeepSeek = mock(() => Promise.resolve(createDeepSeekResult(true, 0.7)));
 
     const { verifyMatch } = await import("./verify.ts");
     const message = createMockMessage("iPhone 15 продаю срочно");
@@ -136,12 +134,13 @@ describe("verifyMatch with mocked HF API", () => {
 
     const result = await verifyMatch(message, subscription);
 
+    // >= 0.7 threshold, so 0.7 should pass
     expect(result.isMatch).toBe(true);
-    expect(result.confidence).toBe(0.61);
+    expect(result.confidence).toBe(0.7);
   });
 
-  test("handles invalid response structure", async () => {
-    mockZeroShotClassification = mock(() => Promise.resolve({ invalid: "response" }));
+  test("handles DeepSeek API error", async () => {
+    mockVerifyWithDeepSeek = mock(() => Promise.reject(new Error("DeepSeek API error")));
 
     const { verifyMatch } = await import("./verify.ts");
     const message = createMockMessage("Test message");
@@ -151,56 +150,42 @@ describe("verifyMatch with mocked HF API", () => {
 
     expect(result.isMatch).toBe(false);
     expect(result.confidence).toBe(0);
-    expect(result.label).toBe("invalid_response");
+    expect(result.label).toBe("error");
   });
 
-  test("handles response as array (batch mode)", async () => {
-    mockZeroShotClassification = mock(() => Promise.resolve([createZeroShotResult(0.85)]));
+  test("uses subscription llm_description for verification", async () => {
+    let capturedDescription = "";
+    mockVerifyWithDeepSeek = mock((text: string, description: string) => {
+      capturedDescription = description;
+      return Promise.resolve(createDeepSeekResult(true, 0.9));
+    });
 
     const { verifyMatch } = await import("./verify.ts");
     const message = createMockMessage("iPhone 15 Pro Max новый");
-    const subscription = createMockSubscription(1, "iPhone для продажи");
+    const subscription = createMockSubscription(1, "Объявления о продаже iPhone");
 
-    const result = await verifyMatch(message, subscription);
+    await verifyMatch(message, subscription);
 
-    expect(result.isMatch).toBe(true);
-    expect(result.confidence).toBe(0.85);
+    expect(capturedDescription).toBe("Объявления о продаже iPhone");
   });
 
-  test("handles empty labels array", async () => {
-    mockZeroShotClassification = mock(() =>
-      Promise.resolve({
-        labels: [],
-        scores: [],
-        sequence: "test",
-      })
-    );
-
-    const { verifyMatch } = await import("./verify.ts");
-    const message = createMockMessage("Test");
-    const subscription = createMockSubscription(1, "Test");
-
-    const result = await verifyMatch(message, subscription);
-
-    // matchIndex will be -1, matchScore will be 0
-    expect(result.isMatch).toBe(false);
-    expect(result.confidence).toBe(0);
-  });
 });
 
 // Tests for verifyMatches (batch verification)
-describe("verifyMatches with mocked HF API", () => {
+describe("verifyMatches with mocked DeepSeek API", () => {
   beforeEach(() => {
-    mockZeroShotClassification = mock(() => Promise.resolve(createZeroShotResult(0.8)));
+    mockVerifyWithDeepSeek = mock(() => Promise.resolve(createDeepSeekResult(true, 0.8)));
   });
 
   test("processes multiple subscriptions", async () => {
     let callCount = 0;
-    mockZeroShotClassification = mock(() => {
+    mockVerifyWithDeepSeek = mock(() => {
       callCount++;
       // First subscription matches, second doesn't
-      const score = callCount === 1 ? 0.8 : 0.3;
-      return Promise.resolve(createZeroShotResult(score));
+      if (callCount === 1) {
+        return Promise.resolve(createDeepSeekResult(true, 0.85));
+      }
+      return Promise.resolve(createDeepSeekResult(false, 0.3));
     });
 
     const { verifyMatches } = await import("./verify.ts");
@@ -219,12 +204,12 @@ describe("verifyMatches with mocked HF API", () => {
 
   test("handles error for one subscription without failing others", async () => {
     let callCount = 0;
-    mockZeroShotClassification = mock(() => {
+    mockVerifyWithDeepSeek = mock(() => {
       callCount++;
       if (callCount === 2) {
         return Promise.reject(new Error("API error"));
       }
-      return Promise.resolve(createZeroShotResult(0.8));
+      return Promise.resolve(createDeepSeekResult(true, 0.85));
     });
 
     const { verifyMatches } = await import("./verify.ts");
@@ -243,5 +228,14 @@ describe("verifyMatches with mocked HF API", () => {
     expect(results.get(2)?.isMatch).toBe(false);
     expect(results.get(2)?.label).toBe("error");
     expect(results.get(3)?.isMatch).toBe(true);
+  });
+
+  test("returns empty map for empty subscriptions", async () => {
+    const { verifyMatches } = await import("./verify.ts");
+    const message = createMockMessage("Test");
+
+    const results = await verifyMatches(message, []);
+
+    expect(results.size).toBe(0);
   });
 });

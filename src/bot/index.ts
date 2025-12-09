@@ -28,6 +28,22 @@ import {
   settingsKeyboard,
 } from "./keyboards.ts";
 import { interpretEditCommand } from "../llm/edit.ts";
+import { generateKeywordEmbeddings, checkBgeHealth } from "../llm/embeddings.ts";
+
+/**
+ * Regenerate BGE-M3 embeddings for a subscription (background, non-blocking)
+ */
+function regenerateEmbeddings(subscriptionId: number): void {
+  const subscription = queries.getSubscriptionByIdOnly(subscriptionId);
+  if (!subscription) return;
+
+  generateKeywordEmbeddings(subscription.positive_keywords, subscription.negative_keywords)
+    .then((embeddings) => {
+      queries.updateKeywordEmbeddings(subscriptionId, embeddings);
+      botLog.info({ subscriptionId }, "Embeddings regenerated after keyword update");
+    })
+    .catch((e) => botLog.error({ err: e, subscriptionId }, "Failed to regenerate embeddings"));
+}
 import { getExamplesForSubscription } from "./examples.ts";
 import { findSimilarWithFallback, toRatingExamples } from "./similar.ts";
 import {
@@ -1166,13 +1182,22 @@ bot.on("callback_query", async (context) => {
         const { original_query, positive_keywords, negative_keywords, llm_description } =
           state.pending_subscription;
 
-        queries.createSubscription(
+        const subscriptionId = queries.createSubscription(
           userId,
           original_query,
           positive_keywords,
           negative_keywords,
           llm_description
         );
+
+        // Generate BGE-M3 embeddings in background (non-blocking)
+        generateKeywordEmbeddings(positive_keywords, negative_keywords)
+          .then((embeddings) => {
+            queries.updateKeywordEmbeddings(subscriptionId, embeddings);
+            botLog.info({ subscriptionId }, "Keyword embeddings generated");
+          })
+          .catch((e) => botLog.error({ err: e, subscriptionId }, "Failed to generate embeddings"));
+
         invalidateSubscriptionsCache();
 
         setUserState(userId, { step: "idle" });
@@ -2024,6 +2049,14 @@ ${bold("Выбери группы для мониторинга:")}
         negative_keywords,
         llm_description
       );
+
+      // Generate BGE-M3 embeddings in background (non-blocking)
+      generateKeywordEmbeddings(positive_keywords, negative_keywords)
+        .then((embeddings) => {
+          queries.updateKeywordEmbeddings(subscriptionId, embeddings);
+          botLog.info({ subscriptionId }, "Keyword embeddings generated");
+        })
+        .catch((e) => botLog.error({ err: e, subscriptionId }, "Failed to generate embeddings"));
 
       const selectedGroups = state.selected_groups || [];
 

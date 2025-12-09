@@ -31,18 +31,18 @@ function createMessage(overrides: Partial<IncomingMessage> = {}): IncomingMessag
 }
 
 describe("matchMessage", () => {
-  test("returns null when no match", () => {
+  test("returns null when no match", async () => {
     const message = createMessage({ text: "completely unrelated content" });
     const subscription = createSubscription({
       positive_keywords: ["iphone", "продаю"],
       llm_description: "iPhone для продажи",
     });
 
-    const result = matchMessage(message, subscription);
+    const result = await matchMessage(message, subscription);
     expect(result).toBeNull();
   });
 
-  test("returns match result when text matches keywords", () => {
+  test("returns match result when text matches keywords", async () => {
     const message = createMessage({
       text: "Продаю iPhone 15 Pro Max в идеальном состоянии",
     });
@@ -51,7 +51,7 @@ describe("matchMessage", () => {
       llm_description: "Объявления о продаже iPhone 15 Pro",
     });
 
-    const result = matchMessage(message, subscription, { ngramThreshold: 0.1 });
+    const result = await matchMessage(message, subscription, { ngramThreshold: 0.1 });
     expect(result).not.toBeNull();
     expect(result?.passed).toBe(true);
     expect(result?.stage).toBe("ngram");
@@ -59,7 +59,7 @@ describe("matchMessage", () => {
     expect(result?.score).toBeGreaterThan(0);
   });
 
-  test("returns null when negative keyword found", () => {
+  test("returns null when negative keyword found", async () => {
     const message = createMessage({
       text: "Продаю iPhone 15 на запчасти",
     });
@@ -69,11 +69,11 @@ describe("matchMessage", () => {
       llm_description: "iPhone для продажи",
     });
 
-    const result = matchMessage(message, subscription);
+    const result = await matchMessage(message, subscription);
     expect(result).toBeNull();
   });
 
-  test("checks all negative keywords", () => {
+  test("checks all negative keywords", async () => {
     const subscription = createSubscription({
       positive_keywords: ["iphone"],
       negative_keywords: ["разбор", "запчасти", "битый"],
@@ -82,21 +82,21 @@ describe("matchMessage", () => {
 
     // First negative keyword
     expect(
-      matchMessage(createMessage({ text: "iphone разбор" }), subscription)
+      await matchMessage(createMessage({ text: "iphone разбор" }), subscription)
     ).toBeNull();
 
     // Second negative keyword
     expect(
-      matchMessage(createMessage({ text: "iphone запчасти" }), subscription)
+      await matchMessage(createMessage({ text: "iphone запчасти" }), subscription)
     ).toBeNull();
 
     // Third negative keyword
     expect(
-      matchMessage(createMessage({ text: "iphone битый" }), subscription)
+      await matchMessage(createMessage({ text: "iphone битый" }), subscription)
     ).toBeNull();
   });
 
-  test("negative keyword check is token-based (exact word match)", () => {
+  test("negative keyword check is token-based (exact word match)", async () => {
     const subscription = createSubscription({
       positive_keywords: ["iphone"],
       negative_keywords: ["разбор"],
@@ -105,14 +105,14 @@ describe("matchMessage", () => {
 
     // "разбор" as separate word should block
     expect(
-      matchMessage(createMessage({ text: "iphone разбор кузова" }), subscription)
+      await matchMessage(createMessage({ text: "iphone разбор кузова" }), subscription)
     ).toBeNull();
 
     // "разборчивый" contains "разбор" but is different word - shouldn't block
     // Note: our tokenize normalizes and splits, so this depends on implementation
   });
 
-  test("should NOT trigger negative keyword when word is absent", () => {
+  test("should NOT trigger negative keyword when word is absent", async () => {
     const message = createMessage({
       text: "iPhone 14 Pro, 256 гигабайт памяти, Deep Purple В идеальном",
     });
@@ -122,12 +122,12 @@ describe("matchMessage", () => {
       llm_description: "iPhone 14 Pro для продажи",
     });
 
-    const result = matchMessage(message, subscription, { ngramThreshold: 0.1 });
+    const result = await matchMessage(message, subscription, { ngramThreshold: 0.1 });
     // Должен пройти n-gram фильтр и НЕ быть заблокирован негативным словом
     expect(result).not.toBeNull();
   });
 
-  test("multi-word negative keyword matches as phrase (substring)", () => {
+  test("multi-word negative keyword matches as phrase (substring)", async () => {
     const subscription = createSubscription({
       positive_keywords: ["nike", "кроссовки"],
       negative_keywords: ["на запчасти"],
@@ -135,7 +135,7 @@ describe("matchMessage", () => {
     });
 
     // Text with "на" but not "запчасти" - should NOT block
-    const result1 = matchMessage(
+    const result1 = await matchMessage(
       createMessage({
         text: "Новые кроссовки Nike. Заказывала с официального сайта на прошлой неделе",
       }),
@@ -145,7 +145,7 @@ describe("matchMessage", () => {
     expect(result1).not.toBeNull();
 
     // Text with both words but NOT as phrase - should NOT block
-    const result2 = matchMessage(
+    const result2 = await matchMessage(
       createMessage({
         text: "Продаю Nike кроссовки на рынке, есть запчасти для велосипеда",
       }),
@@ -155,7 +155,7 @@ describe("matchMessage", () => {
     expect(result2).not.toBeNull();
 
     // Text with exact phrase "на запчасти" - SHOULD block
-    const blocked = matchMessage(
+    const blocked = await matchMessage(
       createMessage({ text: "Продаю Nike кроссовки на запчасти" }),
       subscription,
       { ngramThreshold: 0.1 }
@@ -163,7 +163,7 @@ describe("matchMessage", () => {
     expect(blocked).toBeNull();
   });
 
-  test("handles empty negative keywords", () => {
+  test("handles empty negative keywords", async () => {
     const message = createMessage({
       text: "Продаю iPhone 15 pro max", // Would be blocked if negative keywords existed
     });
@@ -173,11 +173,11 @@ describe("matchMessage", () => {
       llm_description: "iPhone продаю pro",
     });
 
-    const result = matchMessage(message, subscription, { ngramThreshold: 0.1 });
+    const result = await matchMessage(message, subscription, { ngramThreshold: 0.1 });
     expect(result).not.toBeNull();
   });
 
-  test("uses custom config", () => {
+  test("uses custom config", async () => {
     const message = createMessage({
       text: "some test text with keywords",
     });
@@ -187,19 +187,19 @@ describe("matchMessage", () => {
     });
 
     // Very high threshold should fail
-    const highThreshold = matchMessage(message, subscription, {
+    const highThreshold = await matchMessage(message, subscription, {
       ngramThreshold: 0.99,
     });
     expect(highThreshold).toBeNull();
 
     // Very low threshold should pass
-    const lowThreshold = matchMessage(message, subscription, {
+    const lowThreshold = await matchMessage(message, subscription, {
       ngramThreshold: 0.01,
     });
     expect(lowThreshold).not.toBeNull();
   });
 
-  test("match result contains correct subscription reference", () => {
+  test("match result contains correct subscription reference", async () => {
     const message = createMessage({ text: "iphone продаю дешево" });
     const subscription = createSubscription({
       id: 42,
@@ -207,14 +207,14 @@ describe("matchMessage", () => {
       llm_description: "iphone продаю",
     });
 
-    const result = matchMessage(message, subscription, { ngramThreshold: 0.1 });
+    const result = await matchMessage(message, subscription, { ngramThreshold: 0.1 });
     expect(result?.subscription).toBe(subscription);
     expect(result?.subscription.id).toBe(42);
   });
 });
 
 describe("matchMessageAgainstAll", () => {
-  test("returns empty array when no matches", () => {
+  test("returns empty array when no matches", async () => {
     const message = createMessage({ text: "random text" });
     const subscriptions = [
       createSubscription({
@@ -229,11 +229,11 @@ describe("matchMessageAgainstAll", () => {
       }),
     ];
 
-    const results = matchMessageAgainstAll(message, subscriptions);
+    const results = await matchMessageAgainstAll(message, subscriptions);
     expect(results).toEqual([]);
   });
 
-  test("returns all matching subscriptions", () => {
+  test("returns all matching subscriptions", async () => {
     const message = createMessage({
       text: "продаю iphone 15 pro и samsung galaxy s24",
     });
@@ -255,7 +255,7 @@ describe("matchMessageAgainstAll", () => {
       }),
     ];
 
-    const results = matchMessageAgainstAll(message, subscriptions, {
+    const results = await matchMessageAgainstAll(message, subscriptions, {
       ngramThreshold: 0.1,
     });
 
@@ -266,7 +266,7 @@ describe("matchMessageAgainstAll", () => {
     expect(ids).not.toContain(3);
   });
 
-  test("sorts results by score descending", () => {
+  test("sorts results by score descending", async () => {
     const message = createMessage({
       text: "iphone iphone iphone samsung",
     });
@@ -283,7 +283,7 @@ describe("matchMessageAgainstAll", () => {
       }),
     ];
 
-    const results = matchMessageAgainstAll(message, subscriptions, {
+    const results = await matchMessageAgainstAll(message, subscriptions, {
       ngramThreshold: 0.05,
     });
 
@@ -293,13 +293,13 @@ describe("matchMessageAgainstAll", () => {
     }
   });
 
-  test("handles empty subscriptions list", () => {
+  test("handles empty subscriptions list", async () => {
     const message = createMessage({ text: "some text" });
-    const results = matchMessageAgainstAll(message, []);
+    const results = await matchMessageAgainstAll(message, []);
     expect(results).toEqual([]);
   });
 
-  test("filters out subscriptions with negative keyword matches", () => {
+  test("filters out subscriptions with negative keyword matches", async () => {
     const message = createMessage({
       text: "продаю iphone pro max на запчасти",
     });
@@ -318,7 +318,7 @@ describe("matchMessageAgainstAll", () => {
       }),
     ];
 
-    const results = matchMessageAgainstAll(message, subscriptions, {
+    const results = await matchMessageAgainstAll(message, subscriptions, {
       ngramThreshold: 0.1,
     });
 
@@ -327,7 +327,7 @@ describe("matchMessageAgainstAll", () => {
     expect(ids).toContain(2); // Passed
   });
 
-  test("applies config to all subscriptions", () => {
+  test("applies config to all subscriptions", async () => {
     const message = createMessage({ text: "iphone pro max продаю" });
     const subscriptions = [
       createSubscription({
@@ -343,18 +343,18 @@ describe("matchMessageAgainstAll", () => {
     ];
 
     // With very high threshold, even good matches should fail
-    const highThreshold = matchMessageAgainstAll(message, subscriptions, {
+    const highThreshold = await matchMessageAgainstAll(message, subscriptions, {
       ngramThreshold: 0.99,
     });
     expect(highThreshold).toEqual([]);
 
-    const lowThreshold = matchMessageAgainstAll(message, subscriptions, {
+    const lowThreshold = await matchMessageAgainstAll(message, subscriptions, {
       ngramThreshold: 0.01,
     });
     expect(lowThreshold.length).toBe(2);
   });
 
-  test("real-world scenario: multiple subscription types", () => {
+  test("real-world scenario: multiple subscription types", async () => {
     const message = createMessage({
       text: "Продаю MacBook Pro M3 Max 14 дюймов, 36gb RAM, идеальное состояние, полный комплект. Цена 250000р, Москва.",
     });
@@ -374,7 +374,7 @@ describe("matchMessageAgainstAll", () => {
       }),
     ];
 
-    const results = matchMessageAgainstAll(message, subscriptions, {
+    const results = await matchMessageAgainstAll(message, subscriptions, {
       ngramThreshold: 0.15,
     });
 
