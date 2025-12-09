@@ -53,7 +53,7 @@ export interface MatchedMessage {
 export interface MatchResult {
   subscription: Subscription;
   score: number;
-  stage: "bm25" | "ngram" | "llm";
+  stage: "bm25" | "ngram" | "llm" | "query_fallback";
   passed: boolean;
 }
 

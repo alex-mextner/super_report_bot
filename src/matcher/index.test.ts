@@ -186,8 +186,14 @@ describe("matchMessage", () => {
       llm_description: "test keywords description",
     });
 
-    // Very high threshold should fail
-    const highThreshold = await matchMessage(message, subscription, {
+    // Very high threshold should fail ngram, but query_fallback can still pass
+    // To test threshold blocking, use original_query that doesn't match the text
+    const subscriptionNoQueryMatch = createSubscription({
+      positive_keywords: ["test", "keywords"],
+      llm_description: "test keywords description",
+      original_query: "completely different unrelated content",
+    });
+    const highThreshold = await matchMessage(message, subscriptionNoQueryMatch, {
       ngramThreshold: 0.99,
     });
     expect(highThreshold).toBeNull();
@@ -210,6 +216,59 @@ describe("matchMessage", () => {
     const result = await matchMessage(message, subscription, { ngramThreshold: 0.1 });
     expect(result?.subscription).toBe(subscription);
     expect(result?.subscription.id).toBe(42);
+  });
+
+  test("uses query_fallback when ngram fails but original_query matches", async () => {
+    // This test verifies the fix for the issue where scanFromCache couldn't find
+    // messages that findSimilarWithFallback found during subscription creation
+    const message = createMessage({
+      text: "Продам iphone 12 черный, 30000 руб",
+    });
+
+    // Subscription with many keywords (like real LLM-generated ones)
+    // that won't pass ngram threshold due to low binary coverage
+    const subscription = createSubscription({
+      id: 1,
+      // Many keywords = low binary coverage in ngram
+      positive_keywords: [
+        "iphone", "apple", "телефон", "смартфон", "мобильный",
+        "продажа", "купить", "цена", "стоимость", "рубли",
+        "доставка", "гарантия", "оригинал", "новый", "бу",
+        "состояние", "экран", "камера", "батарея", "память",
+      ],
+      llm_description: "Объявления о продаже iPhone любых моделей",
+      // But original_query is short and matches well
+      original_query: "iphone продам",
+    });
+
+    // With very high ngram threshold, ngram stage won't pass
+    // But query_fallback should kick in
+    const result = await matchMessage(message, subscription, {
+      ngramThreshold: 0.99, // Force ngram to fail
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.stage).toBe("query_fallback");
+    expect(result?.passed).toBe(true);
+  });
+
+  test("query_fallback does not match when original_query is unrelated", async () => {
+    const message = createMessage({
+      text: "Продам iphone 12 черный, 30000 руб",
+    });
+
+    const subscription = createSubscription({
+      positive_keywords: ["samsung", "galaxy", "android"],
+      llm_description: "Продажа Samsung Galaxy",
+      original_query: "samsung galaxy телефон",
+    });
+
+    const result = await matchMessage(message, subscription, {
+      ngramThreshold: 0.99,
+    });
+
+    // Neither ngram nor query_fallback should match
+    expect(result).toBeNull();
   });
 });
 

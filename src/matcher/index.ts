@@ -1,5 +1,5 @@
-import { passesNgramFilter, phraseMatches } from "./ngram.ts";
-import { generateNgrams } from "./normalize.ts";
+import { passesNgramFilter, phraseMatches, calculateKeywordNgramSimilarity } from "./ngram.ts";
+import { generateNgrams, tokenize } from "./normalize.ts";
 import { matcherLog } from "../logger.ts";
 import { semanticMatch, checkBgeHealth } from "../llm/embeddings.ts";
 import type { Subscription, MatchResult, IncomingMessage } from "../types.ts";
@@ -88,6 +88,33 @@ export async function matchMessage(
       stage: "ngram",
       passed: true,
     };
+  }
+
+  // Stage 1a-fallback: Try matching by original_query keywords
+  // This uses the same algorithm as findSimilarWithFallback for consistency
+  const queryKeywords = tokenize(subscription.original_query);
+  if (queryKeywords.length > 0) {
+    const queryScore = calculateKeywordNgramSimilarity(text, queryKeywords);
+
+    // Progressive thresholds like findSimilarWithFallback
+    const queryThreshold = 0.15;
+
+    if (queryScore >= queryThreshold) {
+      matcherLog.debug(
+        {
+          subscriptionId: subscription.id,
+          queryScore: queryScore.toFixed(3),
+          queryKeywords: queryKeywords.slice(0, 5),
+        },
+        "Query fallback passed"
+      );
+      return {
+        subscription,
+        score: queryScore,
+        stage: "query_fallback",
+        passed: true,
+      };
+    }
   }
 
   // Stage 1b: BGE-M3 semantic matching (if N-gram didn't match)
