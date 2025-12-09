@@ -1023,7 +1023,11 @@ ${examplesText}
     try {
       if (mode === "normal") {
         // Normal mode: correct description only, then regenerate keywords
-        const descResult = await correctDescription(currentSnake.llm_description, text);
+        const descResult = await correctDescription(
+          c.pendingSub.originalQuery,
+          currentSnake.llm_description,
+          text
+        );
 
         // Regenerate keywords based on new description
         const keywordsResult = await generateKeywords(descResult.description);
