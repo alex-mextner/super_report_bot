@@ -6,7 +6,8 @@
       "Bash(bun tsc:*)",
       "Bash(/Users/ultra/.bun/bin/bun run tsc --noEmit)",
       "Bash(bunx tsc:*)",
-      "Bash(/Users/ultra/.bun/bin/bun x tsc:*)"
+      "Bash(/Users/ultra/.bun/bin/bun x tsc:*)",
+      "Bash(/Users/ultra/.bun/bin/bun test:*)"
     ],
     "deny": [],
     "ask": []
