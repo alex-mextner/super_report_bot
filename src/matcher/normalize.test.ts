@@ -117,6 +117,9 @@ describe("generateNgrams", () => {
   });
 
   test("handles empty input", () => {
+    // For strings shorter than n, the function returns the string itself
+    // Empty string returns Set([""]) which works correctly for Jaccard similarity:
+    // similarity("", "") = 1.0, similarity("abc", "") = 0
     const ngrams = generateNgrams("");
     expect(ngrams).toEqual(new Set([""]));
   });

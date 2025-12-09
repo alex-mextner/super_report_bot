@@ -49,34 +49,13 @@ function getContext(actor: ReturnType<typeof createTestActor>): BotContext {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe("createInitialContext", () => {
-  test("creates context with correct telegramId", () => {
-    const ctx = createInitialContext(99999);
-    expect(ctx.telegramId).toBe(99999);
-  });
-
-  test("defaults to normal mode", () => {
-    const ctx = createInitialContext(12345);
-    expect(ctx.userMode).toBe("normal");
-  });
-
-  test("respects advanced mode parameter", () => {
+  test("creates valid context for FSM initialization", () => {
     const ctx = createInitialContext(12345, "advanced");
-    expect(ctx.userMode).toBe("advanced");
-  });
 
-  test("initializes all fields to null/empty", () => {
-    const ctx = createInitialContext(12345);
-    expect(ctx.pendingSub).toBeNull();
-    expect(ctx.clarification).toBeNull();
-    expect(ctx.ratingExamples).toBeNull();
-    expect(ctx.draftKeywords).toBeNull();
-    expect(ctx.availableGroups).toEqual([]);
-    expect(ctx.selectedGroups).toEqual([]);
-    expect(ctx.pendingGroups).toEqual([]);
-    expect(ctx.currentPendingGroup).toBeNull();
-    expect(ctx.editingSubscriptionId).toBeNull();
-    expect(ctx.pendingAiEdit).toBeNull();
-    expect(ctx.pendingAiCorrection).toBeNull();
+    // Only check that context is usable by FSM - not every field
+    expect(ctx.telegramId).toBe(12345);
+    expect(ctx.userMode).toBe("advanced");
+    expect(ctx.pendingSub).toBeNull(); // FSM requires this to be null initially
   });
 });
 

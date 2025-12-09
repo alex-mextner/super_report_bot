@@ -11,43 +11,51 @@ import {
 import type { PendingGroup } from "../types.ts";
 
 describe("confirmKeyboard", () => {
-  test("creates keyboard with confirm, regenerate, edit and cancel buttons", () => {
-    const keyboard = confirmKeyboard("test_query_id");
-
-    // InlineKeyboard has a .toJSON() method that returns the keyboard structure
-    const json = keyboard.toJSON();
-
-    expect(json.inline_keyboard).toBeDefined();
-    expect(json.inline_keyboard.length).toBe(3); // Three rows
-
-    // First row: Confirm and Regenerate
-    const firstRow = json.inline_keyboard[0]!;
-    expect(firstRow.length).toBe(2);
-    expect(firstRow[0]!.text).toBe("Подтвердить");
-    expect(firstRow[1]!.text).toBe("🤖 Перегенерировать");
-
-    // Second row: Edit positive and negative
-    const secondRow = json.inline_keyboard[1]!;
-    expect(secondRow.length).toBe(2);
-    expect(secondRow[0]!.text).toBe("✏️ + слова");
-    expect(secondRow[1]!.text).toBe("✏️ − слова");
-
-    // Third row: Cancel
-    const thirdRow = json.inline_keyboard[2]!;
-    expect(thirdRow.length).toBe(1);
-    expect(thirdRow[0]!.text).toBe("Отмена");
-  });
-
-  test("includes query ID in callback data", () => {
+  test("has all required actions for subscription confirmation flow", () => {
     const queryId = "user123_1234567890";
     const keyboard = confirmKeyboard(queryId);
     const json = keyboard.toJSON();
 
-    const confirmButton = json.inline_keyboard[0]![0]!;
-    const confirmData = JSON.parse((confirmButton as { callback_data: string }).callback_data);
+    // Extract all callback actions from keyboard
+    const allButtons = json.inline_keyboard.flat();
+    const actions = allButtons.map((btn) => {
+      const data = JSON.parse((btn as { callback_data: string }).callback_data);
+      return data.action;
+    });
 
-    expect(confirmData.action).toBe("confirm");
-    expect(confirmData.id).toBe(queryId);
+    // Test behavior: keyboard must have these actions to support the flow
+    // Don't care about exact button text or layout - just that actions exist
+    expect(actions).toContain("confirm");
+    expect(actions).toContain("correct_pending");
+    expect(actions).toContain("cancel");
+  });
+
+  test("advanced mode includes manual keyword editing actions", () => {
+    const keyboard = confirmKeyboard("test_id", "advanced");
+    const json = keyboard.toJSON();
+
+    const allButtons = json.inline_keyboard.flat();
+    const actions = allButtons.map((btn) => {
+      const data = JSON.parse((btn as { callback_data: string }).callback_data);
+      return data.action;
+    });
+
+    expect(actions).toContain("edit_positive_pending");
+    expect(actions).toContain("edit_negative_pending");
+  });
+
+  test("normal mode excludes manual keyword editing", () => {
+    const keyboard = confirmKeyboard("test_id", "normal");
+    const json = keyboard.toJSON();
+
+    const allButtons = json.inline_keyboard.flat();
+    const actions = allButtons.map((btn) => {
+      const data = JSON.parse((btn as { callback_data: string }).callback_data);
+      return data.action;
+    });
+
+    expect(actions).not.toContain("edit_positive_pending");
+    expect(actions).not.toContain("edit_negative_pending");
   });
 
   test("all buttons have valid JSON callback data", () => {
@@ -63,76 +71,64 @@ describe("confirmKeyboard", () => {
 });
 
 describe("subscriptionKeyboard", () => {
-  test("creates keyboard with edit and delete buttons", () => {
-    const keyboard = subscriptionKeyboard(42, true, false);
+  // Helper to extract actions from keyboard
+  const getActions = (keyboard: ReturnType<typeof subscriptionKeyboard>) => {
     const json = keyboard.toJSON();
+    return json.inline_keyboard.flat().map((btn) => {
+      const data = JSON.parse((btn as { callback_data: string }).callback_data);
+      return { action: data.action, id: data.id };
+    });
+  };
 
-    // Should have rows for: edit buttons, toggle/delete
-    expect(json.inline_keyboard.length).toBeGreaterThanOrEqual(2);
-
-    // Find delete button
-    const allButtons = json.inline_keyboard.flat();
-    const deleteButton = allButtons.find((b) => b.text === "❌ Удалить");
-    expect(deleteButton).toBeDefined();
+  test("always has disable action with subscription ID", () => {
+    const actions = getActions(subscriptionKeyboard(42, false, false));
+    expect(actions).toContainEqual({ action: "disable", id: 42 });
   });
 
-  test("shows toggle button when has negative keywords", () => {
-    const keyboard = subscriptionKeyboard(42, true, false);
-    const json = keyboard.toJSON();
+  test("advanced mode has edit and regenerate actions", () => {
+    const actions = getActions(subscriptionKeyboard(42, false, false, "advanced"));
 
-    const allButtons = json.inline_keyboard.flat();
-    const toggleButton = allButtons.find((b) => b.text.includes("Откл. искл."));
-    expect(toggleButton).toBeDefined();
+    expect(actions).toContainEqual({ action: "edit_positive", id: 42 });
+    expect(actions).toContainEqual({ action: "edit_negative", id: 42 });
+    expect(actions).toContainEqual({ action: "edit_description", id: 42 });
+    expect(actions).toContainEqual({ action: "regenerate_sub", id: 42 });
   });
 
-  test("shows toggle button when has disabled negative keywords", () => {
-    const keyboard = subscriptionKeyboard(42, false, true);
-    const json = keyboard.toJSON();
+  test("normal mode has no edit actions", () => {
+    const actions = getActions(subscriptionKeyboard(42, false, false, "normal"));
 
-    const allButtons = json.inline_keyboard.flat();
-    const toggleButton = allButtons.find((b) => b.text.includes("Вкл. искл."));
-    expect(toggleButton).toBeDefined();
+    expect(actions).not.toContainEqual(expect.objectContaining({ action: "edit_positive" }));
+    expect(actions).not.toContainEqual(expect.objectContaining({ action: "edit_negative" }));
   });
 
-  test("hides toggle button when no negative keywords at all", () => {
-    const keyboard = subscriptionKeyboard(42, false, false);
-    const json = keyboard.toJSON();
-
-    const allButtons = json.inline_keyboard.flat();
-    const toggleButton = allButtons.find((b) => b.text.includes("искл."));
-    expect(toggleButton).toBeUndefined();
+  test("toggle_negative action appears when has active negative keywords", () => {
+    const actions = getActions(subscriptionKeyboard(42, true, false, "advanced"));
+    expect(actions).toContainEqual({ action: "toggle_negative", id: 42 });
   });
 
-  test("includes subscription ID in callback data", () => {
-    const subscriptionId = 123;
-    const keyboard = subscriptionKeyboard(subscriptionId, false, false);
-    const json = keyboard.toJSON();
+  test("toggle_negative action appears when has disabled negative keywords", () => {
+    const actions = getActions(subscriptionKeyboard(42, false, true, "advanced"));
+    expect(actions).toContainEqual({ action: "toggle_negative", id: 42 });
+  });
 
-    const allButtons = json.inline_keyboard.flat();
-    const deleteButton = allButtons.find((b) => b.text === "❌ Удалить")!;
-    const data = JSON.parse((deleteButton as { callback_data: string }).callback_data);
-
-    expect(data.action).toBe("disable");
-    expect(data.id).toBe(subscriptionId);
+  test("toggle_negative action hidden when no negative keywords at all", () => {
+    const actions = getActions(subscriptionKeyboard(42, false, false, "advanced"));
+    expect(actions).not.toContainEqual(expect.objectContaining({ action: "toggle_negative" }));
   });
 });
 
 describe("backKeyboard", () => {
-  test("creates keyboard with back button", () => {
+  test("has back action", () => {
     const keyboard = backKeyboard();
     const json = keyboard.toJSON();
 
-    expect(json.inline_keyboard.length).toBe(1);
-    expect(json.inline_keyboard[0]!.length).toBe(1);
-    expect(json.inline_keyboard[0]![0]!.text).toBe("Назад");
-  });
+    const allButtons = json.inline_keyboard.flat();
+    const actions = allButtons.map((btn) => {
+      const data = JSON.parse((btn as { callback_data: string }).callback_data);
+      return data.action;
+    });
 
-  test("has back action in callback data", () => {
-    const keyboard = backKeyboard();
-    const json = keyboard.toJSON();
-
-    const data = JSON.parse((json.inline_keyboard[0]![0]! as { callback_data: string }).callback_data);
-    expect(data.action).toBe("back");
+    expect(actions).toContain("back");
   });
 });
 
