@@ -695,17 +695,39 @@ export async function scanGroupHistory(
   return matchCount;
 }
 
-// Scan messages from in-memory cache (no Telegram API calls)
+// Result of a history scan match
+export interface HistoryScanMatch {
+  messageId: number;
+  groupId: number;
+  groupTitle: string;
+  text: string;
+  score: number;
+}
+
+export interface HistoryScanResult {
+  matches: HistoryScanMatch[];
+  total: number;
+  processed: number;
+}
+
+// Max candidates to verify with LLM (cost control)
+const MAX_LLM_VERIFICATIONS = 20;
+
+// Scan messages from in-memory cache with LLM verification
+// Returns paginated results - caller handles notifications
 export async function scanFromCache(
   groupIds: number[],
-  subscriptionId: number
-): Promise<number> {
-  listenerLog.info({ groupIds, subscriptionId }, "Scanning from cache");
+  subscriptionId: number,
+  options: { limit?: number; offset?: number; notify?: boolean } = {}
+): Promise<HistoryScanResult> {
+  const { limit = 5, offset = 0, notify = false } = options;
+
+  listenerLog.info({ groupIds, subscriptionId, limit, offset }, "Scanning from cache");
 
   const subscription = queries.getSubscriptionByIdOnly(subscriptionId);
   if (!subscription) {
     listenerLog.warn({ subscriptionId }, "Subscription not found for cache scan");
-    return 0;
+    return { matches: [], total: 0, processed: 0 };
   }
 
   // Wait for cache to be ready for all groups
@@ -726,37 +748,20 @@ export async function scanFromCache(
     }
   }
 
-  let matchCount = 0;
+  // Phase 1: Collect n-gram candidates (cheap)
+  interface NgramCandidate {
+    msg: CachedMessage;
+    incomingMsg: IncomingMessage;
+    score: number;
+  }
+  const ngramCandidates: NgramCandidate[] = [];
   let processedCount = 0;
-  let ngramPassedCount = 0;
-  let llmMatchCount = 0;
-  let fuzzyFallbackCount = 0;
-  let errorFallbackCount = 0;
 
   for (const groupId of groupIds) {
     if (!isCacheReady(groupId)) continue;
 
     const messages = getMessages(groupId);
     listenerLog.debug({ groupId, messageCount: messages.length }, "Scanning cached messages");
-
-    // DEBUG: Log first 5 messages with their ngram scores
-    const DEBUG_LIMIT = 5;
-    for (let i = 0; i < Math.min(DEBUG_LIMIT, messages.length); i++) {
-      const debugMsg = messages[i];
-      if (!debugMsg) continue;
-      const debugResult = passesNgramFilter(
-        debugMsg.text,
-        subscription.positive_keywords,
-        subscription.llm_description,
-        0.15
-      );
-      listenerLog.info({
-        msgId: debugMsg.id,
-        text: debugMsg.text.substring(0, 120),
-        score: debugResult.score.toFixed(3),
-        passed: debugResult.passed,
-      }, "Debug: message ngram score");
-    }
 
     for (const msg of messages) {
       processedCount++;
@@ -776,92 +781,108 @@ export async function scanFromCache(
         timestamp: new Date(msg.date * 1000),
       };
 
-      // N-gram + semantic matching
+      // N-gram + semantic matching (cheap, local)
       const candidates = await matchMessageAgainstAll(incomingMsg, [subscription]);
       if (candidates.length === 0) continue;
-      ngramPassedCount++;
 
-      // LLM verification with fuzzy fallback
-      let matched = false;
-      let matchSource = "";
-
-      try {
-        const verification = await verifyMatch(incomingMsg, subscription);
-
-        if (verification.isMatch) {
-          matched = true;
-          matchSource = "llm";
-          llmMatchCount++;
-        } else {
-          // LLM rejected — try fuzzy search fallback
-          const fuzzyScore = fuzzySearchScore(msg.text, subscription.original_query);
-          if (fuzzyScore >= FUZZY_FALLBACK_THRESHOLD) {
-            matched = true;
-            matchSource = "fuzzy_fallback";
-            fuzzyFallbackCount++;
-            listenerLog.debug({
-              msgId: msg.id,
-              fuzzyScore: fuzzyScore.toFixed(3),
-              llmConfidence: verification.confidence.toFixed(3),
-              query: subscription.original_query,
-            }, "Fuzzy fallback matched (LLM rejected)");
-          }
-        }
-      } catch (error) {
-        // On LLM error, try fuzzy search first, then n-gram score
-        const fuzzyScore = fuzzySearchScore(msg.text, subscription.original_query);
-        if (fuzzyScore >= FUZZY_FALLBACK_THRESHOLD) {
-          matched = true;
-          matchSource = "fuzzy_error_fallback";
-          errorFallbackCount++;
-          listenerLog.debug({
-            msgId: msg.id,
-            fuzzyScore: fuzzyScore.toFixed(3),
-            query: subscription.original_query,
-          }, "Fuzzy fallback matched (LLM error)");
-        } else {
-          // Fallback to n-gram score if fuzzy doesn't match
-          const candidate = candidates[0];
-          if (candidate && candidate.score > 0.7) {
-            matched = true;
-            matchSource = "ngram_error_fallback";
-            errorFallbackCount++;
-          }
-        }
-      }
-
-      if (matched) {
-        matchCount++;
-        queries.markMessageMatched(subscriptionId, msg.id, groupId);
-
-        const userTelegramId = await getUserTelegramId(subscription.user_id);
-        if (userTelegramId) {
-          await notifyUser(
-            userTelegramId,
-            msg.groupTitle,
-            msg.text,
-            subscription.original_query,
-            msg.id,
-            msg.groupId
-          );
-        }
+      const topCandidate = candidates[0];
+      if (topCandidate) {
+        ngramCandidates.push({
+          msg,
+          incomingMsg,
+          score: topCandidate.score,
+        });
       }
     }
   }
+
+  // Sort by n-gram score descending
+  ngramCandidates.sort((a, b) => b.score - a.score);
+
+  // Phase 2: LLM verification only for top candidates (expensive)
+  const topCandidates = ngramCandidates.slice(0, MAX_LLM_VERIFICATIONS);
+  const allMatches: HistoryScanMatch[] = [];
+  let llmMatchCount = 0;
+
+  listenerLog.info({
+    ngramCandidates: ngramCandidates.length,
+    verifying: topCandidates.length,
+  }, "N-gram phase complete, starting LLM verification");
+
+  for (const { msg, incomingMsg, score } of topCandidates) {
+    try {
+      const verification = await verifyMatch(incomingMsg, subscription);
+
+      if (verification.isMatch) {
+        llmMatchCount++;
+        allMatches.push({
+          messageId: msg.id,
+          groupId: msg.groupId,
+          groupTitle: msg.groupTitle,
+          text: msg.text,
+          score,
+        });
+        queries.markMessageMatched(subscriptionId, msg.id, msg.groupId);
+      }
+    } catch (error) {
+      // On LLM error, use high n-gram score threshold only
+      if (score > 0.8) {
+        llmMatchCount++;
+        allMatches.push({
+          messageId: msg.id,
+          groupId: msg.groupId,
+          groupTitle: msg.groupTitle,
+          text: msg.text,
+          score,
+        });
+        queries.markMessageMatched(subscriptionId, msg.id, msg.groupId);
+
+        listenerLog.warn({ msgId: msg.id, score: score.toFixed(3) }, "LLM error, high score fallback");
+      }
+    }
+  }
+
+  // Sort by score descending
+  allMatches.sort((a, b) => b.score - a.score);
+
+  // Apply pagination
+  const paginatedMatches = allMatches.slice(offset, offset + limit);
 
   listenerLog.info(
     {
       subscriptionId,
       processed: processedCount,
-      ngramPassed: ngramPassedCount,
+      ngramCandidates: ngramCandidates.length,
+      llmVerified: topCandidates.length,
       llmMatches: llmMatchCount,
-      fuzzyFallbacks: fuzzyFallbackCount,
-      errorFallbacks: errorFallbackCount,
-      totalMatches: matchCount,
+      total: allMatches.length,
+      returned: paginatedMatches.length,
     },
     "Cache scan complete"
   );
-  return matchCount;
+
+  // Optionally notify for this page of results
+  if (notify && paginatedMatches.length > 0) {
+    const userTelegramId = await getUserTelegramId(subscription.user_id);
+    if (userTelegramId) {
+      for (const match of paginatedMatches) {
+        await notifyUser(
+          userTelegramId,
+          match.groupTitle,
+          match.text,
+          subscription.original_query,
+          match.messageId,
+          match.groupId
+        );
+      }
+    }
+  }
+
+  return {
+    matches: paginatedMatches,
+    total: allMatches.length,
+    processed: processedCount,
+  };
 }
 
 // Check if userbot is member of a chat by trying to resolve it

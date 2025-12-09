@@ -2078,13 +2078,18 @@ ${bold("Выбери группы для мониторинга:")}
 
         // Scan cache in background
         const groupIds = selectedGroups.map((g) => g.id);
-        scanFromCache(groupIds, subscriptionId)
-          .then((count) => {
-            botLog.info({ count, subscriptionId }, "Cache scan complete");
-            const resultText =
-              count > 0
-                ? `✅ Подписка создана! Мониторинг групп: ${groupNames}\n\n📬 Найдено ${count} сообщений в истории.`
-                : `✅ Подписка создана! Мониторинг групп: ${groupNames}\n\n📭 В истории совпадений не найдено.`;
+        scanFromCache(groupIds, subscriptionId, { limit: 5, offset: 0, notify: true })
+          .then((result) => {
+            botLog.info({ total: result.total, subscriptionId }, "Cache scan complete");
+            let resultText: string;
+            if (result.total > 0) {
+              resultText = `✅ Подписка создана! Мониторинг групп: ${groupNames}\n\n📬 Найдено ${result.total} сообщений в истории.`;
+              if (result.total > 5) {
+                resultText += `\n\n📤 Отправлено первые 5 из ${result.total}. Остальные появятся в ленте при новых совпадениях.`;
+              }
+            } else {
+              resultText = `✅ Подписка создана! Мониторинг групп: ${groupNames}\n\n📭 В истории совпадений не найдено.`;
+            }
             context
               .editText(resultText)
               .catch((e) =>
