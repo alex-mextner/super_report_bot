@@ -221,6 +221,9 @@ const stmts = {
   countAllMessages: db.prepare<{ count: number }, []>(
     "SELECT COUNT(*) as count FROM messages WHERE is_deleted = 0"
   ),
+  getLastMessageId: db.prepare<{ message_id: number } | null, [number]>(
+    "SELECT MAX(message_id) as message_id FROM messages WHERE group_id = ?"
+  ),
   getDistinctGroups: db.prepare<{ group_id: number; group_title: string; count: number }, []>(
     `SELECT group_id, group_title, COUNT(*) as count FROM messages
      WHERE is_deleted = 0 GROUP BY group_id ORDER BY count DESC`
@@ -635,6 +638,11 @@ export const queries = {
       return stmts.countMessagesByGroup.get(groupId)?.count || 0;
     }
     return stmts.countAllMessages.get()?.count || 0;
+  },
+
+  getLastMessageId(groupId: number): number | null {
+    const row = stmts.getLastMessageId.get(groupId);
+    return row?.message_id ?? null;
   },
 
   getDistinctMessageGroups(): { group_id: number; group_title: string; count: number }[] {

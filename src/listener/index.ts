@@ -427,6 +427,14 @@ async function loadGroupHistory(groupId: number, limit: number): Promise<void> {
       // Check if this is a forum group with topics
       const isForum = chat.chatType === "supergroup" && chat.isForum;
 
+      // Check for existing messages to enable incremental load
+      const lastMessageId = queries.getLastMessageId(groupId);
+      if (lastMessageId) {
+        listenerLog.info({ groupId, groupTitle, lastMessageId }, "Incremental load from last message");
+      } else {
+        listenerLog.info({ groupId, groupTitle }, "Full history load (first run)");
+      }
+
       if (isForum) {
         // Load forum topics first
         const topics: ForumTopic[] = [];
@@ -447,6 +455,7 @@ async function loadGroupHistory(groupId: number, limit: number): Promise<void> {
             threadId: topic.id,
             query: "",
             limit: limitPerTopic,
+            minId: lastMessageId ?? undefined,
           })) {
             if (msg.text) {
               addMessage({
@@ -472,7 +481,7 @@ async function loadGroupHistory(groupId: number, limit: number): Promise<void> {
       } else {
         // Regular group - use iterHistory
         let count = 0;
-        for await (const msg of mtClient.iterHistory(groupId, { limit })) {
+        for await (const msg of mtClient.iterHistory(groupId, { limit, minId: lastMessageId ?? undefined })) {
           if (msg.text) {
             const topicId = extractTopicId(msg);
             addMessage({
