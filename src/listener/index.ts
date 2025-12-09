@@ -17,6 +17,7 @@ import {
   saveTopic,
   type CachedMessage,
 } from "../cache/messages.ts";
+import { generateNgrams, generateWordShingles } from "../matcher/normalize.ts";
 
 const API_ID = Number(process.env.API_ID);
 const API_HASH = process.env.API_HASH;
@@ -32,6 +33,45 @@ const RATE_LIMIT_DELAY = 2000; // 2 seconds between groups
 const RETRY_ATTEMPTS = 10;
 const RETRY_BASE_DELAY = 2000; // 2s -> 4s -> 8s -> ... exponential backoff
 const RETRY_MAX_DELAY = 120000; // cap at 2 minutes
+const FUZZY_FALLBACK_THRESHOLD = 0.3; // Threshold for fuzzy search fallback
+
+/**
+ * Calculate fuzzy search score between text and query
+ * Uses asymmetric coverage: what fraction of query is found in text
+ * Same algorithm as webapp search
+ */
+function fuzzySearchScore(text: string, query: string): number {
+  if (!query || query.trim().length === 0) return 1;
+
+  const queryNgrams = generateNgrams(query, 3);
+  const queryShingles = generateWordShingles(query, 2);
+  const isSingleWord = queryShingles.size === 1;
+
+  const textNgrams = generateNgrams(text, 3);
+  const textShingles = generateWordShingles(text, 2);
+
+  // Asymmetric: how much of the query is found in the text
+  const charCoverage = queryCoverage(textNgrams, queryNgrams);
+  const wordCoverage = queryCoverage(textShingles, queryShingles);
+
+  // For single-word queries, rely more on character n-grams
+  return isSingleWord
+    ? charCoverage
+    : charCoverage * 0.4 + wordCoverage * 0.6;
+}
+
+/**
+ * Calculate what fraction of query n-grams are found in text
+ */
+function queryCoverage(textNgrams: Set<string>, queryNgrams: Set<string>): number {
+  if (queryNgrams.size === 0) return 1;
+
+  let found = 0;
+  for (const ng of queryNgrams) {
+    if (textNgrams.has(ng)) found++;
+  }
+  return found / queryNgrams.size;
+}
 
 export let mtClient = new TelegramClient({
   apiId: API_ID,
@@ -688,6 +728,10 @@ export async function scanFromCache(
 
   let matchCount = 0;
   let processedCount = 0;
+  let ngramPassedCount = 0;
+  let llmMatchCount = 0;
+  let fuzzyFallbackCount = 0;
+  let errorFallbackCount = 0;
 
   for (const groupId of groupIds) {
     if (!isCacheReady(groupId)) continue;
@@ -735,51 +779,86 @@ export async function scanFromCache(
       // N-gram filter
       const candidates = matchMessageAgainstAll(incomingMsg, [subscription]);
       if (candidates.length === 0) continue;
+      ngramPassedCount++;
 
-      // LLM verification
+      // LLM verification with fuzzy fallback
+      let matched = false;
+      let matchSource = "";
+
       try {
         const verification = await verifyMatch(incomingMsg, subscription);
 
         if (verification.isMatch) {
-          matchCount++;
-          queries.markMessageMatched(subscriptionId, msg.id, groupId);
-
-          const userTelegramId = await getUserTelegramId(subscription.user_id);
-          if (userTelegramId) {
-            await notifyUser(
-              userTelegramId,
-              msg.groupTitle,
-              msg.text,
-              subscription.original_query,
-              msg.id,
-              msg.groupId
-            );
+          matched = true;
+          matchSource = "llm";
+          llmMatchCount++;
+        } else {
+          // LLM rejected — try fuzzy search fallback
+          const fuzzyScore = fuzzySearchScore(msg.text, subscription.original_query);
+          if (fuzzyScore >= FUZZY_FALLBACK_THRESHOLD) {
+            matched = true;
+            matchSource = "fuzzy_fallback";
+            fuzzyFallbackCount++;
+            listenerLog.debug({
+              msgId: msg.id,
+              fuzzyScore: fuzzyScore.toFixed(3),
+              llmConfidence: verification.confidence.toFixed(3),
+              query: subscription.original_query,
+            }, "Fuzzy fallback matched (LLM rejected)");
           }
         }
       } catch (error) {
-        // On LLM error, use score threshold
-        const candidate = candidates[0];
-        if (candidate && candidate.score > 0.7) {
-          matchCount++;
-          queries.markMessageMatched(subscriptionId, msg.id, groupId);
-          const userTelegramId = await getUserTelegramId(subscription.user_id);
-          if (userTelegramId) {
-            await notifyUser(
-              userTelegramId,
-              msg.groupTitle,
-              msg.text,
-              subscription.original_query,
-              msg.id,
-              msg.groupId
-            );
+        // On LLM error, try fuzzy search first, then n-gram score
+        const fuzzyScore = fuzzySearchScore(msg.text, subscription.original_query);
+        if (fuzzyScore >= FUZZY_FALLBACK_THRESHOLD) {
+          matched = true;
+          matchSource = "fuzzy_error_fallback";
+          errorFallbackCount++;
+          listenerLog.debug({
+            msgId: msg.id,
+            fuzzyScore: fuzzyScore.toFixed(3),
+            query: subscription.original_query,
+          }, "Fuzzy fallback matched (LLM error)");
+        } else {
+          // Fallback to n-gram score if fuzzy doesn't match
+          const candidate = candidates[0];
+          if (candidate && candidate.score > 0.7) {
+            matched = true;
+            matchSource = "ngram_error_fallback";
+            errorFallbackCount++;
           }
+        }
+      }
+
+      if (matched) {
+        matchCount++;
+        queries.markMessageMatched(subscriptionId, msg.id, groupId);
+
+        const userTelegramId = await getUserTelegramId(subscription.user_id);
+        if (userTelegramId) {
+          await notifyUser(
+            userTelegramId,
+            msg.groupTitle,
+            msg.text,
+            subscription.original_query,
+            msg.id,
+            msg.groupId
+          );
         }
       }
     }
   }
 
   listenerLog.info(
-    { processed: processedCount, matches: matchCount, subscriptionId },
+    {
+      subscriptionId,
+      processed: processedCount,
+      ngramPassed: ngramPassedCount,
+      llmMatches: llmMatchCount,
+      fuzzyFallbacks: fuzzyFallbackCount,
+      errorFallbacks: errorFallbackCount,
+      totalMatches: matchCount,
+    },
     "Cache scan complete"
   );
   return matchCount;

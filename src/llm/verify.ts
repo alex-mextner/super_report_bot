@@ -52,15 +52,23 @@ export async function verifyMatch(
   const matchScore = matchIndex >= 0 ? result.scores[matchIndex] ?? 0 : 0;
   const isMatch = matchScore > 0.6;
 
-  llmLog.debug(
-    {
-      subscriptionId: subscription.id,
-      confidence: matchScore.toFixed(3),
-      isMatch,
-      textPreview: text.slice(0, 50),
-    },
-    isMatch ? "LLM match" : "LLM no match"
-  );
+  // Log with appropriate level based on confidence
+  const logData = {
+    subscriptionId: subscription.id,
+    confidence: matchScore.toFixed(3),
+    isMatch,
+    textPreview: text.slice(0, 80),
+    description: description.slice(0, 50),
+  };
+
+  if (isMatch) {
+    llmLog.debug(logData, "LLM match");
+  } else if (matchScore >= 0.5) {
+    // Near-threshold rejection — log at info level for monitoring
+    llmLog.info(logData, "LLM near-threshold rejection (0.5-0.6)");
+  } else {
+    llmLog.debug(logData, "LLM no match");
+  }
 
   return {
     isMatch,
