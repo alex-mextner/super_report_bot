@@ -9,6 +9,7 @@
 
 import { queries } from "../db/index.ts";
 import { apiLog } from "../logger.ts";
+import { analyzeListingImage, type ListingImageAnalysis } from "./vision.ts";
 
 const BRAVE_API = "https://api.search.brave.com/res/v1/web/search";
 const BRAVE_KEY = process.env.BRAVE_API_KEY;
@@ -69,7 +70,8 @@ interface ItemAnalysis {
   priceInEur: number | null;
   marketAvgInEur: number | null;
   priceVerdict: "good_deal" | "overpriced" | "fair" | "unknown";
-  worthBuying: boolean;
+  priceDataFound: boolean; // true if market prices were found in search results
+  worthBuying: boolean; // false ONLY if negative reviews found
   worthBuyingReason: string;
   sources: PriceSource[];
 }
@@ -100,6 +102,7 @@ export interface DeepAnalysisResult {
   scamRisk: ScamRisk;
   overallVerdict: string;
   similarItems: SimilarProduct[];
+  imageAnalysis?: ListingImageAnalysis;
 }
 
 // ============= Currency Conversion =============
@@ -361,8 +364,9 @@ async function analyzeItemPrice(
       priceInEur,
       marketAvgInEur: null,
       priceVerdict: "unknown",
+      priceDataFound: false, // no search results
       worthBuying: true,
-      worthBuyingReason: "Недостаточно данных для оценки",
+      worthBuyingReason: "",
       sources: [],
     };
   }
@@ -393,8 +397,9 @@ ${context}
   "minPrice": {"value": число, "currency": "код ISO 4217"} или null,
   "maxPrice": {"value": число, "currency": "код ISO 4217"} или null,
   "avgPrice": {"value": число, "currency": "код ISO 4217"} или null,
-  "worthBuying": boolean (стоит ли вообще покупать такой товар — качество, отзывы),
-  "worthBuyingReason": "причина рекомендации",
+  "priceDataFound": boolean (удалось ли найти цены в результатах поиска),
+  "worthBuying": boolean (false ТОЛЬКО если найдены негативные отзывы о качестве товара, иначе true),
+  "worthBuyingReason": "причина НЕ рекомендации если worthBuying=false, иначе null",
   "sources": [
     {"index": номер источника 1-8, "price": "найденная цена как текст или null"}
   ]
@@ -440,6 +445,9 @@ ${context}
       const priceVerdict = calculatePriceVerdict(priceInEur, marketAvgInEur);
       apiLog.debug({ itemName, priceVerdict, priceInEur, marketAvgInEur }, "Price verdict calculated");
 
+      // Determine if price data was found (either from LLM response or by checking if we have market prices)
+      const priceDataFound = parsed.priceDataFound ?? (marketAvg?.value != null);
+
       return {
         name: itemName,
         extractedPrice: extractedPriceDisplay,
@@ -452,6 +460,7 @@ ${context}
         priceInEur,
         marketAvgInEur,
         priceVerdict,
+        priceDataFound,
         worthBuying: parsed.worthBuying ?? true,
         worthBuyingReason: parsed.worthBuyingReason || "",
         sources,
@@ -473,8 +482,9 @@ ${context}
     priceInEur,
     marketAvgInEur: null,
     priceVerdict: "unknown",
+    priceDataFound: false, // LLM call failed
     worthBuying: true,
-    worthBuyingReason: "Не удалось проанализировать",
+    worthBuyingReason: "",
     sources: searchResults.slice(0, 3).map((r) => ({
       title: r.title,
       url: r.url,
@@ -510,12 +520,34 @@ const SCAM_PRICE_THRESHOLD_EUR = 150;
 // Apple products have higher scam risk threshold
 const APPLE_PATTERNS = /\b(iphone|ipad|macbook|airpods|apple\s*watch|imac|mac\s*(mini|pro|studio))\b/i;
 
-function detectScamFlags(text: string, items: ItemAnalysis[]): ScamFlags {
+function detectScamFlags(
+  text: string,
+  items: ItemAnalysis[],
+  imageAnalysis?: ListingImageAnalysis
+): ScamFlags {
   const flags: string[] = [];
   let score = 0;
 
   const textLower = text.toLowerCase();
   const hasAppleProduct = APPLE_PATTERNS.test(text);
+
+  // 0. Image analysis flags
+  if (imageAnalysis) {
+    if (imageAnalysis.quality === "stock_photo") {
+      flags.push("Стоковое фото (не реальный товар)");
+      score += 20;
+    } else if (imageAnalysis.quality === "screenshot") {
+      flags.push("Скриншот вместо фото товара");
+      score += 10;
+    }
+    // Add any suspicious flags from vision analysis
+    for (const flag of imageAnalysis.suspiciousFlags) {
+      if (!flags.includes(flag)) {
+        flags.push(flag);
+        score += 5;
+      }
+    }
+  }
 
   // 1. Suspiciously low price — show only the MOST severe flag
   // Only flag items worth >= 150 EUR (scammers don't bother with cheap stuff)
@@ -722,17 +754,28 @@ function generateOverallVerdict(
     parts.push(`❌ Завышена цена: ${overpriced.map((i) => i.name).join(", ")}`);
   }
 
-  // Worth buying
-  const notWorth = items.filter((i) => !i.worthBuying);
+  // Not recommended (only if negative reviews found)
+  const notWorth = items.filter((i) => !i.worthBuying && i.worthBuyingReason);
   if (notWorth.length > 0) {
-    parts.push(`🚫 Не рекомендуется: ${notWorth.map((i) => i.name).join(", ")}`);
+    for (const item of notWorth) {
+      parts.push(`🚫 Не рекомендуется: ${item.name}`);
+      if (item.worthBuyingReason) {
+        parts.push(`   └ ${item.worthBuyingReason}`);
+      }
+    }
+  }
+
+  // Insufficient data (price not found, but NOT "not recommended")
+  const noData = items.filter((i) => !i.priceDataFound && i.worthBuying);
+  if (noData.length > 0) {
+    parts.push(`❓ Недостаточно данных для оценки: ${noData.map((i) => i.name).join(", ")}`);
   }
 
   if (parts.length === 0) {
     if (listingType === "rent") {
       parts.push("Объявление об аренде. Проверьте документы и осмотрите объект лично.");
     } else {
-      parts.push("Недостаточно данных для полной оценки.");
+      parts.push("Анализ завершён.");
     }
   }
 
@@ -741,12 +784,26 @@ function generateOverallVerdict(
 
 // ============= Main Function =============
 
-export async function deepAnalyze(text: string, groupTitle?: string | null): Promise<DeepAnalysisResult> {
+export async function deepAnalyze(
+  text: string,
+  groupTitle?: string | null,
+  firstPhotoPath?: string | null
+): Promise<DeepAnalysisResult> {
   const region = detectSearchRegion(groupTitle);
-  apiLog.info({ textLength: text.length, groupTitle, region }, "Starting deep analysis");
+  apiLog.info({ textLength: text.length, groupTitle, region, hasPhoto: !!firstPhotoPath }, "Starting deep analysis");
 
-  // Step 1: Get exchange rates
-  const rates = await getExchangeRates();
+  // Step 1: Get exchange rates + analyze image (in parallel)
+  const ratesPromise = getExchangeRates();
+  const imagePromise = firstPhotoPath ? analyzeImage(firstPhotoPath) : Promise.resolve(undefined);
+
+  const [rates, imageAnalysis] = await Promise.all([ratesPromise, imagePromise]);
+
+  if (imageAnalysis) {
+    apiLog.debug(
+      { description: imageAnalysis.description?.slice(0, 50), quality: imageAnalysis.quality },
+      "Image analysis complete"
+    );
+  }
 
   // Step 2: Extract listing info and items
   const listingInfo = await extractListingInfo(text);
@@ -767,6 +824,7 @@ export async function deepAnalyze(text: string, groupTitle?: string | null): Pro
       },
       overallVerdict: `Это не объявление: ${reason}`,
       similarItems: [],
+      imageAnalysis,
     };
   }
 
@@ -776,8 +834,8 @@ export async function deepAnalyze(text: string, groupTitle?: string | null): Pro
   );
   const items = await Promise.all(itemPromises);
 
-  // Step 4: Deterministic scam detection
-  const { flags, score } = detectScamFlags(text, items);
+  // Step 4: Deterministic scam detection (including image analysis)
+  const { flags, score } = detectScamFlags(text, items, imageAnalysis);
   const level = calculateScamLevel(score);
   const recommendation = generateScamRecommendation(level, flags);
 
@@ -801,6 +859,7 @@ export async function deepAnalyze(text: string, groupTitle?: string | null): Pro
       itemCount: items.length,
       scamLevel: scamRisk.level,
       scamScore: scamRisk.score,
+      imageQuality: imageAnalysis?.quality,
     },
     "Deep analysis complete"
   );
@@ -813,5 +872,25 @@ export async function deepAnalyze(text: string, groupTitle?: string | null): Pro
     scamRisk,
     overallVerdict,
     similarItems,
+    imageAnalysis,
   };
+}
+
+/**
+ * Load image from file and analyze it
+ */
+async function analyzeImage(photoPath: string): Promise<ListingImageAnalysis | undefined> {
+  try {
+    const file = Bun.file(photoPath);
+    if (!(await file.exists())) {
+      apiLog.warn({ photoPath }, "Photo file not found");
+      return undefined;
+    }
+
+    const buffer = await file.arrayBuffer();
+    return await analyzeListingImage(new Uint8Array(buffer));
+  } catch (error) {
+    apiLog.error({ error, photoPath }, "Failed to analyze image");
+    return undefined;
+  }
 }

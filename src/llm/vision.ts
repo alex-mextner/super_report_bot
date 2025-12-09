@@ -135,3 +135,117 @@ export async function checkVisionHealth(): Promise<boolean> {
     return false;
   }
 }
+
+// ============= Listing Image Analysis =============
+
+export interface ListingImageAnalysis {
+  description: string;
+  condition: "new" | "used" | "unknown";
+  suspiciousFlags: string[];
+  quality: "real_photo" | "stock_photo" | "screenshot" | "unknown";
+}
+
+/**
+ * Analyze listing image to describe product and detect suspicious signs
+ */
+export async function analyzeListingImage(
+  imageBuffer: Uint8Array
+): Promise<ListingImageAnalysis> {
+  const base64Image = Buffer.from(imageBuffer).toString("base64");
+  const imageDataUrl = `data:image/jpeg;base64,${base64Image}`;
+
+  const prompt = `Analyze this product listing image. Respond ONLY with JSON:
+{
+  "description": "brief product description in Russian (brand, type, color)",
+  "condition": "new" | "used" | "unknown",
+  "quality": "real_photo" | "stock_photo" | "screenshot" | "unknown",
+  "suspiciousFlags": ["list of suspicious signs in Russian, empty if none"]
+}
+
+Detect suspicious signs:
+- Stock photo: professional lighting, white background, watermarks
+- Screenshot: phone UI, browser elements, image of another image
+- Mismatch: photo doesn't show the actual product
+- Poor quality: blurry, dark, can't see product details`;
+
+  try {
+    const response = await withRetry(() =>
+      hf.chatCompletion({
+        model: QWEN_VL_MODEL,
+        provider: "novita",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "image_url", image_url: { url: imageDataUrl } },
+              { type: "text", text: prompt },
+            ],
+          },
+        ],
+        max_tokens: 400,
+        temperature: 0.1,
+      })
+    );
+
+    const content = response.choices[0]?.message?.content;
+
+    if (!content) {
+      throw new Error("Empty response from vision model");
+    }
+
+    const result = parseListingImageResponse(content);
+
+    llmLog.debug(
+      {
+        description: result.description?.slice(0, 50),
+        condition: result.condition,
+        quality: result.quality,
+        flags: result.suspiciousFlags.length,
+      },
+      "Listing image analysis result"
+    );
+
+    return result;
+  } catch (error) {
+    llmLog.error({ error }, "Listing image analysis failed");
+    return {
+      description: "",
+      condition: "unknown",
+      quality: "unknown",
+      suspiciousFlags: [],
+    };
+  }
+}
+
+function parseListingImageResponse(content: string): ListingImageAnalysis {
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    return {
+      description: content.slice(0, 200),
+      condition: "unknown",
+      quality: "unknown",
+      suspiciousFlags: [],
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    return {
+      description: parsed.description || "",
+      condition: ["new", "used", "unknown"].includes(parsed.condition)
+        ? parsed.condition
+        : "unknown",
+      quality: ["real_photo", "stock_photo", "screenshot", "unknown"].includes(parsed.quality)
+        ? parsed.quality
+        : "unknown",
+      suspiciousFlags: Array.isArray(parsed.suspiciousFlags) ? parsed.suspiciousFlags : [],
+    };
+  } catch {
+    return {
+      description: content.slice(0, 200),
+      condition: "unknown",
+      quality: "unknown",
+      suspiciousFlags: [],
+    };
+  }
+}

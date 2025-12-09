@@ -2459,9 +2459,32 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
           return;
         }
 
-        // Run deep analysis (pass group title for region-specific search)
+        // Get photo for visual analysis
+        let photoPath: string | null = null;
+        const mediaRows = queries.getMediaForMessage(msgId, grpId);
+        let firstPhoto = mediaRows.find((m) => m.media_type === "photo");
+
+        // If no photo in DB, try to fetch from Telegram
+        if (!firstPhoto) {
+          try {
+            const { fetchMediaForMessage } = await import("../listener/index.ts");
+            const fetched = await fetchMediaForMessage(msgId, grpId);
+            if (fetched) {
+              const updatedMedia = queries.getMediaForMessage(msgId, grpId);
+              firstPhoto = updatedMedia.find((m) => m.media_type === "photo");
+            }
+          } catch {
+            // Ignore fetch errors, continue without photo
+          }
+        }
+
+        if (firstPhoto) {
+          photoPath = `data/${firstPhoto.file_path}`;
+        }
+
+        // Run deep analysis (pass group title and photo path)
         const { deepAnalyze } = await import("../llm/deep-analyze.ts");
-        const result = await deepAnalyze(storedMsg.text, storedMsg.group_title);
+        const result = await deepAnalyze(storedMsg.text, storedMsg.group_title, photoPath);
 
         // Format result
         if (!result.isListing) {
@@ -2479,6 +2502,19 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
 
         let resultText = `📊 <b>Анализ объявления</b>\n`;
         resultText += `Тип: ${listingTypeLabels[result.listingType || "other"] || "Неизвестно"}\n\n`;
+
+        // Image analysis section (if available)
+        if (result.imageAnalysis?.description) {
+          resultText += `📷 <b>Фото:</b> ${result.imageAnalysis.description}\n`;
+          if (result.imageAnalysis.condition !== "unknown") {
+            const conditionLabels: Record<string, string> = {
+              new: "новый",
+              used: "б/у",
+            };
+            resultText += `   Состояние: ${conditionLabels[result.imageAnalysis.condition] || "—"}\n`;
+          }
+          resultText += `\n`;
+        }
 
         // Scam risk section
         const riskEmoji = result.scamRisk.level === "high" ? "🚨" : result.scamRisk.level === "medium" ? "⚠️" : "✅";
