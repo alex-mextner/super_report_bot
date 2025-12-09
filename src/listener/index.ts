@@ -799,6 +799,7 @@ export async function scanFromCache(
         group_title: msg.groupTitle,
         text: msg.text,
         sender_name: msg.senderName || "Unknown",
+        sender_username: msg.senderUsername,
         timestamp: new Date(msg.date * 1000),
       };
 
