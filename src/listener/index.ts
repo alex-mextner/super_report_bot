@@ -18,6 +18,7 @@ import {
   type CachedMessage,
 } from "../cache/messages.ts";
 import { generateNgrams, generateWordShingles } from "../matcher/normalize.ts";
+import { isUrlOnlyMessage, enrichMessageWithUrlContent } from "../utils/url.ts";
 
 const API_ID = Number(process.env.API_ID);
 const API_HASH = process.env.API_HASH;
@@ -318,6 +319,40 @@ async function processMessage(msg: Message): Promise<void> {
   const incomingMsg = await toIncomingMessage(msg);
   if (!incomingMsg) return;
 
+  // Enrich URL-only messages with fetched content
+  // This prevents false positives from URL n-grams matching arbitrary queries
+  const originalText = incomingMsg.text;
+  if (isUrlOnlyMessage(incomingMsg.text)) {
+    try {
+      const { enrichedText, wasEnriched, fetchedUrls } = await enrichMessageWithUrlContent(
+        incomingMsg.text,
+        { timeout: 5000, maxLength: 2000 }
+      );
+      if (wasEnriched) {
+        incomingMsg.text = enrichedText;
+        listenerLog.debug(
+          {
+            event: "url_enriched",
+            urls: fetchedUrls,
+            originalLength: originalText.length,
+            enrichedLength: enrichedText.length,
+          },
+          "URL-only message enriched with page content"
+        );
+      } else {
+        // Couldn't fetch content — skip this message to avoid false positives
+        listenerLog.debug(
+          { event: "url_only_skipped", textPreview: originalText.slice(0, 100) },
+          "URL-only message skipped (no content fetched)"
+        );
+        return;
+      }
+    } catch (error) {
+      listenerLog.warn({ err: error }, "URL enrichment failed, skipping message");
+      return;
+    }
+  }
+
   listenerLog.debug(
     {
       event: "message_received",
@@ -384,10 +419,11 @@ async function processMessage(msg: Message): Promise<void> {
         // Get user telegram_id from subscription
         const userTelegramId = await getUserTelegramId(subscription.user_id);
         if (userTelegramId) {
+          // Use originalText for notification (shows URL instead of fetched content)
           await notifyUser(
             userTelegramId,
             incomingMsg.group_title,
-            incomingMsg.text,
+            originalText,
             subscription.original_query,
             incomingMsg.id,
             incomingMsg.group_id,
@@ -433,10 +469,11 @@ async function processMessage(msg: Message): Promise<void> {
 
         const userTelegramId = await getUserTelegramId(subscription.user_id);
         if (userTelegramId) {
+          // Use originalText for notification (shows URL instead of fetched content)
           await notifyUser(
             userTelegramId,
             incomingMsg.group_title,
-            incomingMsg.text,
+            originalText,
             subscription.original_query,
             incomingMsg.id,
             incomingMsg.group_id,
