@@ -7,6 +7,8 @@ export interface VerificationResult {
   isMatch: boolean;
   confidence: number;
   label: string;
+  // Reasoning from LLM explaining why message matches/doesn't match
+  reasoning?: string;
 }
 
 // Minimum confidence threshold for DeepSeek verification
@@ -47,6 +49,7 @@ export async function verifyMatch(
           isMatch: visionResult.isMatch,
           confidence: visionResult.confidence,
           label: visionResult.isMatch ? "vision_match" : "vision_no_match",
+          reasoning: visionResult.reasoning,
         };
       }
       // Otherwise, fall through to text verification
@@ -91,6 +94,7 @@ export async function verifyMatch(
       isMatch,
       confidence: result.confidence,
       label: result.isMatch ? "text_match" : "text_no_match",
+      reasoning: result.reasoning,
     };
   } catch (error) {
     llmLog.error(
@@ -103,6 +107,7 @@ export async function verifyMatch(
       isMatch: false,
       confidence: 0,
       label: "error",
+      reasoning: undefined,
     };
   }
 }

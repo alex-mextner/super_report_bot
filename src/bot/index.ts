@@ -2610,6 +2610,7 @@ function buildNotificationCaption(
   messageText: string,
   senderName?: string,
   senderUsername?: string,
+  reasoning?: string,
   maxLength: number = 1000 // Telegram caption limit is 1024
 ): string {
   let authorLine = "";
@@ -2619,7 +2620,10 @@ function buildNotificationCaption(
       : `\nАвтор: ${senderName}`;
   }
 
-  const prefix = `🔔 Найдено совпадение!\n\nГруппа: ${groupTitle}\n\nЗапрос: ${subscriptionQuery}${authorLine}\n\nСообщение:\n`;
+  // Add reasoning line if available
+  const reasonLine = reasoning ? `\n\n💡 Причина: ${reasoning}` : "";
+
+  const prefix = `🔔 Найдено совпадение!\n\nГруппа: ${groupTitle}\n\nЗапрос: ${subscriptionQuery}${authorLine}${reasonLine}\n\nСообщение:\n`;
   const availableForText = maxLength - prefix.length - 3; // -3 for "..."
   const truncatedText = messageText.length > availableForText
     ? messageText.slice(0, availableForText) + "..."
@@ -2661,7 +2665,8 @@ export async function notifyUser(
   groupId?: number,
   senderName?: string,
   senderUsername?: string,
-  media?: MediaItem[]
+  media?: MediaItem[],
+  reasoning?: string
 ): Promise<void> {
   try {
     const keyboard = buildNotificationKeyboard(messageId, groupId);
@@ -2674,6 +2679,7 @@ export async function notifyUser(
         messageText,
         senderName,
         senderUsername,
+        reasoning,
         1000 // Leave some room for Telegram formatting
       );
 
@@ -2730,6 +2736,7 @@ export async function notifyUser(
         messageText,
         senderName,
         senderUsername,
+        reasoning,
         4000 // Telegram message limit is 4096
       );
 

@@ -49,12 +49,28 @@ export interface MatchedMessage {
   matched_at: string;
 }
 
+// Match reasons for user notification
+export interface MatchReasons {
+  // Which keywords matched (from n-gram or semantic matching)
+  matchedKeywords: string[];
+  // N-gram score (0-1)
+  ngramScore?: number;
+  // LLM verification confidence (0-1)
+  llmConfidence?: number;
+  // Verification method used
+  verificationMethod?: "vision" | "text" | "fallback";
+  // Stage that passed the message
+  stage: "ngram" | "query_fallback" | "semantic" | "llm";
+}
+
 // Matcher types
 export interface MatchResult {
   subscription: Subscription;
   score: number;
-  stage: "bm25" | "ngram" | "llm" | "query_fallback";
+  stage: "bm25" | "ngram" | "llm" | "query_fallback" | "semantic";
   passed: boolean;
+  // Detailed match reasons for user notification
+  matchedKeywords?: string[];
 }
 
 export interface KeywordGenerationResult {

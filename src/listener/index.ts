@@ -429,7 +429,8 @@ async function processMessage(msg: Message): Promise<void> {
             incomingMsg.group_id,
             incomingMsg.sender_name,
             incomingMsg.sender_username,
-            incomingMsg.media
+            incomingMsg.media,
+            verification.reasoning
           );
           listenerLog.info(
             {
@@ -479,7 +480,8 @@ async function processMessage(msg: Message): Promise<void> {
             incomingMsg.group_id,
             incomingMsg.sender_name,
             incomingMsg.sender_username,
-            incomingMsg.media
+            incomingMsg.media,
+            `Высокий скор совпадения: ${(candidate.score * 100).toFixed(0)}%`
           );
         }
       }
@@ -921,7 +923,8 @@ export async function scanGroupHistory(
                 incomingMsg.group_id,
                 incomingMsg.sender_name,
                 incomingMsg.sender_username,
-                incomingMsg.media
+                incomingMsg.media,
+                verification.reasoning
               );
             }
           }
@@ -947,7 +950,8 @@ export async function scanGroupHistory(
                 incomingMsg.group_id,
                 incomingMsg.sender_name,
                 incomingMsg.sender_username,
-                incomingMsg.media
+                incomingMsg.media,
+                `Высокий скор совпадения: ${(candidate.score * 100).toFixed(0)}%`
               );
             }
           }
@@ -974,6 +978,7 @@ export interface HistoryScanMatch {
   score: number;
   senderName?: string;
   senderUsername?: string;
+  reasoning?: string;
 }
 
 export interface HistoryScanResult {
@@ -1096,6 +1101,7 @@ export async function scanFromCache(
           score,
           senderName: msg.senderName,
           senderUsername: msg.senderUsername,
+          reasoning: verification.reasoning,
         });
         queries.markMessageMatched(subscriptionId, msg.id, msg.groupId);
       }
@@ -1111,6 +1117,7 @@ export async function scanFromCache(
           score,
           senderName: msg.senderName,
           senderUsername: msg.senderUsername,
+          reasoning: `Высокий скор совпадения: ${(score * 100).toFixed(0)}%`,
         });
         queries.markMessageMatched(subscriptionId, msg.id, msg.groupId);
 
@@ -1151,7 +1158,9 @@ export async function scanFromCache(
           match.messageId,
           match.groupId,
           match.senderName,
-          match.senderUsername
+          match.senderUsername,
+          undefined, // no media in cache scan
+          match.reasoning
         );
       }
     }
