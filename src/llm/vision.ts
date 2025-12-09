@@ -45,7 +45,7 @@ Be strict but reasonable:
 
   try {
     const response = await fetch(
-      `https://api-inference.huggingface.co/models/${QWEN_VL_MODEL}`,
+      `https://router.huggingface.co/hf-inference/models/${QWEN_VL_MODEL}`,
       {
         method: "POST",
         headers: {
@@ -152,7 +152,7 @@ export async function checkVisionHealth(): Promise<boolean> {
   try {
     // Simple status check
     const response = await fetch(
-      `https://api-inference.huggingface.co/status/${QWEN_VL_MODEL}`,
+      `https://router.huggingface.co/hf-inference/status/${QWEN_VL_MODEL}`,
       {
         headers: { Authorization: `Bearer ${HF_TOKEN}` },
         signal: AbortSignal.timeout(5000),
