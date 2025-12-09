@@ -1,3 +1,9 @@
-FlagEmbedding>=1.2.0
+# Core dependencies for BGE-M3 inference (without benchmark datasets)
+torch>=2.0.0
+transformers>=4.30.0
+sentence-transformers>=2.2.0
+peft>=0.5.0
+datasets>=2.14.0
+accelerate>=0.20.0
 flask>=3.0.0
 gunicorn>=21.0.0

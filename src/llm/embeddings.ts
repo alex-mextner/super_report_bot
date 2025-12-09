@@ -5,7 +5,7 @@
 
 import { llmLog } from "../logger.ts";
 
-const BGE_URL = process.env.BGE_URL || "http://localhost:8080";
+const BGE_URL = process.env.BGE_URL || "http://localhost:8079";
 
 export interface KeywordEmbedding {
   keyword: string;

@@ -8,10 +8,12 @@ services:
     container_name: bge-server
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8079:8080"
     environment:
       - PORT=8080
       - MAX_BATCH_SIZE=32
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface  # Persist model (~2.2GB)
     # BGE-M3 needs ~2-3GB RAM
     deploy:
       resources:
@@ -22,7 +24,10 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s  # Model loading takes time
+      start_period: 300s  # First run downloads model (~2.2GB)
+
+volumes:
+  huggingface-cache:
 
   # Bot service (uncomment when ready)
   # bot:

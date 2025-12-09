@@ -7,12 +7,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Install Python dependencies (core libs for inference)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download the model during build
-RUN python -c "from FlagEmbedding import BGEM3FlagModel; BGEM3FlagModel('BAAI/bge-m3', use_fp16=True, device='cpu')"
+# Install FlagEmbedding without deps (we already have the core deps above)
+# This avoids pulling in beir/zlib-state which fail on ARM
+RUN pip install --no-cache-dir --no-deps FlagEmbedding>=1.2.0
+
+# Model (~2.2GB) will be downloaded on first run
+# Or mount a volume to /root/.cache/huggingface for persistence
 
 # Copy server code
 COPY server.py .
