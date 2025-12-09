@@ -87,6 +87,111 @@ export async function generateClarificationQuestions(query: string): Promise<str
   }
 }
 
+// =====================================================
+// Smart query analysis (for normal mode)
+// =====================================================
+
+const ANALYZE_QUERY_PROMPT = `Ты помощник для настройки мониторинга Telegram-групп.
+Проанализируй запрос пользователя и определи, нужны ли уточняющие вопросы.
+
+## ВАЖНО: Твои знания о мире устарели
+- НЕ предполагай что какой-то товар/модель не существует
+- Принимай запрос как есть — пользователь знает что ищет
+
+## Когда СПРАШИВАТЬ (1-3 вопроса):
+- Категория товара без конкретики: "джинсы", "телефон", "мебель"
+- Нет указания на цену/состояние для товаров
+- Нет размера/характеристик где это важно
+- Слишком общий запрос (1-2 слова без деталей)
+
+## Когда НЕ спрашивать:
+- Запрос содержит конкретику: бренд, модель, цена, размер, цвет
+- Пример: "iPhone 15 Pro Max 256gb до 80к" — всё понятно
+- Пример: "синие джинсы Levis 32 размер" — всё понятно
+- Пользователь явно указал что хочет
+
+## Какие вопросы задавать:
+- Ценовой диапазон (для товаров)
+- Размер/характеристики (где важно)
+- Состояние: новый/б/у
+- Что исключить из поиска
+НЕ спрашивай то, что уже в запросе!
+
+## Формат ответа
+ТОЛЬКО JSON:
+{
+  "needsClarification": true/false,
+  "questions": ["вопрос1", "вопрос2"],
+  "reasoning": "почему"
+}`;
+
+export interface QueryAnalysisResult {
+  needsClarification: boolean;
+  questions: string[];
+  reasoning: string;
+}
+
+/**
+ * Analyze query and generate clarification questions if needed (for normal mode)
+ * Returns 0-3 questions based on query specificity
+ */
+export async function analyzeQueryAndGenerateQuestions(
+  query: string
+): Promise<QueryAnalysisResult> {
+  const response = await withRetry(async () => {
+    const result = await hf.chatCompletion({
+      model: MODELS.DEEPSEEK_R1,
+      provider: "novita",
+      messages: [
+        { role: "system", content: ANALYZE_QUERY_PROMPT },
+        { role: "user", content: query },
+      ],
+      max_tokens: 800,
+      temperature: 0.5,
+    });
+    return result.choices[0]?.message?.content || "";
+  });
+
+  // Strip thinking tags
+  const cleaned = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+
+  llmLog.debug({ query, response: cleaned.slice(0, 400) }, "analyzeQuery raw response");
+
+  // Parse JSON
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    llmLog.error({ query, response: cleaned.slice(0, 200) }, "Failed to parse analyzeQuery response");
+    // Default: no clarification needed
+    return { needsClarification: false, questions: [], reasoning: "parse_error" };
+  }
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    const result: QueryAnalysisResult = {
+      needsClarification: Boolean(parsed.needsClarification),
+      questions: Array.isArray(parsed.questions) ? parsed.questions.slice(0, 3) : [],
+      reasoning: parsed.reasoning || "",
+    };
+
+    // If needsClarification but no questions — fix it
+    if (result.needsClarification && result.questions.length === 0) {
+      result.needsClarification = false;
+    }
+
+    llmLog.info({
+      query,
+      needsClarification: result.needsClarification,
+      questionsCount: result.questions.length,
+      reasoning: result.reasoning,
+    }, "analyzeQuery result");
+
+    return result;
+  } catch (e) {
+    llmLog.error({ query, json: jsonMatch[0].slice(0, 200), error: e }, "Invalid JSON in analyzeQuery response");
+    return { needsClarification: false, questions: [], reasoning: "json_error" };
+  }
+}
+
 /**
  * Format Q&A pairs for keyword generation context
  */

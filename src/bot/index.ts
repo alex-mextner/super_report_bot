@@ -11,6 +11,7 @@ import {
 } from "../llm/keywords.ts";
 import {
   generateClarificationQuestions,
+  analyzeQueryAndGenerateQuestions,
   formatClarificationContext,
 } from "../llm/clarify.ts";
 import {
@@ -1200,9 +1201,39 @@ ${code(updated.negative_keywords.join(", ") || "нет")}
   const mode = queries.getUserMode(userId);
 
   if (mode === "normal") {
-    // Normal mode: skip clarification, go directly to draft keywords + rating
+    // Normal mode: analyze query first, ask clarification if needed
     await context.send("Анализирую запрос...");
 
+    try {
+      const analysis = await analyzeQueryAndGenerateQuestions(query);
+
+      if (analysis.needsClarification && analysis.questions.length > 0) {
+        // Need clarification — show questions
+        botLog.debug({ userId, questionsCount: analysis.questions.length }, "Normal mode: asking clarification");
+
+        setUserState(userId, {
+          step: "clarifying_query",
+          clarification: {
+            original_query: query,
+            questions: analysis.questions,
+            answers: [],
+            current_index: 0,
+          },
+        });
+
+        const firstQuestion = analysis.questions[0]!;
+        const questionNumber = `(1/${analysis.questions.length})`;
+        await context.send(format`${bold("Уточняющий вопрос")} ${questionNumber}\n\n${firstQuestion}`, {
+          reply_markup: skipQuestionKeyboard(),
+        });
+        return;
+      }
+    } catch (error) {
+      botLog.error({ err: error, userId }, "Query analysis failed, skipping clarification");
+      // Continue without clarification
+    }
+
+    // No clarification needed — go to draft keywords + rating
     let draftKeywords: string[];
     try {
       draftKeywords = await generateDraftKeywords(query);

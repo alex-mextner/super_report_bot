@@ -1,4 +1,5 @@
 import { hf, MODELS, withRetry } from "./index.ts";
+import { llmLog } from "../logger.ts";
 import type { KeywordGenerationResult, ExampleRating, RatingExample } from "../types.ts";
 
 const SYSTEM_PROMPT = `Ты помощник для извлечения ключевых слов из поисковых запросов пользователей.
@@ -109,20 +110,33 @@ export async function generateKeywords(
   // DeepSeek R1 may include <think>...</think> reasoning blocks — strip them
   const cleanedResponse = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 
+  llmLog.debug({ query, response: cleanedResponse.slice(0, 500) }, "generateKeywords raw response");
+
   // Parse JSON from response
   const jsonMatch = cleanedResponse.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
+    llmLog.error({ query, response: cleanedResponse.slice(0, 300) }, "Failed to parse generateKeywords response");
     throw new Error(`Failed to parse LLM response: ${response}`);
   }
 
   try {
     const parsed = JSON.parse(jsonMatch[0]);
-    return {
+    const result = {
       positive_keywords: parsed.positive_keywords || [],
       negative_keywords: parsed.negative_keywords || [],
       llm_description: parsed.description || "",
     };
+
+    llmLog.info({
+      query,
+      positiveCount: result.positive_keywords.length,
+      negativeCount: result.negative_keywords.length,
+      description: result.llm_description,
+    }, "generateKeywords result");
+
+    return result;
   } catch (e) {
+    llmLog.error({ query, json: jsonMatch[0].slice(0, 300) }, "Invalid JSON in generateKeywords response");
     throw new Error(`Invalid JSON in LLM response: ${jsonMatch[0]}`);
   }
 }
@@ -386,20 +400,40 @@ export async function generateKeywordsWithRatings(
   // Strip thinking tags
   const cleaned = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 
+  llmLog.debug({
+    query,
+    ratingsCount: ratings.length,
+    hot: ratings.filter((r) => r.rating === "hot").length,
+    warm: ratings.filter((r) => r.rating === "warm").length,
+    cold: ratings.filter((r) => r.rating === "cold").length,
+    response: cleaned.slice(0, 500),
+  }, "generateKeywordsWithRatings raw response");
+
   // Parse JSON
   const match = cleaned.match(/\{[\s\S]*\}/);
   if (!match) {
+    llmLog.error({ query, response: cleaned.slice(0, 300) }, "Failed to parse generateKeywordsWithRatings response");
     throw new Error(`Failed to parse LLM response: ${response}`);
   }
 
   try {
     const parsed = JSON.parse(match[0]);
-    return {
+    const result = {
       positive_keywords: parsed.positive_keywords || [],
       negative_keywords: parsed.negative_keywords || [],
       llm_description: parsed.description || "",
     };
+
+    llmLog.info({
+      query,
+      positiveCount: result.positive_keywords.length,
+      negativeCount: result.negative_keywords.length,
+      description: result.llm_description,
+    }, "generateKeywordsWithRatings result");
+
+    return result;
   } catch {
+    llmLog.error({ query, json: match[0].slice(0, 300) }, "Invalid JSON in generateKeywordsWithRatings response");
     throw new Error(`Invalid JSON in LLM response: ${match[0]}`);
   }
 }
