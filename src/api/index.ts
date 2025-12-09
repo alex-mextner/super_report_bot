@@ -30,8 +30,8 @@ api.use(
 
 // Strict auth middleware - only works inside Telegram WebApp
 api.use("/*", async (c, next) => {
-  // Health check is public
-  if (c.req.path === "/api/health") {
+  // Health check and media files are public
+  if (c.req.path === "/api/health" || c.req.path.startsWith("/api/media/")) {
     await next();
     return;
   }
