@@ -2488,13 +2488,8 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
         }
         resultText += `${result.scamRisk.recommendation}\n\n`;
 
-        // Items table
+        // Items table (expandable blockquote for Telegram)
         if (result.items.length > 0) {
-          resultText += `<b>📋 Товары/услуги:</b>\n`;
-          resultText += `<code>`;
-          resultText += `${"Товар".padEnd(20)} | ${"Цена".padEnd(12)} | ${"Рынок".padEnd(15)} | Оценка\n`;
-          resultText += `${"─".repeat(20)} | ${"─".repeat(12)} | ${"─".repeat(15)} | ${"─".repeat(8)}\n`;
-
           const verdictEmoji: Record<string, string> = {
             good_deal: "✅",
             overpriced: "❌",
@@ -2502,16 +2497,20 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
             unknown: "❓",
           };
 
+          resultText += `<b>📋 Товары/услуги:</b>\n`;
+          resultText += `<blockquote expandable>`;
+
           for (const item of result.items) {
-            const name = item.name.slice(0, 18).padEnd(20);
-            const price = (item.extractedPrice || "—").slice(0, 10).padEnd(12);
-            const market = item.marketPriceAvg
-              ? `~${item.marketPriceAvg.toLocaleString("ru-RU")}`.slice(0, 13).padEnd(15)
-              : "—".padEnd(15);
             const verdict = verdictEmoji[item.priceVerdict] || "❓";
-            resultText += `${name} | ${price} | ${market} | ${verdict}\n`;
+            const marketPrice = item.marketPriceAvg
+              ? `~${item.marketPriceAvg.toLocaleString("ru-RU")}`
+              : "н/д";
+            resultText += `${verdict} <b>${item.name}</b>\n`;
+            resultText += `   Цена: ${item.extractedPrice || "—"}\n`;
+            resultText += `   Рынок: ${marketPrice}\n\n`;
           }
-          resultText += `</code>\n\n`;
+
+          resultText += `</blockquote>\n`;
 
           // Worth buying warnings
           const notWorth = result.items.filter((i) => !i.worthBuying);
