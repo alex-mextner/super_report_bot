@@ -150,6 +150,16 @@ async function downloadMediaFromAlbum(messages: Message[]): Promise<MediaItem[]>
   return items;
 }
 
+// Extract text/caption from album messages (can be on any photo in the album)
+function extractTextFromAlbum(messages: Message[]): string {
+  for (const msg of messages) {
+    if (msg.text && msg.text.trim()) {
+      return msg.text;
+    }
+  }
+  return "";
+}
+
 // Directory for media storage
 const MEDIA_DIR = "data/media";
 
@@ -272,13 +282,17 @@ async function toIncomingMessage(msg: Message): Promise<IncomingMessage | null> 
     return null; // Skip messages without text AND without photo/video
   }
 
-  // Download media if present
+  // Download media and extract text (caption can be on any photo in album)
   let media: MediaItem[] | undefined;
+  let text = msg.text || "";
+
   try {
     if (msg.groupedId) {
       // Album — get all grouped messages
       const group = await mtClient.getMessageGroup({ chatId: chat.id, message: msg.id });
       media = await downloadMediaFromAlbum(group);
+      // Caption can be on any photo in the album, not just the first one
+      text = extractTextFromAlbum(group) || text;
     } else if (hasMedia) {
       // Single photo/video
       media = await downloadSingleMedia(msg);
@@ -291,7 +305,7 @@ async function toIncomingMessage(msg: Message): Promise<IncomingMessage | null> 
     id: msg.id,
     group_id: chat.id,
     group_title: chat.title || "Unknown",
-    text: msg.text || "", // Empty string if no text (media-only message)
+    text,
     sender_name: msg.sender?.displayName || "Unknown",
     sender_username: msg.sender?.username ?? undefined,
     timestamp: msg.date,
