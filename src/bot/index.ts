@@ -22,6 +22,7 @@ import {
   skipQuestionKeyboard,
   aiEditKeyboard,
   pendingAiEditKeyboard,
+  pendingAiCorrectionStartKeyboard,
   nextRequestId,
   keywordEditSubmenu,
   keywordEditSubmenuPending,
@@ -1863,7 +1864,7 @@ ${pending.llm_description}
 • "не нужны услуги, только товары"
 • "добавь что нужна доставка"`,
           {
-            reply_markup: pendingAiEditKeyboard(),
+            reply_markup: pendingAiCorrectionStartKeyboard(),
           }
         );
       } else {
@@ -1884,7 +1885,7 @@ ${bold("Описание:")} ${pending.llm_description}
 • "добавь слово аренда"
 • "добавь в исключения ремонт"`,
           {
-            reply_markup: pendingAiEditKeyboard(),
+            reply_markup: pendingAiCorrectionStartKeyboard(),
           }
         );
       }

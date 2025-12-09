@@ -176,7 +176,13 @@ export function aiEditKeyboard(subscriptionId: number): InlineKeyboard {
     );
 }
 
-// Keyboard for AI correction of pending subscription
+// Keyboard for initial AI correction prompt (no "Apply" since no changes yet)
+export function pendingAiCorrectionStartKeyboard(): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("↩️ Назад", JSON.stringify({ action: "cancel_pending_ai" }));
+}
+
+// Keyboard for AI correction of pending subscription (after AI response)
 export function pendingAiEditKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
     .text("✅ Применить", JSON.stringify({ action: "apply_pending_ai" }))
