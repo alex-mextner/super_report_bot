@@ -1,11 +1,11 @@
-import { createActor, type Snapshot } from "xstate";
+import { createActor, type SnapshotFrom } from "xstate";
 import { userMachine, type UserMachine } from "./machine";
 import { createInitialContext, type BotContext } from "./context";
 import { queries } from "../db";
 import type { UserMode } from "../types";
 
 export type UserActor = ReturnType<typeof createActor<UserMachine>>;
-export type UserSnapshot = Snapshot<BotContext>;
+export type UserSnapshot = SnapshotFrom<typeof userMachine>;
 
 // Load user's persisted snapshot from database
 export function loadUserSnapshot(telegramId: number): UserSnapshot | null {
