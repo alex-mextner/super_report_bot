@@ -1872,8 +1872,11 @@ ${bold("Описание:")} ${pending.llmDescription}
 
       await context.answer({ text: "Применено!" });
 
-      await context.editText(
-        format`
+      const mode = queries.getUserMode(userId);
+
+      if (mode === "advanced") {
+        await context.editText(
+          format`
 ${bold("Скорректированные ключевые слова:")}
 
 ${bold("Позитивные:")}
@@ -1886,11 +1889,14 @@ ${bold("Описание:")}
 ${proposed.llmDescription}
 
 Подтверди или измени:
-        `,
-        {
+          `,
+          { reply_markup: confirmKeyboard(queryId) }
+        );
+      } else {
+        await context.editText("Подтверди или измени:", {
           reply_markup: confirmKeyboard(queryId),
-        }
-      );
+        });
+      }
       break;
     }
 
