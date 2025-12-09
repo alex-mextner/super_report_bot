@@ -943,7 +943,7 @@ ${code(updatedC.pendingSub?.negativeKeywords.join(", ") || "нет")}
       llm_description: current.llmDescription,
     };
 
-    await context.send("Обрабатываю запрос...");
+    await context.send("Корректирую (может занять до минуты)...");
 
     try {
       const result = await interpretEditCommand(text, currentSnake, conversation);
@@ -1018,7 +1018,7 @@ ${examplesText}
       llm_description: current.llmDescription,
     };
 
-    await context.send("Обрабатываю запрос...");
+    await context.send("Корректирую (может занять до минуты)...");
 
     try {
       if (mode === "normal") {

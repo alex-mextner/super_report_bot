@@ -644,6 +644,22 @@ describe("State Machine", () => {
       expect(getState(actor)).toBe("awaitingConfirmation");
       expect(getContext(actor).pendingSub?.positiveKeywords).toEqual(["new1", "new2"]);
     });
+
+    test("KEYWORDS_GENERATED updates pendingSub with llmDescription (bug fix)", () => {
+      // Bug: RATE event transitions to awaitingConfirmation BEFORE finishRatingAndGenerateKeywords
+      // runs, so KEYWORDS_GENERATED arrives when we're already in awaitingConfirmation.
+      // This test ensures KEYWORDS_GENERATED is handled here and updates pendingSub.
+      const newPendingSub = {
+        originalQuery: "test",
+        positiveKeywords: ["keyword1"],
+        negativeKeywords: ["neg1"],
+        llmDescription: "This is the generated description",
+      };
+      actor.send({ type: "KEYWORDS_GENERATED", pendingSub: newPendingSub });
+      expect(getState(actor)).toBe("awaitingConfirmation");
+      expect(getContext(actor).pendingSub).toEqual(newPendingSub);
+      expect(getContext(actor).pendingSub?.llmDescription).toBe("This is the generated description");
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════

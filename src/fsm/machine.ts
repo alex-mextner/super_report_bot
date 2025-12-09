@@ -659,6 +659,15 @@ export const userMachine = setup({
         },
 
         /**
+         * Keywords generated after rating completed.
+         * The RATE event transitions here before finishRatingAndGenerateKeywords
+         * has a chance to call KEYWORDS_GENERATED, so we need to handle it here.
+         */
+        KEYWORDS_GENERATED: {
+          actions: "setKeywordsGenerated",
+        },
+
+        /**
          * Handler wants to start group selection with a specific list.
          * Used when programmatically providing available groups.
          */
