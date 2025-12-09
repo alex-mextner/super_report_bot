@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS messages (
   text TEXT NOT NULL,
   sender_id INTEGER,
   sender_name TEXT,
+  sender_username TEXT,          -- @username without @
   timestamp INTEGER NOT NULL,    -- unix timestamp
   is_deleted INTEGER DEFAULT 0,  -- soft delete
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,

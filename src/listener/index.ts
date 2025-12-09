@@ -123,6 +123,7 @@ function toIncomingMessage(msg: Message): IncomingMessage | null {
     group_title: chat.title || "Unknown",
     text: msg.text,
     sender_name: msg.sender?.displayName || "Unknown",
+    sender_username: msg.sender?.username ?? undefined,
     timestamp: msg.date,
   };
 }
@@ -199,7 +200,9 @@ async function processMessage(msg: Message): Promise<void> {
             incomingMsg.text,
             subscription.original_query,
             incomingMsg.id,
-            incomingMsg.group_id
+            incomingMsg.group_id,
+            incomingMsg.sender_name,
+            incomingMsg.sender_username
           );
           listenerLog.info(
             {
@@ -238,7 +241,9 @@ async function processMessage(msg: Message): Promise<void> {
             incomingMsg.text,
             subscription.original_query,
             incomingMsg.id,
-            incomingMsg.group_id
+            incomingMsg.group_id,
+            incomingMsg.sender_name,
+            incomingMsg.sender_username
           );
         }
       }
@@ -361,6 +366,7 @@ function messageToCached(msg: Message): CachedMessage | null {
     text: msg.text,
     senderId: msg.sender?.id,
     senderName: msg.sender?.displayName,
+    senderUsername: msg.sender?.username ?? undefined,
     date: Math.floor(msg.date.getTime() / 1000),
   };
 }
@@ -660,7 +666,9 @@ export async function scanGroupHistory(
                 incomingMsg.text,
                 subscription.original_query,
                 incomingMsg.id,
-                incomingMsg.group_id
+                incomingMsg.group_id,
+                incomingMsg.sender_name,
+                incomingMsg.sender_username
               );
             }
           }
@@ -677,7 +685,9 @@ export async function scanGroupHistory(
                 incomingMsg.text,
                 subscription.original_query,
                 incomingMsg.id,
-                incomingMsg.group_id
+                incomingMsg.group_id,
+                incomingMsg.sender_name,
+                incomingMsg.sender_username
               );
             }
           }
@@ -702,6 +712,8 @@ export interface HistoryScanMatch {
   groupTitle: string;
   text: string;
   score: number;
+  senderName?: string;
+  senderUsername?: string;
 }
 
 export interface HistoryScanResult {
@@ -821,6 +833,8 @@ export async function scanFromCache(
           groupTitle: msg.groupTitle,
           text: msg.text,
           score,
+          senderName: msg.senderName,
+          senderUsername: msg.senderUsername,
         });
         queries.markMessageMatched(subscriptionId, msg.id, msg.groupId);
       }
@@ -834,6 +848,8 @@ export async function scanFromCache(
           groupTitle: msg.groupTitle,
           text: msg.text,
           score,
+          senderName: msg.senderName,
+          senderUsername: msg.senderUsername,
         });
         queries.markMessageMatched(subscriptionId, msg.id, msg.groupId);
 
@@ -872,7 +888,9 @@ export async function scanFromCache(
           match.text,
           subscription.original_query,
           match.messageId,
-          match.groupId
+          match.groupId,
+          match.senderName,
+          match.senderUsername
         );
       }
     }

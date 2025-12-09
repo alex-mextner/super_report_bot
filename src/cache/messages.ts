@@ -11,6 +11,7 @@ export interface CachedMessage {
   text: string;
   senderId?: number;
   senderName?: string;
+  senderUsername?: string;
   date: number; // unix timestamp
 }
 
@@ -25,6 +26,7 @@ function toCache(m: StoredMessage): CachedMessage {
     text: m.text,
     senderId: m.sender_id ?? undefined,
     senderName: m.sender_name ?? undefined,
+    senderUsername: m.sender_username ?? undefined,
     date: m.timestamp,
   };
 }
@@ -42,6 +44,7 @@ export function addMessage(msg: CachedMessage): void {
     text: msg.text,
     sender_id: msg.senderId ?? null,
     sender_name: msg.senderName ?? null,
+    sender_username: msg.senderUsername ?? null,
     timestamp: msg.date,
   });
 }

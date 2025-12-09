@@ -2608,6 +2608,18 @@ bot.onError(({ context, error }) => {
 });
 
 /**
+ * Build message link for Telegram supergroup
+ * Format: https://t.me/c/{internal_id}/{message_id}
+ * internal_id is the group_id without the -100 prefix
+ */
+function buildMessageLink(groupId: number, messageId: number): string {
+  // Telegram supergroup IDs are like -1001234567890
+  // Internal ID for t.me/c/ links is 1234567890 (without -100 prefix)
+  const internalId = String(Math.abs(groupId)).replace(/^100/, "");
+  return `https://t.me/c/${internalId}/${messageId}`;
+}
+
+/**
  * Send notification to user about matched message
  */
 export async function notifyUser(
@@ -2616,25 +2628,41 @@ export async function notifyUser(
   messageText: string,
   subscriptionQuery: string,
   messageId?: number,
-  groupId?: number
+  groupId?: number,
+  senderName?: string,
+  senderUsername?: string
 ): Promise<void> {
   try {
-    const keyboard = messageId && groupId
-      ? {
-          inline_keyboard: [
-            [
-              {
-                text: "🔍 Анализ цены",
-                callback_data: JSON.stringify({ action: "analyze", msgId: messageId, grpId: groupId }),
-              },
-            ],
+    // Build author line
+    let authorLine = "";
+    if (senderName) {
+      authorLine = senderUsername
+        ? `\nАвтор: ${senderName} (@${senderUsername})`
+        : `\nАвтор: ${senderName}`;
+    }
+
+    // Build keyboard with URL button and analyze button
+    let keyboard: { inline_keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> } | undefined;
+    if (messageId && groupId) {
+      const messageUrl = buildMessageLink(groupId, messageId);
+      keyboard = {
+        inline_keyboard: [
+          [
+            { text: "📎 Перейти к посту", url: messageUrl },
           ],
-        }
-      : undefined;
+          [
+            {
+              text: "🔍 Анализ цены",
+              callback_data: JSON.stringify({ action: "analyze", msgId: messageId, grpId: groupId }),
+            },
+          ],
+        ],
+      };
+    }
 
     await bot.api.sendMessage({
       chat_id: telegramId,
-      text: `🔔 Найдено совпадение!\n\nГруппа: ${groupTitle}\n\nЗапрос: ${subscriptionQuery}\n\nСообщение:\n${messageText.slice(0, 500)}${messageText.length > 500 ? "..." : ""}`,
+      text: `🔔 Найдено совпадение!\n\nГруппа: ${groupTitle}\n\nЗапрос: ${subscriptionQuery}${authorLine}\n\nСообщение:\n${messageText.slice(0, 500)}${messageText.length > 500 ? "..." : ""}`,
       reply_markup: keyboard,
     });
     botLog.debug({ userId: telegramId, groupTitle }, "Notification sent");

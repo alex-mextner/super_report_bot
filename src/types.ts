@@ -177,6 +177,7 @@ export interface IncomingMessage {
   group_title: string;
   text: string;
   sender_name: string;
+  sender_username?: string;
   timestamp: Date;
 }
 
@@ -223,6 +224,7 @@ export interface StoredMessage {
   text: string;
   sender_id: number | null;
   sender_name: string | null;
+  sender_username: string | null;
   timestamp: number;
   is_deleted: number;
   created_at: string;

@@ -179,9 +179,9 @@ const stmts = {
   ),
 
   // Messages (persistent history)
-  upsertMessage: db.prepare<void, [number, number, string | null, number | null, string | null, string, number | null, string | null, number]>(
-    `INSERT INTO messages (message_id, group_id, group_title, topic_id, topic_title, text, sender_id, sender_name, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  upsertMessage: db.prepare<void, [number, number, string | null, number | null, string | null, string, number | null, string | null, string | null, number]>(
+    `INSERT INTO messages (message_id, group_id, group_title, topic_id, topic_title, text, sender_id, sender_name, sender_username, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(message_id, group_id) DO UPDATE SET
        text = excluded.text,
        group_title = excluded.group_title,
@@ -189,6 +189,7 @@ const stmts = {
        topic_title = excluded.topic_title,
        sender_id = excluded.sender_id,
        sender_name = excluded.sender_name,
+       sender_username = excluded.sender_username,
        updated_at = CURRENT_TIMESTAMP`
   ),
   updateMessageText: db.prepare<void, [string, number, number]>(
@@ -583,6 +584,7 @@ export const queries = {
     text: string;
     sender_id: number | null;
     sender_name: string | null;
+    sender_username: string | null;
     timestamp: number;
   }): void {
     stmts.upsertMessage.run(
@@ -594,6 +596,7 @@ export const queries = {
       data.text,
       data.sender_id,
       data.sender_name,
+      data.sender_username,
       data.timestamp
     );
   },
