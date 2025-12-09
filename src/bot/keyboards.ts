@@ -53,15 +53,15 @@ export function pendingGroupsKeyboard(groups: PendingGroup[]): InlineKeyboard {
 
 /**
  * Confirmation keyboard for subscription creation
- * In normal mode: only Confirm + Cancel
- * In advanced mode: full editing capabilities
+ * Both modes: Confirm + Correct + Cancel
+ * Advanced mode adds: manual keyword editing
  */
 export const confirmKeyboard = (queryId: string, mode: UserMode = "advanced") => {
   const kb = new InlineKeyboard()
-    .text("Подтвердить", JSON.stringify({ action: "confirm", id: queryId }));
+    .text("Подтвердить", JSON.stringify({ action: "confirm", id: queryId }))
+    .text("🤖 Скорректировать", JSON.stringify({ action: "correct_pending", id: queryId }));
 
   if (mode === "advanced") {
-    kb.text("🤖 Перегенерировать", JSON.stringify({ action: "regenerate", id: queryId }));
     kb.row();
     kb.text("✏️ + слова", JSON.stringify({ action: "edit_positive_pending" }));
     kb.text("✏️ − слова", JSON.stringify({ action: "edit_negative_pending" }));
@@ -174,6 +174,13 @@ export function aiEditKeyboard(subscriptionId: number): InlineKeyboard {
       "Отмена",
       JSON.stringify({ action: "cancel_ai_edit", id: subscriptionId })
     );
+}
+
+// Keyboard for AI correction of pending subscription
+export function pendingAiEditKeyboard(): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("✅ Применить", JSON.stringify({ action: "apply_pending_ai" }))
+    .text("↩️ Назад", JSON.stringify({ action: "cancel_pending_ai" }));
 }
 
 // Submenu for editing positive/negative keywords (add/remove choice)

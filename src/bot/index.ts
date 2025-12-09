@@ -7,6 +7,7 @@ import {
   generateExampleMessages,
   generatedToRatingExamples,
   generateKeywordsWithRatings,
+  correctDescription,
 } from "../llm/keywords.ts";
 import {
   generateClarificationQuestions,
@@ -20,6 +21,7 @@ import {
   groupsKeyboard,
   skipQuestionKeyboard,
   aiEditKeyboard,
+  pendingAiEditKeyboard,
   nextRequestId,
   keywordEditSubmenu,
   keywordEditSubmenuPending,
@@ -990,6 +992,105 @@ ${examplesText}
     return;
   }
 
+  // Handle AI correction for pending subscription
+  if (state.step === "correcting_pending_ai" && state.pending_subscription && state.pending_ai_correction) {
+    const { mode, current, conversation } = state.pending_ai_correction;
+
+    await context.send("Обрабатываю запрос...");
+
+    try {
+      if (mode === "normal") {
+        // Normal mode: correct description only, then regenerate keywords
+        const descResult = await correctDescription(current.llm_description, text);
+
+        // Regenerate keywords based on new description
+        const keywordsResult = await generateKeywords(descResult.description);
+
+        // Update state with proposed changes
+        setUserState(userId, {
+          ...state,
+          pending_ai_correction: {
+            ...state.pending_ai_correction,
+            proposed: {
+              positive_keywords: keywordsResult.positive_keywords,
+              negative_keywords: keywordsResult.negative_keywords,
+              llm_description: descResult.description,
+            },
+            conversation: [
+              ...conversation,
+              { role: "user", content: text },
+              { role: "assistant", content: descResult.summary },
+            ],
+          },
+        });
+
+        await context.send(
+          format`${bold("Новое описание:")}
+${descResult.description}
+
+${bold("ИИ:")} ${descResult.summary}
+
+Ключевые слова будут перегенерированы автоматически.
+Можешь продолжить уточнение или применить:`,
+          {
+            reply_markup: pendingAiEditKeyboard(),
+          }
+        );
+      } else {
+        // Advanced mode: full control over keywords
+        const result = await interpretEditCommand(text, current, conversation);
+
+        // Format diff
+        const addedPos = result.positive_keywords.filter((k) => !current.positive_keywords.includes(k));
+        const removedPos = current.positive_keywords.filter((k) => !result.positive_keywords.includes(k));
+        const addedNeg = result.negative_keywords.filter((k) => !current.negative_keywords.includes(k));
+        const removedNeg = current.negative_keywords.filter((k) => !result.negative_keywords.includes(k));
+
+        let diffText = "";
+        if (addedPos.length) diffText += `+ Добавлено: ${addedPos.join(", ")}\n`;
+        if (removedPos.length) diffText += `- Удалено: ${removedPos.join(", ")}\n`;
+        if (addedNeg.length) diffText += `+ Исключения: ${addedNeg.join(", ")}\n`;
+        if (removedNeg.length) diffText += `- Из исключений: ${removedNeg.join(", ")}\n`;
+        if (current.llm_description !== result.llm_description) {
+          diffText += `Описание: ${result.llm_description}\n`;
+        }
+
+        // Update state with proposed changes
+        setUserState(userId, {
+          ...state,
+          pending_ai_correction: {
+            ...state.pending_ai_correction,
+            proposed: {
+              positive_keywords: result.positive_keywords,
+              negative_keywords: result.negative_keywords,
+              llm_description: result.llm_description,
+            },
+            conversation: [
+              ...conversation,
+              { role: "user", content: text },
+              { role: "assistant", content: result.summary },
+            ],
+          },
+        });
+
+        await context.send(
+          format`${bold("Изменения:")}
+${diffText || "Без изменений"}
+${bold("ИИ:")} ${result.summary}
+
+Можешь продолжить редактирование или применить:`,
+          {
+            reply_markup: pendingAiEditKeyboard(),
+          }
+        );
+      }
+    } catch (error) {
+      botLog.error({ err: error, userId }, "AI correction for pending failed");
+      await context.send("Ошибка обработки. Попробуй переформулировать.");
+    }
+    return;
+  }
+
   // If user is editing keywords
   if (state.step === "editing_keywords" && state.pending_subscription) {
     const text = context.text;
@@ -1720,6 +1821,156 @@ ${bold("Описание:")} ${sub.llm_description}
       setUserState(userId, { step: "idle" });
       await context.answer({ text: "Отменено" });
       await context.editText("Редактирование отменено.");
+      break;
+    }
+
+    case "correct_pending": {
+      // Enter AI correction mode for pending subscription
+      if (state.step !== "awaiting_confirmation" || !state.pending_subscription) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      const pending = state.pending_subscription;
+      const userMode = queries.getUserMode(userId);
+
+      setUserState(userId, {
+        ...state,
+        step: "correcting_pending_ai",
+        pending_ai_correction: {
+          mode: userMode,
+          current: {
+            positive_keywords: pending.positive_keywords,
+            negative_keywords: pending.negative_keywords,
+            llm_description: pending.llm_description,
+          },
+          conversation: [],
+        },
+      });
+
+      await context.answer({ text: "Режим коррекции" });
+
+      if (userMode === "normal") {
+        // Normal mode: only description, keywords will be regenerated
+        await context.editText(
+          format`${bold("Уточнение запроса")}
+
+${bold("Текущее описание:")}
+${pending.llm_description}
+
+Опиши что ты хочешь найти точнее:
+• "ищу только новые, не б/у"
+• "не нужны услуги, только товары"
+• "добавь что нужна доставка"`,
+          {
+            reply_markup: pendingAiEditKeyboard(),
+          }
+        );
+      } else {
+        // Advanced mode: full control over keywords
+        const posPreview = pending.positive_keywords.slice(0, 10).join(", ");
+        const posMore = pending.positive_keywords.length > 10 ? ` (+${pending.positive_keywords.length - 10})` : "";
+
+        await context.editText(
+          format`${bold("Режим ИИ-коррекции")}
+
+${bold("Текущие параметры:")}
+${bold("+ слова:")} ${code(posPreview + posMore)}
+${bold("- слова:")} ${code(pending.negative_keywords.join(", ") || "нет")}
+${bold("Описание:")} ${pending.llm_description}
+
+Напиши что изменить, например:
+• "убери размеры и бренды"
+• "добавь слово аренда"
+• "добавь в исключения ремонт"`,
+          {
+            reply_markup: pendingAiEditKeyboard(),
+          }
+        );
+      }
+      break;
+    }
+
+    case "apply_pending_ai": {
+      if (state.step !== "correcting_pending_ai" || !state.pending_ai_correction?.proposed) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      const { proposed } = state.pending_ai_correction;
+      const queryId = `${userId}_${Date.now()}`;
+
+      // Update pending subscription with proposed changes
+      setUserState(userId, {
+        step: "awaiting_confirmation",
+        pending_subscription: {
+          original_query: state.pending_subscription!.original_query,
+          positive_keywords: proposed.positive_keywords,
+          negative_keywords: proposed.negative_keywords,
+          llm_description: proposed.llm_description,
+        },
+      });
+
+      await context.answer({ text: "Применено!" });
+
+      await context.editText(
+        format`
+${bold("Скорректированные ключевые слова:")}
+
+${bold("Позитивные:")}
+${code(proposed.positive_keywords.join(", "))}
+
+${bold("Негативные:")}
+${code(proposed.negative_keywords.join(", ") || "нет")}
+
+${bold("Описание:")}
+${proposed.llm_description}
+
+Подтверди или измени:
+        `,
+        {
+          reply_markup: confirmKeyboard(queryId),
+        }
+      );
+      break;
+    }
+
+    case "cancel_pending_ai": {
+      if (!state.pending_subscription) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      const pending = state.pending_subscription;
+      const queryId = `${userId}_${Date.now()}`;
+
+      // Return to awaiting_confirmation
+      setUserState(userId, {
+        step: "awaiting_confirmation",
+        pending_subscription: pending,
+      });
+
+      await context.answer({ text: "Отменено" });
+
+      await context.editText(
+        format`
+${bold("Ключевые слова:")}
+
+${bold("Позитивные:")}
+${code(pending.positive_keywords.join(", "))}
+
+${bold("Негативные:")}
+${code(pending.negative_keywords.join(", ") || "нет")}
+
+${bold("Описание:")}
+${pending.llm_description}
+
+Подтверди или измени:
+        `,
+        {
+          reply_markup: confirmKeyboard(queryId),
+        }
+      );
       break;
     }
 

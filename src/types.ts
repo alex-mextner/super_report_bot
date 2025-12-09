@@ -93,6 +93,7 @@ export interface UserState {
     | "rating_examples" // new: rating similar messages
     | "awaiting_confirmation"
     | "editing_keywords"
+    | "correcting_pending_ai" // AI correction for pending subscription
     | "selecting_groups"
     | "adding_group"
     | "awaiting_invite_link"
@@ -152,6 +153,21 @@ export interface UserState {
   };
   // Draft keywords for searching similar messages
   draft_keywords?: string[];
+  // AI correction flow for pending subscription
+  pending_ai_correction?: {
+    mode: UserMode; // normal = description only, advanced = full control
+    current: {
+      positive_keywords: string[];
+      negative_keywords: string[];
+      llm_description: string;
+    };
+    proposed?: {
+      positive_keywords: string[];
+      negative_keywords: string[];
+      llm_description: string;
+    };
+    conversation: Array<{ role: "user" | "assistant"; content: string }>;
+  };
 }
 
 // Message from monitored group
