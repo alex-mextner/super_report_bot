@@ -88,6 +88,8 @@ Migration files are named `NNN_description.sql` or `NNN_description.ts` and appl
 
 **Migrations must be idempotent** — succeed even if schema.sql already applied the change.
 
+**NEVER modify existing migrations** — they may have already been applied to production databases. Always create a new migration file instead.
+
 For **tables/indexes** — use `.sql` with `IF NOT EXISTS`:
 
 ```sql
