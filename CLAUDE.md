@@ -41,6 +41,7 @@ The userbot requires separate auth session (`bun run auth`). Session stored in `
 ### State Machine (XState v5)
 
 Bot conversation flow is managed by XState in `src/fsm/`:
+
 - `machine.ts` — State machine definition with all states and transitions
 - `context.ts` — BotContext type (pending subscription, editing state, etc.)
 - `events.ts` — BotEvent type (TEXT_QUERY, CONFIRM, CANCEL, etc.)
@@ -76,7 +77,45 @@ Key states: `idle` → `clarifyingQuery` → `ratingExamples` → `awaitingConfi
 
 SQLite via `bun:sqlite`. Schema in `src/db/schema.sql`, migrations in `src/db/migrations.ts`.
 
+#### Schema Changes (IMPORTANT)
+
+When modifying database schema, you MUST do BOTH:
+
+1. **Update `src/db/schema.sql`** — for new databases
+2. **Create migration in `src/db/migrations/`** — for existing databases
+
+Migration files are named `NNN_description.sql` or `NNN_description.ts` and applied in order. Tracked in `_migrations` table.
+
+**Migrations must be idempotent** — succeed even if schema.sql already applied the change.
+
+For **tables/indexes** — use `.sql` with `IF NOT EXISTS`:
+
+```sql
+CREATE TABLE IF NOT EXISTS new_table (...);
+CREATE INDEX IF NOT EXISTS idx_name ON table(column);
+```
+
+For **columns** — use `.ts` migration with helper:
+
+```typescript
+// migrations/006_add_new_field.ts
+import { Database } from "bun:sqlite";
+import { columnExists } from "../migrations";
+
+export function migrate(db: Database) {
+  if (!columnExists(db, "users", "new_field")) {
+    db.exec("ALTER TABLE users ADD COLUMN new_field TEXT");
+  }
+}
+```
+
+Available helpers in `src/db/migrations.ts`:
+
+- `columnExists(db, table, column)` — check if column exists
+- `tableExists(db, table)` — check if table exists
+
 Key tables:
+
 - `users` — telegram_id, mode (normal/advanced)
 - `subscriptions` — query, positive/negative keywords (JSON), llm_description
 - `subscription_groups` — which groups to monitor per subscription

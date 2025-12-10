@@ -5,13 +5,14 @@ import type {
   Subscription,
   KeywordEmbeddings,
   MonitoredGroup,
-  MatchedMessage,
   Category,
   Product,
   SellerContact,
   StoredMessage,
   Topic,
   StoredMedia,
+  FoundPostAnalysis,
+  AnalysisResult,
 } from "../types.ts";
 import { runMigrations } from "./migrations.ts";
 
@@ -22,7 +23,7 @@ const schema = await Bun.file(new URL("./schema.sql", import.meta.url)).text();
 db.exec(schema);
 
 // Run migrations
-runMigrations(db);
+await runMigrations(db);
 
 // Prepared statements
 const stmts = {
@@ -66,13 +67,38 @@ const stmts = {
   ),
   removeGroup: db.prepare<void, [number]>("DELETE FROM monitored_groups WHERE telegram_id = ?"),
 
-  // Matched messages (deduplication)
+  // Matched messages (deduplication) - DEPRECATED, use found_posts_analyzes
   isMessageMatched: db.prepare<{ found: number }, [number, number, number]>(
     `SELECT 1 as found FROM matched_messages
      WHERE subscription_id = ? AND message_id = ? AND group_id = ? LIMIT 1`
   ),
   markMessageMatched: db.prepare<void, [number, number, number]>(
     `INSERT OR IGNORE INTO matched_messages (subscription_id, message_id, group_id) VALUES (?, ?, ?)`
+  ),
+
+  // Found posts analyzes (new unified table for all analysis results)
+  saveAnalysis: db.prepare<void, [number, number, number, string, number | null, number | null, number | null, string | null, string | null, number | null]>(
+    `INSERT OR REPLACE INTO found_posts_analyzes
+     (subscription_id, message_id, group_id, result, ngram_score, semantic_score, llm_confidence, rejection_keyword, llm_reasoning, notified_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ),
+  getAnalysisForSubscription: db.prepare<FoundPostAnalysis, [number, number, number]>(
+    `SELECT * FROM found_posts_analyzes
+     WHERE subscription_id = ? AND message_id = ? AND group_id = ?`
+  ),
+  getAnalysesForMessage: db.prepare<FoundPostAnalysis, [number, number]>(
+    `SELECT * FROM found_posts_analyzes
+     WHERE message_id = ? AND group_id = ?`
+  ),
+  getAnalysesForMessageByUser: db.prepare<FoundPostAnalysis & { original_query: string }, [number, number, number]>(
+    `SELECT fpa.*, s.original_query FROM found_posts_analyzes fpa
+     JOIN subscriptions s ON fpa.subscription_id = s.id
+     JOIN users u ON s.user_id = u.id
+     WHERE fpa.message_id = ? AND fpa.group_id = ? AND u.telegram_id = ?`
+  ),
+  isAnalysisMatched: db.prepare<{ found: number }, [number, number, number]>(
+    `SELECT 1 as found FROM found_posts_analyzes
+     WHERE subscription_id = ? AND message_id = ? AND group_id = ? AND result = 'matched' LIMIT 1`
   ),
 
   // Subscription groups
@@ -367,13 +393,64 @@ export const queries = {
     stmts.removeGroup.run(telegramId);
   },
 
-  // Deduplication
+  // Deduplication (DEPRECATED - use analysis methods)
   isMessageMatched(subscriptionId: number, messageId: number, groupId: number): boolean {
     return stmts.isMessageMatched.get(subscriptionId, messageId, groupId) !== null;
   },
 
   markMessageMatched(subscriptionId: number, messageId: number, groupId: number): void {
     stmts.markMessageMatched.run(subscriptionId, messageId, groupId);
+  },
+
+  // Analysis results (found_posts_analyzes)
+  saveAnalysis(data: {
+    subscriptionId: number;
+    messageId: number;
+    groupId: number;
+    result: AnalysisResult;
+    ngramScore?: number;
+    semanticScore?: number;
+    llmConfidence?: number;
+    rejectionKeyword?: string;
+    llmReasoning?: string;
+    notifiedAt?: number;
+  }): void {
+    stmts.saveAnalysis.run(
+      data.subscriptionId,
+      data.messageId,
+      data.groupId,
+      data.result,
+      data.ngramScore ?? null,
+      data.semanticScore ?? null,
+      data.llmConfidence ?? null,
+      data.rejectionKeyword ?? null,
+      data.llmReasoning ?? null,
+      data.notifiedAt ?? null
+    );
+  },
+
+  getAnalysisForSubscription(
+    subscriptionId: number,
+    messageId: number,
+    groupId: number
+  ): FoundPostAnalysis | null {
+    return stmts.getAnalysisForSubscription.get(subscriptionId, messageId, groupId) ?? null;
+  },
+
+  getAnalysesForMessage(messageId: number, groupId: number): FoundPostAnalysis[] {
+    return stmts.getAnalysesForMessage.all(messageId, groupId);
+  },
+
+  getAnalysesForMessageByUser(
+    messageId: number,
+    groupId: number,
+    telegramId: number
+  ): (FoundPostAnalysis & { original_query: string })[] {
+    return stmts.getAnalysesForMessageByUser.all(messageId, groupId, telegramId);
+  },
+
+  isAnalysisMatched(subscriptionId: number, messageId: number, groupId: number): boolean {
+    return stmts.isAnalysisMatched.get(subscriptionId, messageId, groupId) !== null;
   },
 
   // Subscription groups
