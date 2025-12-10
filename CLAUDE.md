@@ -9,12 +9,15 @@ Super Report Bot — Telegram bot for monitoring group messages with fuzzy match
 ## Commands
 
 ```bash
-bun install          # Install dependencies
-bun run start        # Start bot (production)
-bun run dev          # Start with hot reload
-bun run auth         # Authenticate userbot (MTProto session)
-bun test             # Run all tests
-bun test src/matcher # Run specific test directory
+bun install           # Install dependencies
+bun run start         # Start bot (production) — builds webapp first
+bun run dev           # Start with hot reload
+bun run auth          # Authenticate userbot (MTProto session)
+bun test              # Run all tests
+bun test src/matcher  # Run specific test directory
+bun test --watch      # Run tests in watch mode
+bun run webapp:dev    # Run webapp dev server (Vite)
+bun run webapp:build  # Build webapp for production
 ```
 
 ## Architecture
@@ -23,14 +26,30 @@ bun test src/matcher # Run specific test directory
 User sends query → gramio bot → LLM generates keywords → subscription saved to SQLite
                                                                       ↓
 User gets notification ← gramio bot ← LLM verifies ← N-gram matcher ← MTProto listener
+                                                                      ↓
+                                                        Hono API ← Telegram WebApp
 ```
 
-### Two Telegram Clients
+### Three Main Components
 
 1. **gramio** (`src/bot/`) — Bot API for user interface (commands, keyboards, notifications)
 2. **mtcute** (`src/listener/`) — MTProto userbot for listening to group messages
+3. **Hono** (`src/api/`) — REST API for Telegram WebApp, validates `initData` from Telegram
 
 The userbot requires separate auth session (`bun run auth`). Session stored in `userbot.session`.
+
+### State Machine (XState v5)
+
+Bot conversation flow is managed by XState in `src/fsm/`:
+- `machine.ts` — State machine definition with all states and transitions
+- `context.ts` — BotContext type (pending subscription, editing state, etc.)
+- `events.ts` — BotEvent type (TEXT_QUERY, CONFIRM, CANCEL, etc.)
+- `actions.ts` — Context mutations (assign actions)
+- `guards.ts` — Transition conditions
+- `persistence.ts` — FSM state persistence to SQLite for recovery
+- `adapter.ts` — gramio integration
+
+Key states: `idle` → `clarifyingQuery` → `ratingExamples` → `awaitingConfirmation` → `selectingGroups` → `idle`
 
 ### Message Processing Pipeline (3 stages)
 
@@ -38,9 +57,9 @@ The userbot requires separate auth session (`bun run auth`). Session stored in `
    - Character-level trigrams + word-level bigrams
    - Threshold: 0.15 for candidates
 
-2. **Keyword matching** — Binary + soft coverage scoring
-   - Keyword "found" if ≥70% of its n-grams present in text
-   - Logic is OR-like: single keyword match passes threshold
+2. **BGE-M3 Semantic** (`src/llm/embeddings.ts`) — Optional semantic fallback
+   - Used when N-gram doesn't match but message might be relevant
+   - Requires external BGE server
 
 3. **LLM Verification** (`src/llm/verify.ts`) — Zero-shot classification via BART-MNLI
    - Confirms if message semantically matches subscription description
@@ -48,31 +67,26 @@ The userbot requires separate auth session (`bun run auth`). Session stored in `
 
 ### LLM Usage
 
-- **Keyword generation**: DeepSeek R1 via HuggingFace Inference (Novita provider)
+- **Keyword generation**: DeepSeek R1 via HuggingFace Inference (`src/llm/keywords.ts`)
 - **Match verification**: facebook/bart-large-mnli for zero-shot classification
+- **Message analysis**: Categorization and price extraction for WebApp (`src/llm/analyze.ts`)
 - Fallback: simple tokenization if LLM unavailable
 
 ### Database
 
-SQLite via `bun:sqlite`. Schema in `src/db/schema.sql`.
+SQLite via `bun:sqlite`. Schema in `src/db/schema.sql`, migrations in `src/db/migrations.ts`.
 
 Key tables:
-- `users` — telegram_id
+- `users` — telegram_id, mode (normal/advanced)
 - `subscriptions` — query, positive/negative keywords (JSON), llm_description
 - `subscription_groups` — which groups to monitor per subscription
 - `matched_messages` — deduplication
+- `messages` — cached messages for WebApp search
+- `products`, `categories`, `seller_contacts` — WebApp marketplace features
 
-### Conversation Flow State Machine
+### WebApp (`webapp/`)
 
-```
-idle → awaiting_confirmation → selecting_groups → idle
-         ↓                          ↓
-   editing_keywords            (saves subscription)
-         ↓
-   awaiting_confirmation
-```
-
-State stored in-memory (`Map<userId, UserState>`).
+Telegram Mini App for browsing cached messages. Built with Vite, served by Hono from `webapp/dist/`.
 
 ## Environment Variables
 
@@ -81,15 +95,8 @@ BOT_TOKEN=       # Telegram Bot API token
 API_ID=          # Telegram API ID (from my.telegram.org)
 API_HASH=        # Telegram API Hash
 HF_TOKEN=        # HuggingFace token (optional, for LLM features)
+API_PORT=3000    # Hono API port (default: 3000)
+ADMIN_ID=        # Telegram user ID for admin features
 ```
 
 Bun loads `.env` automatically.
-
-## Key Files
-
-- `src/index.ts` — Entry point, starts both clients
-- `src/bot/index.ts` — Bot commands and callback handlers
-- `src/listener/index.ts` — MTProto message listener and group scanning
-- `src/matcher/ngram.ts` — N-gram similarity algorithms
-- `src/llm/keywords.ts` — Keyword generation prompt and parsing
-- `src/llm/verify.ts` — Zero-shot classification for match verification
