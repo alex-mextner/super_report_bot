@@ -471,10 +471,70 @@ interface DescriptionCorrectionResult {
   summary: string;
 }
 
+// =====================================================
+// Extract keywords from message text (for criteria expansion)
+// =====================================================
+
+const EXTRACT_KEYWORDS_PROMPT = `Из текста сообщения извлеки 5-15 ключевых слов/фраз, которые могут быть полезны для поиска похожих объявлений.
+
+Включи:
+- Названия товаров/услуг
+- Бренды и модели
+- Характеристики и параметры
+- Релевантные прилагательные
+
+НЕ включай:
+- Стоп-слова (и, в, на, для, с)
+- Контактные данные
+- Цены и валюты
+- Эмодзи
+
+Ответ ТОЛЬКО JSON массив строк:
+["слово1", "слово2", ...]`;
+
 /**
- * Correct description based on user's instruction (for normal mode)
- * Returns new description, keywords will be regenerated separately
+ * Extract keywords from message text for criteria expansion
+ * Used when user wants to expand subscription criteria based on a forwarded message
  */
+export async function extractKeywordsFromText(text: string): Promise<string[]> {
+  try {
+    const response = await withRetry(async () => {
+      const result = await hf.chatCompletion({
+        model: MODELS.DEEPSEEK_R1,
+        provider: "novita",
+        messages: [
+          { role: "system", content: EXTRACT_KEYWORDS_PROMPT },
+          { role: "user", content: text.slice(0, 2000) }, // Limit text length
+        ],
+        max_tokens: 500,
+        temperature: 0.4,
+      });
+      return result.choices[0]?.message?.content || "";
+    });
+
+    // Strip thinking tags
+    const cleaned = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+
+    // Parse JSON array
+    const match = cleaned.match(/\[[\s\S]*\]/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((k) => typeof k === "string" && k.length > 1);
+      }
+    }
+  } catch (e) {
+    llmLog.error({ error: e, textLen: text.length }, "extractKeywordsFromText failed");
+  }
+
+  // Fallback to simple tokenization
+  return generateKeywordsFallback(text).positive_keywords.slice(0, 10);
+}
+
+// =====================================================
+// Description correction (for normal mode)
+// =====================================================
+
 export async function correctDescription(
   originalQuery: string,
   currentDescription: string,

@@ -26,13 +26,44 @@ CREATE TABLE IF NOT EXISTS monitored_groups (
   added_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
--- Matched messages (deduplication)
+-- Matched messages (deduplication) - DEPRECATED, use found_posts_analyzes
 CREATE TABLE IF NOT EXISTS matched_messages (
   id INTEGER PRIMARY KEY,
   subscription_id INTEGER NOT NULL REFERENCES subscriptions(id),
   message_id INTEGER NOT NULL,
   group_id INTEGER NOT NULL,
   matched_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(subscription_id, message_id, group_id)
+);
+
+-- Analysis results for all messages (matched and rejected)
+CREATE TABLE IF NOT EXISTS found_posts_analyzes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  subscription_id INTEGER NOT NULL REFERENCES subscriptions(id) ON DELETE CASCADE,
+  message_id INTEGER NOT NULL,
+  group_id INTEGER NOT NULL,
+
+  -- Result of analysis
+  result TEXT NOT NULL CHECK (result IN (
+    'matched',           -- passed all stages
+    'rejected_negative', -- rejected by negative keyword
+    'rejected_ngram',    -- n-gram score < threshold
+    'rejected_semantic', -- BGE-M3 semantic match failed
+    'rejected_llm'       -- LLM verification rejected
+  )),
+
+  -- Scores
+  ngram_score REAL,
+  semantic_score REAL,
+  llm_confidence REAL,
+
+  -- Rejection details
+  rejection_keyword TEXT,   -- which negative keyword triggered rejection
+  llm_reasoning TEXT,       -- reasoning from LLM
+
+  analyzed_at INTEGER DEFAULT (unixepoch()),  -- unix timestamp
+  notified_at INTEGER,                        -- unix timestamp, NULL if rejected
+
   UNIQUE(subscription_id, message_id, group_id)
 );
 
@@ -90,6 +121,9 @@ CREATE TABLE IF NOT EXISTS topics (
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_active ON subscriptions(is_active);
 CREATE INDEX IF NOT EXISTS idx_matched_messages_sub ON matched_messages(subscription_id);
+CREATE INDEX IF NOT EXISTS idx_fpa_lookup ON found_posts_analyzes(message_id, group_id);
+CREATE INDEX IF NOT EXISTS idx_fpa_sub ON found_posts_analyzes(subscription_id);
+CREATE INDEX IF NOT EXISTS idx_fpa_result ON found_posts_analyzes(result);
 CREATE INDEX IF NOT EXISTS idx_subscription_groups_sub ON subscription_groups(subscription_id);
 CREATE INDEX IF NOT EXISTS idx_subscription_groups_group ON subscription_groups(group_id);
 CREATE INDEX IF NOT EXISTS idx_user_groups_user ON user_groups(user_id);

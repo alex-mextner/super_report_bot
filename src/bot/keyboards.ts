@@ -285,3 +285,46 @@ export function settingsKeyboard(currentMode: UserMode): InlineKeyboard {
 
   return kb;
 }
+
+// =====================================================
+// Forward analysis keyboards
+// =====================================================
+
+/**
+ * Actions keyboard for forward analysis (when message was rejected)
+ */
+export function forwardActionsKeyboard(
+  subscriptionId: number,
+  messageId: number,
+  groupId: number
+): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(
+      "🔧 Расширить критерии",
+      JSON.stringify({
+        action: "expand_criteria",
+        id: subscriptionId,
+        msgId: messageId,
+        grpId: groupId,
+      })
+    )
+    .row()
+    .text(
+      "✏️ Скорректировать с ИИ",
+      JSON.stringify({ action: "ai_correct_forward", id: subscriptionId })
+    );
+}
+
+/**
+ * Keyboard to suggest adding unmonitored group
+ */
+export function addGroupKeyboard(chatId: number, title?: string): InlineKeyboard {
+  return new InlineKeyboard().text(
+    "➕ Добавить группу",
+    JSON.stringify({
+      action: "add_group_quick",
+      id: chatId,
+      title: title || "Неизвестная группа",
+    })
+  );
+}

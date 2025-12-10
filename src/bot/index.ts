@@ -58,6 +58,7 @@ import {
   ensureUserbotInGroup,
   scanFromCache,
 } from "../listener/index.ts";
+import { handleForward, analyzeForwardedMessage } from "./forward.ts";
 import { botLog } from "../logger.ts";
 import type {
   UserMode,
@@ -654,6 +655,47 @@ bot.on("message", async (context) => {
 
   const userId = context.from?.id;
   if (!userId) return;
+
+  // Handle forwarded messages - show analysis results
+  if (context.forwardOrigin) {
+    const result = await handleForward({
+      message: context as unknown as import("gramio").Message,
+      from: context.from,
+      send: (text: string, options?: unknown) => context.send(text, options as Parameters<typeof context.send>[1]),
+    });
+
+    if (result.handled) {
+      if (result.response === "analyzing") {
+        // Need to analyze on demand
+        const forwardResult = result as { forwardInfo?: { chatId: number; messageId: number | null; chatTitle?: string }; messageText?: string };
+        if (forwardResult.forwardInfo && forwardResult.messageText) {
+          await context.send("Анализирую сообщение...");
+          const analysisResult = await analyzeForwardedMessage(
+            userId,
+            forwardResult.forwardInfo,
+            forwardResult.messageText
+          );
+          if (analysisResult.keyboard) {
+            await context.send(analysisResult.response, {
+              reply_markup: analysisResult.keyboard as import("gramio").InlineKeyboard,
+            });
+          } else {
+            await context.send(analysisResult.response);
+          }
+        }
+      } else if (result.response) {
+        const keyboard = (result as { keyboard?: unknown }).keyboard;
+        if (keyboard) {
+          await context.send(result.response, {
+            reply_markup: keyboard as import("gramio").InlineKeyboard,
+          });
+        } else {
+          await context.send(result.response);
+        }
+      }
+      return;
+    }
+  }
 
   const currentState = fsmState(userId);
   const c = ctx(userId);
@@ -2525,6 +2567,132 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
     case "noop": {
       // Do nothing (already selected option)
       await context.answer({ text: "Уже выбрано" });
+      break;
+    }
+
+    // Forward analysis actions
+    case "expand_criteria": {
+      const subscriptionId = data.id as number;
+      const msgId = data.msgId as number;
+      const grpId = data.grpId as number;
+
+      if (!subscriptionId) {
+        await context.answer({ text: "Подписка не найдена" });
+        return;
+      }
+
+      const subscription = queries.getSubscriptionById(subscriptionId, userId);
+      if (!subscription) {
+        await context.answer({ text: "Подписка не найдена" });
+        return;
+      }
+
+      // Get message text from DB or from the forward
+      let messageText = "";
+      if (msgId && grpId) {
+        const storedMsg = queries.getMessage(msgId, grpId);
+        if (storedMsg) {
+          messageText = storedMsg.text;
+        }
+      }
+
+      if (!messageText) {
+        await context.answer({ text: "Текст сообщения не найден" });
+        return;
+      }
+
+      await context.answer({ text: "Расширяю критерии..." });
+      await editCallbackMessage(context, "⏳ Извлекаю ключевые слова и обновляю подписку...");
+
+      try {
+        // Generate keywords from the message text
+        const { extractKeywordsFromText } = await import("../llm/keywords.ts");
+        const newKeywords = await extractKeywordsFromText(messageText);
+
+        if (newKeywords.length === 0) {
+          await editCallbackMessage(context, "Не удалось извлечь ключевые слова из сообщения.");
+          return;
+        }
+
+        // Merge with existing keywords
+        const combined = [...new Set([...subscription.positive_keywords, ...newKeywords])];
+        queries.updatePositiveKeywords(subscriptionId, userId, combined);
+
+        // Regenerate embeddings in background
+        regenerateEmbeddings(subscriptionId);
+
+        await editCallbackMessage(
+          context,
+          `✅ Критерии расширены!\n\nДобавлены слова: ${newKeywords.join(", ")}`
+        );
+      } catch (e) {
+        botLog.error({ err: e, subscriptionId }, "Failed to expand criteria");
+        await editCallbackMessage(context, "Ошибка при расширении критериев. Попробуй позже.");
+      }
+      break;
+    }
+
+    case "ai_correct_forward": {
+      const subscriptionId = data.id as number;
+
+      if (!subscriptionId) {
+        await context.answer({ text: "Подписка не найдена" });
+        return;
+      }
+
+      const subscription = queries.getSubscriptionById(subscriptionId, userId);
+      if (!subscription) {
+        await context.answer({ text: "Подписка не найдена" });
+        return;
+      }
+
+      // Start AI correction flow (same as regenerate_sub)
+      send(userId, {
+        type: "EDIT_SUB_AI",
+        data: {
+          subscriptionId,
+          current: {
+            positiveKeywords: subscription.positive_keywords,
+            negativeKeywords: subscription.negative_keywords,
+            llmDescription: subscription.llm_description,
+          },
+          conversation: [],
+        },
+      });
+      await context.answer({ text: "Корректировка с ИИ" });
+      await context.editText(
+        `Опиши, как изменить критерии поиска для подписки "${subscription.original_query}".\n\n` +
+          `Например: «добавь слова про скидки» или «убери слишком строгие фильтры»`,
+        { reply_markup: aiEditKeyboard(subscriptionId) }
+      );
+      break;
+    }
+
+    case "add_group_quick": {
+      const groupId = data.id as number;
+      const groupTitle = (data as { title?: string }).title || "Неизвестная группа";
+
+      await context.answer({ text: "Добавляю группу..." });
+      await editCallbackMessage(context, `⏳ Добавляю группу "${groupTitle}"...`);
+
+      try {
+        // Check if userbot is member
+        const isMember = await isUserbotMember(groupId);
+        if (!isMember) {
+          await editCallbackMessage(
+            context,
+            `Бот не может читать эту группу. Используй /addgroup и отправь пригласительную ссылку.`
+          );
+          return;
+        }
+
+        // Add group for user
+        queries.addUserGroup(userId, groupId, groupTitle, false);
+        await editCallbackMessage(context, `✅ Группа "${groupTitle}" добавлена в мониторинг.`);
+      } catch (e) {
+        botLog.error({ err: e, groupId }, "Failed to add group quick");
+        await editCallbackMessage(context, "Не удалось добавить группу. Используй /addgroup.");
+      }
       break;
     }
 

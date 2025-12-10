@@ -2,7 +2,7 @@ import { passesNgramFilter, phraseMatches, calculateKeywordNgramSimilarity } fro
 import { generateNgrams, tokenize } from "./normalize.ts";
 import { matcherLog } from "../logger.ts";
 import { semanticMatch, checkBgeHealth } from "../llm/embeddings.ts";
-import type { Subscription, MatchResult, IncomingMessage } from "../types.ts";
+import type { Subscription, MatchResult, IncomingMessage, MatchAnalysis } from "../types.ts";
 
 export interface MatcherConfig {
   ngramThreshold: number;
@@ -39,13 +39,13 @@ async function isBgeAvailable(): Promise<boolean> {
  * Match a message against a subscription using N-gram similarity
  * Falls back to BGE-M3 semantic matching if N-gram doesn't match
  *
- * Returns null if no match, or MatchResult if passed
+ * Always returns MatchAnalysis with detailed rejection info
  */
 export async function matchMessage(
   message: IncomingMessage,
   subscription: Subscription,
   config: MatcherConfig = DEFAULT_CONFIG
-): Promise<MatchResult | null> {
+): Promise<MatchAnalysis> {
   const text = message.text;
 
   // Check negative keywords first (n-gram matching with bridge check for phrases)
@@ -58,7 +58,12 @@ export async function matchMessage(
           { subscriptionId: subscription.id, negativeKeyword: negKw },
           "Negative keyword hit"
         );
-        return null; // Negative keyword found, skip
+        return {
+          subscription,
+          result: "rejected_negative",
+          passed: false,
+          rejectionKeyword: negKw,
+        };
       }
     }
   }
@@ -84,9 +89,9 @@ export async function matchMessage(
   if (ngram.passed) {
     return {
       subscription,
-      score: ngram.score,
-      stage: "ngram",
+      result: "matched",
       passed: true,
+      ngramScore: ngram.score,
     };
   }
 
@@ -110,9 +115,9 @@ export async function matchMessage(
       );
       return {
         subscription,
-        score: queryScore,
-        stage: "query_fallback",
+        result: "matched",
         passed: true,
+        ngramScore: queryScore,
       };
     }
   }
@@ -131,7 +136,14 @@ export async function matchMessage(
           { subscriptionId: subscription.id, blockedBy: semantic.blocked },
           "Blocked by semantic negative keyword"
         );
-        return null;
+        return {
+          subscription,
+          result: "rejected_semantic",
+          passed: false,
+          ngramScore: ngram.score,
+          semanticScore: semantic.score,
+          rejectionKeyword: semantic.blocked,
+        };
       }
 
       matcherLog.debug(
@@ -147,44 +159,67 @@ export async function matchMessage(
       if (semantic.passed) {
         return {
           subscription,
-          score: semantic.score,
-          stage: "ngram", // Keep stage as "ngram" for compatibility, could add "bge-m3"
+          result: "matched",
           passed: true,
+          ngramScore: ngram.score,
+          semanticScore: semantic.score,
         };
       }
+
+      // Semantic didn't pass
+      return {
+        subscription,
+        result: "rejected_semantic",
+        passed: false,
+        ngramScore: ngram.score,
+        semanticScore: semantic.score,
+      };
     } catch (error) {
       matcherLog.error(
         { subscriptionId: subscription.id, error },
         "BGE-M3 semantic match failed"
       );
-      // Fall through — no match
+      // Fall through — return ngram rejection
     }
   }
 
-  return null;
+  // Final rejection: n-gram filter didn't pass
+  return {
+    subscription,
+    result: "rejected_ngram",
+    passed: false,
+    ngramScore: ngram.score,
+  };
 }
 
 /**
  * Match a message against all active subscriptions
- * Returns array of potential matches for LLM verification
+ * Returns all analyses (both passed and rejected) for saving to DB
  */
 export async function matchMessageAgainstAll(
   message: IncomingMessage,
   subscriptions: Subscription[],
   config: MatcherConfig = DEFAULT_CONFIG
-): Promise<MatchResult[]> {
-  const results: MatchResult[] = [];
+): Promise<MatchAnalysis[]> {
+  const results: MatchAnalysis[] = [];
 
   // Process subscriptions sequentially to avoid overwhelming BGE server
   for (const subscription of subscriptions) {
     const result = await matchMessage(message, subscription, config);
-    if (result) {
-      results.push(result);
-    }
+    results.push(result);
   }
 
-  // Sort by score descending
-  return results.sort((a, b) => b.score - a.score);
+  return results;
+}
+
+/**
+ * Get only passed matches (candidates for LLM verification)
+ * Sorted by score descending
+ */
+export function getPassedMatches(analyses: MatchAnalysis[]): MatchAnalysis[] {
+  return analyses
+    .filter((a) => a.passed)
+    .sort((a, b) => (b.ngramScore ?? 0) - (a.ngramScore ?? 0));
 }
 
 export { calculateNgramSimilarity, passesNgramFilter } from "./ngram.ts";

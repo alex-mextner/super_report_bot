@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { matchMessage, matchMessageAgainstAll } from "./index.ts";
+import { matchMessage, matchMessageAgainstAll, getPassedMatches } from "./index.ts";
 import type { Subscription, IncomingMessage } from "../types.ts";
 
 // Helper to create a test subscription
@@ -39,7 +39,8 @@ describe("matchMessage", () => {
     });
 
     const result = await matchMessage(message, subscription);
-    expect(result).toBeNull();
+    expect(result.passed).toBe(false);
+    expect(result.result).toBe("rejected_ngram");
   });
 
   test("returns match result when text matches keywords", async () => {
@@ -54,12 +55,12 @@ describe("matchMessage", () => {
     const result = await matchMessage(message, subscription, { ngramThreshold: 0.1 });
     expect(result).not.toBeNull();
     expect(result?.passed).toBe(true);
-    expect(result?.stage).toBe("ngram");
+    expect(result?.result).toBe("matched");
     expect(result?.subscription.id).toBe(subscription.id);
-    expect(result?.score).toBeGreaterThan(0);
+    expect(result?.ngramScore).toBeGreaterThan(0);
   });
 
-  test("returns null when negative keyword found", async () => {
+  test("returns rejection when negative keyword found", async () => {
     const message = createMessage({
       text: "Продаю iPhone 15 на запчасти",
     });
@@ -70,7 +71,9 @@ describe("matchMessage", () => {
     });
 
     const result = await matchMessage(message, subscription);
-    expect(result).toBeNull();
+    expect(result.passed).toBe(false);
+    expect(result.result).toBe("rejected_negative");
+    expect(result.rejectionKeyword).toBe("запчасти");
   });
 
   test("checks all negative keywords", async () => {
@@ -81,19 +84,19 @@ describe("matchMessage", () => {
     });
 
     // First negative keyword
-    expect(
-      await matchMessage(createMessage({ text: "iphone разбор" }), subscription)
-    ).toBeNull();
+    const result1 = await matchMessage(createMessage({ text: "iphone разбор" }), subscription);
+    expect(result1.passed).toBe(false);
+    expect(result1.result).toBe("rejected_negative");
 
     // Second negative keyword
-    expect(
-      await matchMessage(createMessage({ text: "iphone запчасти" }), subscription)
-    ).toBeNull();
+    const result2 = await matchMessage(createMessage({ text: "iphone запчасти" }), subscription);
+    expect(result2.passed).toBe(false);
+    expect(result2.result).toBe("rejected_negative");
 
     // Third negative keyword
-    expect(
-      await matchMessage(createMessage({ text: "iphone битый" }), subscription)
-    ).toBeNull();
+    const result3 = await matchMessage(createMessage({ text: "iphone битый" }), subscription);
+    expect(result3.passed).toBe(false);
+    expect(result3.result).toBe("rejected_negative");
   });
 
   test("negative keyword check is token-based (exact word match)", async () => {
@@ -104,9 +107,9 @@ describe("matchMessage", () => {
     });
 
     // "разбор" as separate word should block
-    expect(
-      await matchMessage(createMessage({ text: "iphone разбор кузова" }), subscription)
-    ).toBeNull();
+    const result = await matchMessage(createMessage({ text: "iphone разбор кузова" }), subscription);
+    expect(result.passed).toBe(false);
+    expect(result.result).toBe("rejected_negative");
 
     // "разборчивый" contains "разбор" but is different word - shouldn't block
     // Note: our tokenize normalizes and splits, so this depends on implementation
@@ -160,7 +163,8 @@ describe("matchMessage", () => {
       subscription,
       { ngramThreshold: 0.1 }
     );
-    expect(blocked).toBeNull();
+    expect(blocked.passed).toBe(false);
+    expect(blocked.result).toBe("rejected_negative");
   });
 
   test("handles empty negative keywords", async () => {
@@ -196,7 +200,7 @@ describe("matchMessage", () => {
     const highThreshold = await matchMessage(message, subscriptionNoQueryMatch, {
       ngramThreshold: 0.99,
     });
-    expect(highThreshold).toBeNull();
+    expect(highThreshold.passed).toBe(false);
 
     // Very low threshold should pass
     const lowThreshold = await matchMessage(message, subscription, {
@@ -248,7 +252,7 @@ describe("matchMessage", () => {
     });
 
     expect(result).not.toBeNull();
-    expect(result?.stage).toBe("query_fallback");
+    expect(result?.result).toBe("matched"); // query fallback is part of ngram stage
     expect(result?.passed).toBe(true);
   });
 
@@ -268,12 +272,13 @@ describe("matchMessage", () => {
     });
 
     // Neither ngram nor query_fallback should match
-    expect(result).toBeNull();
+    expect(result.passed).toBe(false);
+    expect(result.result).toBe("rejected_ngram");
   });
 });
 
 describe("matchMessageAgainstAll", () => {
-  test("returns empty array when no matches", async () => {
+  test("returns all analyses including rejections", async () => {
     const message = createMessage({ text: "random text" });
     const subscriptions = [
       createSubscription({
@@ -289,7 +294,12 @@ describe("matchMessageAgainstAll", () => {
     ];
 
     const results = await matchMessageAgainstAll(message, subscriptions);
-    expect(results).toEqual([]);
+    // Now returns all analyses (both rejected)
+    expect(results.length).toBe(2);
+    expect(results.every(r => r.passed === false)).toBe(true);
+    // Use getPassedMatches to filter only passed
+    const passed = getPassedMatches(results);
+    expect(passed).toEqual([]);
   });
 
   test("returns all matching subscriptions", async () => {
@@ -318,8 +328,12 @@ describe("matchMessageAgainstAll", () => {
       ngramThreshold: 0.1,
     });
 
-    expect(results.length).toBeGreaterThanOrEqual(2);
-    const ids = results.map((r) => r.subscription.id);
+    // Now returns ALL analyses
+    expect(results.length).toBe(3);
+    // Filter to get only passed
+    const passed = getPassedMatches(results);
+    expect(passed.length).toBeGreaterThanOrEqual(2);
+    const ids = passed.map((r) => r.subscription.id);
     expect(ids).toContain(1);
     expect(ids).toContain(2);
     expect(ids).not.toContain(3);
@@ -348,7 +362,7 @@ describe("matchMessageAgainstAll", () => {
 
     // Check that results are sorted by score descending
     for (let i = 1; i < results.length; i++) {
-      expect(results[i - 1]!.score).toBeGreaterThanOrEqual(results[i]!.score);
+      expect(results[i - 1]!.ngramScore ?? 0).toBeGreaterThanOrEqual(results[i]!.ngramScore ?? 0);
     }
   });
 
@@ -358,7 +372,7 @@ describe("matchMessageAgainstAll", () => {
     expect(results).toEqual([]);
   });
 
-  test("filters out subscriptions with negative keyword matches", async () => {
+  test("marks subscriptions with negative keyword matches as rejected", async () => {
     const message = createMessage({
       text: "продаю iphone pro max на запчасти",
     });
@@ -366,13 +380,13 @@ describe("matchMessageAgainstAll", () => {
       createSubscription({
         id: 1,
         positive_keywords: ["iphone", "продаю", "pro"],
-        negative_keywords: ["запчасти"], // Should be filtered
+        negative_keywords: ["запчасти"], // Should be rejected
         llm_description: "iPhone продаю pro",
       }),
       createSubscription({
         id: 2,
         positive_keywords: ["iphone", "продаю", "pro"],
-        negative_keywords: [], // Should match
+        negative_keywords: [], // Should pass
         llm_description: "iPhone продаю pro",
       }),
     ];
@@ -381,9 +395,14 @@ describe("matchMessageAgainstAll", () => {
       ngramThreshold: 0.1,
     });
 
-    const ids = results.map((r) => r.subscription.id);
-    expect(ids).not.toContain(1); // Filtered by negative keyword
-    expect(ids).toContain(2); // Passed
+    // Returns all analyses
+    expect(results.length).toBe(2);
+    // Check rejection status
+    const sub1 = results.find(r => r.subscription.id === 1);
+    const sub2 = results.find(r => r.subscription.id === 2);
+    expect(sub1?.passed).toBe(false);
+    expect(sub1?.result).toBe("rejected_negative");
+    expect(sub2?.passed).toBe(true);
   });
 
   test("applies config to all subscriptions", async () => {
@@ -401,16 +420,19 @@ describe("matchMessageAgainstAll", () => {
       }),
     ];
 
-    // With very high threshold, even good matches should fail
+    // With very high threshold, even good matches should fail (be rejected)
     const highThreshold = await matchMessageAgainstAll(message, subscriptions, {
       ngramThreshold: 0.99,
     });
-    expect(highThreshold).toEqual([]);
+    // Still returns analyses, but none passed
+    expect(highThreshold.length).toBe(2);
+    expect(getPassedMatches(highThreshold)).toEqual([]);
 
     const lowThreshold = await matchMessageAgainstAll(message, subscriptions, {
       ngramThreshold: 0.01,
     });
     expect(lowThreshold.length).toBe(2);
+    expect(getPassedMatches(lowThreshold).length).toBe(2);
   });
 
   test("real-world scenario: multiple subscription types", async () => {
@@ -437,8 +459,11 @@ describe("matchMessageAgainstAll", () => {
       ngramThreshold: 0.15,
     });
 
-    // Should match MacBook subscription
-    const ids = results.map((r) => r.subscription.id);
+    // Returns all analyses
+    expect(results.length).toBe(2);
+    // MacBook should match, iPhone should be rejected
+    const passed = getPassedMatches(results);
+    const ids = passed.map((r) => r.subscription.id);
     expect(ids).toContain(1);
     expect(ids).not.toContain(2); // iPhone/Apple/iOS not mentioned
   });

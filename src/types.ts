@@ -195,3 +195,51 @@ export interface Topic {
   title: string | null;
   updated_at: string;
 }
+
+// Analysis result for forward explanations
+export type AnalysisResult =
+  | "matched"
+  | "rejected_negative"
+  | "rejected_ngram"
+  | "rejected_semantic"
+  | "rejected_llm";
+
+// Detailed match analysis (returned by matchMessage instead of null)
+export interface MatchAnalysis {
+  subscription: Subscription;
+  result: AnalysisResult;
+  passed: boolean;
+
+  // Scores (filled if stage was executed)
+  ngramScore?: number;
+  semanticScore?: number;
+  llmConfidence?: number;
+
+  // On rejection
+  rejectionKeyword?: string;
+  llmReasoning?: string;
+}
+
+// Found post analysis record from DB
+export interface FoundPostAnalysis {
+  id: number;
+  subscription_id: number;
+  message_id: number;
+  group_id: number;
+  result: AnalysisResult;
+  ngram_score: number | null;
+  semantic_score: number | null;
+  llm_confidence: number | null;
+  rejection_keyword: string | null;
+  llm_reasoning: string | null;
+  analyzed_at: number; // unix timestamp
+  notified_at: number | null; // unix timestamp
+}
+
+// Forward info extracted from forwarded message
+export interface ForwardInfo {
+  chatId: number;
+  messageId: number | null;
+  chatTitle?: string;
+  date?: number; // unix timestamp from forward origin
+}

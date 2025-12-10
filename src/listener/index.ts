@@ -1,7 +1,7 @@
 import { TelegramClient, Message, ForumTopic } from "@mtcute/bun";
 import { tl } from "@mtcute/bun";
 import { queries } from "../db/index.ts";
-import { matchMessageAgainstAll, passesNgramFilter } from "../matcher/index.ts";
+import { matchMessageAgainstAll, getPassedMatches } from "../matcher/index.ts";
 import { verifyMatch } from "../llm/verify.ts";
 import { notifyUser } from "../bot/index.ts";
 import { listenerLog } from "../logger.ts";
@@ -396,15 +396,32 @@ async function processMessage(msg: Message): Promise<void> {
   const subscriptions = getSubscriptionsForGroup(incomingMsg.group_id);
   if (subscriptions.length === 0) return;
 
-  // Stage 1-2: N-gram + BGE-M3 semantic matching
-  const candidates = await matchMessageAgainstAll(incomingMsg, subscriptions);
+  // Stage 1-2: N-gram + BGE-M3 semantic matching (returns all results)
+  const allAnalyses = await matchMessageAgainstAll(incomingMsg, subscriptions);
+  const candidates = getPassedMatches(allAnalyses);
+
+  // Save rejected analyses immediately
+  for (const analysis of allAnalyses) {
+    if (!analysis.passed) {
+      queries.saveAnalysis({
+        subscriptionId: analysis.subscription.id,
+        messageId: incomingMsg.id,
+        groupId: incomingMsg.group_id,
+        result: analysis.result,
+        ngramScore: analysis.ngramScore,
+        semanticScore: analysis.semanticScore,
+        rejectionKeyword: analysis.rejectionKeyword,
+      });
+    }
+  }
+
   if (candidates.length === 0) return;
 
   listenerLog.info(
     {
       event: "candidates_found",
       count: candidates.length,
-      topScore: candidates[0]?.score.toFixed(3),
+      topScore: candidates[0]?.ngramScore?.toFixed(3),
       textPreview: incomingMsg.text.slice(0, 50),
     },
     "Candidates found"
@@ -415,7 +432,7 @@ async function processMessage(msg: Message): Promise<void> {
     const { subscription } = candidate;
 
     // Check deduplication
-    if (queries.isMessageMatched(subscription.id, incomingMsg.id, incomingMsg.group_id)) {
+    if (queries.isAnalysisMatched(subscription.id, incomingMsg.id, incomingMsg.group_id)) {
       listenerLog.debug(
         { subscriptionId: subscription.id, messageId: incomingMsg.id },
         "Duplicate skipped"
@@ -432,12 +449,26 @@ async function processMessage(msg: Message): Promise<void> {
             event: "llm_verified",
             subscriptionId: subscription.id,
             confidence: verification.confidence.toFixed(3),
-            ngramScore: candidate.score.toFixed(3),
+            ngramScore: candidate.ngramScore?.toFixed(3),
           },
           "Match verified"
         );
 
-        // Mark as matched
+        // Save analysis as matched
+        const notifiedAt = Math.floor(Date.now() / 1000);
+        queries.saveAnalysis({
+          subscriptionId: subscription.id,
+          messageId: incomingMsg.id,
+          groupId: incomingMsg.group_id,
+          result: "matched",
+          ngramScore: candidate.ngramScore,
+          semanticScore: candidate.semanticScore,
+          llmConfidence: verification.confidence,
+          llmReasoning: verification.reasoning,
+          notifiedAt,
+        });
+
+        // Also mark in old table for backward compatibility
         queries.markMessageMatched(subscription.id, incomingMsg.id, incomingMsg.group_id);
 
         // Save media to disk if present
@@ -473,6 +504,18 @@ async function processMessage(msg: Message): Promise<void> {
           );
         }
       } else {
+        // Save analysis as LLM rejected
+        queries.saveAnalysis({
+          subscriptionId: subscription.id,
+          messageId: incomingMsg.id,
+          groupId: incomingMsg.group_id,
+          result: "rejected_llm",
+          ngramScore: candidate.ngramScore,
+          semanticScore: candidate.semanticScore,
+          llmConfidence: verification.confidence,
+          llmReasoning: verification.reasoning,
+        });
+
         listenerLog.debug(
           {
             event: "llm_rejected",
@@ -485,11 +528,22 @@ async function processMessage(msg: Message): Promise<void> {
     } catch (error) {
       listenerLog.error({ err: error, subscriptionId: subscription.id }, "LLM verification failed");
       // On LLM error, skip verification and notify anyway if score is high enough
-      if (candidate.score > 0.7) {
+      if ((candidate.ngramScore ?? 0) > 0.7) {
         listenerLog.warn(
-          { subscriptionId: subscription.id, score: candidate.score.toFixed(3) },
+          { subscriptionId: subscription.id, score: candidate.ngramScore?.toFixed(3) },
           "Fallback: notifying due to high score"
         );
+
+        const notifiedAt = Math.floor(Date.now() / 1000);
+        queries.saveAnalysis({
+          subscriptionId: subscription.id,
+          messageId: incomingMsg.id,
+          groupId: incomingMsg.group_id,
+          result: "matched",
+          ngramScore: candidate.ngramScore,
+          semanticScore: candidate.semanticScore,
+          notifiedAt,
+        });
         queries.markMessageMatched(subscription.id, incomingMsg.id, incomingMsg.group_id);
 
         // Save media to disk if present
@@ -510,7 +564,7 @@ async function processMessage(msg: Message): Promise<void> {
             incomingMsg.sender_name,
             incomingMsg.sender_username,
             incomingMsg.media,
-            `Высокий скор совпадения: ${(candidate.score * 100).toFixed(0)}%`
+            `Высокий скор совпадения: ${((candidate.ngramScore ?? 0) * 100).toFixed(0)}%`
           );
         }
       }
@@ -915,7 +969,7 @@ export async function scanGroupHistory(
         listenerLog.info(
           {
             textPreview: incomingMsg.text.slice(0, 60),
-            score: topCandidate.score.toFixed(3),
+            score: (topCandidate.ngramScore ?? 0).toFixed(3),
           },
           "Candidate found"
         );
@@ -959,7 +1013,8 @@ export async function scanGroupHistory(
           }
         } catch (error) {
           // On LLM error, use score threshold
-          if (candidate.score > 0.7) {
+          const candidateScore = candidate.ngramScore ?? 0;
+          if (candidateScore > 0.7) {
             matchCount++;
             queries.markMessageMatched(subscription.id, incomingMsg.id, incomingMsg.group_id);
 
@@ -980,7 +1035,7 @@ export async function scanGroupHistory(
                 incomingMsg.sender_name,
                 incomingMsg.sender_username,
                 incomingMsg.media,
-                `Высокий скор совпадения: ${(candidate.score * 100).toFixed(0)}%`
+                `Высокий скор совпадения: ${(candidateScore * 100).toFixed(0)}%`
               );
             }
           }
@@ -1097,7 +1152,7 @@ export async function scanFromCache(
         ngramCandidates.push({
           msg,
           incomingMsg,
-          score: topCandidate.score,
+          score: topCandidate.ngramScore ?? 0,
         });
       }
     }
