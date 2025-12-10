@@ -304,6 +304,17 @@ export const userMachine = setup({
 
     /** Save the original query before analysis */
     saveQuery: assign(actions.saveQuery),
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PENDING QUERY ACTIONS
+    // For addgroup-first flow when user has no groups yet
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /** Save user's query when they don't have groups */
+    savePendingQuery: assign(actions.savePendingQuery),
+
+    /** Clear the pending query after processing */
+    clearPendingQuery: assign(actions.clearPendingQuery),
   },
 }).createMachine({
   /**
@@ -362,6 +373,22 @@ export const userMachine = setup({
      */
     SAVE_QUERY: {
       actions: "saveQuery",
+    },
+
+    /**
+     * Save user's query when they don't have groups yet.
+     * Query will be processed after addgroup flow completes.
+     */
+    SAVE_PENDING_QUERY: {
+      actions: "savePendingQuery",
+    },
+
+    /**
+     * Clear the saved pending query.
+     * Called after query has been processed or user cancels.
+     */
+    CLEAR_PENDING_QUERY: {
+      actions: "clearPendingQuery",
     },
   },
 

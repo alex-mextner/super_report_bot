@@ -653,6 +653,131 @@ async function addGroupForUser(
   }
 }
 
+// Helper: process new subscription query
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function processSubscriptionQuery(context: any, userId: number, query: string): Promise<void> {
+  const mode = queries.getUserMode(userId);
+
+  if (mode === "normal") {
+    // Normal mode: analyze query first, ask clarification if needed
+    // Save query for recovery before starting LLM call
+    send(userId, { type: "SAVE_QUERY", query });
+
+    await context.send("Анализирую запрос...");
+
+    try {
+      const analysis = await runWithRecovery(
+        userId,
+        "GENERATE_QUESTIONS",
+        undefined,
+        () => analyzeQueryAndGenerateQuestions(query)
+      );
+
+      if (analysis.needsClarification && analysis.questions.length > 0) {
+        // Need clarification — show questions
+        botLog.debug({ userId, questionsCount: analysis.questions.length }, "Normal mode: asking clarification");
+
+        send(userId, {
+          type: "START_CLARIFICATION",
+          data: {
+            originalQuery: query,
+            questions: analysis.questions,
+            answers: [],
+            currentIndex: 0,
+          },
+        });
+
+        // Debug: verify state changed
+        const newState = fsmState(userId);
+        const newCtx = ctx(userId);
+        botLog.debug(
+          { userId, newState, hasClarification: !!newCtx.clarification },
+          "After START_CLARIFICATION"
+        );
+
+        const firstQuestion = analysis.questions[0]!;
+        const questionNumber = `(1/${analysis.questions.length})`;
+        await context.send(format`${bold("Уточняющий вопрос")} ${questionNumber}\n\n${firstQuestion}`, {
+          reply_markup: skipQuestionKeyboard(),
+        });
+        return;
+      }
+    } catch (error) {
+      botLog.error({ err: error, userId }, "Query analysis failed, skipping clarification");
+      // Continue without clarification
+    }
+
+    // No clarification needed — go to draft keywords + rating
+    let draftKeywords: string[];
+    try {
+      draftKeywords = await runWithRecovery(
+        userId,
+        "GENERATE_KEYWORDS",
+        undefined,
+        () => generateDraftKeywords(query)
+      );
+    } catch (error) {
+      botLog.error({ err: error, userId }, "Draft keywords generation failed");
+      draftKeywords = generateKeywordsFallback(query).positive_keywords;
+    }
+
+    await startRatingFlow(context, userId, query, draftKeywords);
+  } else {
+    // Advanced mode: start with clarification questions
+    // Save query for recovery before starting LLM call
+    send(userId, { type: "SAVE_QUERY", query });
+
+    await context.send("Генерирую уточняющие вопросы...");
+
+    let questions: string[];
+    try {
+      questions = await runWithRecovery(
+        userId,
+        "GENERATE_QUESTIONS",
+        undefined,
+        () => generateClarificationQuestions(query)
+      );
+    } catch (error) {
+      botLog.error({ err: error, userId }, "LLM clarification generation failed");
+      // Fallback: skip clarification, go to draft keywords + rating
+      await context.send("Не удалось сгенерировать вопросы, перехожу к примерам...");
+
+      let draftKeywords: string[];
+      try {
+        draftKeywords = await runWithRecovery(
+          userId,
+          "GENERATE_KEYWORDS",
+          undefined,
+          () => generateDraftKeywords(query)
+        );
+      } catch {
+        draftKeywords = generateKeywordsFallback(query).positive_keywords;
+      }
+
+      await startRatingFlow(context, userId, query, draftKeywords);
+      return;
+    }
+
+    // Save clarification state
+    send(userId, {
+      type: "START_CLARIFICATION",
+      data: {
+        originalQuery: query,
+        questions,
+        answers: [],
+        currentIndex: 0,
+      },
+    });
+
+    // Send first question
+    const firstQuestion = questions[0] ?? "Какие конкретные характеристики важны?";
+    const questionNumber = `(1/${questions.length})`;
+    await context.send(format`${bold("Уточняющий вопрос")} ${questionNumber}\n\n${firstQuestion}`, {
+      reply_markup: skipQuestionKeyboard(),
+    });
+  }
+}
+
 // Handle text messages (new subscription requests)
 bot.on("message", async (context) => {
   if (!context.text || context.text.startsWith("/")) return;
@@ -713,12 +838,27 @@ bot.on("message", async (context) => {
 
   // Handle "Готово" button in adding_group state
   if (text === "Готово" && currentState === "addingGroup") {
+    const pendingQuery = c.pendingQuery;
     send(userId, { type: "DONE_ADDING_GROUPS" });
+
+    // Clear pending query if it exists
+    if (pendingQuery) {
+      send(userId, { type: "CLEAR_PENDING_QUERY" });
+    }
+
     const groups = queries.getUserGroups(userId);
     if (groups.length > 0) {
-      await context.send(`Добавлено групп: ${groups.length}. Теперь отправь описание того, что ищешь.`, {
-        reply_markup: { remove_keyboard: true },
-      });
+      // If there was a pending query, process it automatically
+      if (pendingQuery) {
+        await context.send(`Добавлено групп: ${groups.length}. Обрабатываю твой запрос...`, {
+          reply_markup: { remove_keyboard: true },
+        });
+        await processSubscriptionQuery(context, userId, pendingQuery);
+      } else {
+        await context.send(`Добавлено групп: ${groups.length}. Теперь отправь описание того, что ищешь.`, {
+          reply_markup: { remove_keyboard: true },
+        });
+      }
     } else {
       await context.send("Группы не добавлены. Используй /addgroup когда будешь готов.", {
         reply_markup: { remove_keyboard: true },
@@ -1252,131 +1392,27 @@ ${bold("ИИ:")} ${result.summary}
     return;
   }
 
-  // New subscription request — check mode and start appropriate flow
+  // New subscription request — start appropriate flow
   const query = context.text;
-  const mode = queries.getUserMode(userId);
 
   // Reset FSM to idle if stuck in another state (e.g. from previous session)
   ensureIdle(userId);
 
-  if (mode === "normal") {
-    // Normal mode: analyze query first, ask clarification if needed
-    // Save query for recovery before starting LLM call
-    send(userId, { type: "SAVE_QUERY", query });
-
-    await context.send("Анализирую запрос...");
-
-    try {
-      const analysis = await runWithRecovery(
-        userId,
-        "GENERATE_QUESTIONS",
-        undefined,
-        () => analyzeQueryAndGenerateQuestions(query)
-      );
-
-      if (analysis.needsClarification && analysis.questions.length > 0) {
-        // Need clarification — show questions
-        botLog.debug({ userId, questionsCount: analysis.questions.length }, "Normal mode: asking clarification");
-
-        send(userId, {
-          type: "START_CLARIFICATION",
-          data: {
-            originalQuery: query,
-            questions: analysis.questions,
-            answers: [],
-            currentIndex: 0,
-          },
-        });
-
-        // Debug: verify state changed
-        const newState = fsmState(userId);
-        const newCtx = ctx(userId);
-        botLog.debug(
-          { userId, newState, hasClarification: !!newCtx.clarification },
-          "After START_CLARIFICATION"
-        );
-
-        const firstQuestion = analysis.questions[0]!
-        const questionNumber = `(1/${analysis.questions.length})`;
-        await context.send(format`${bold("Уточняющий вопрос")} ${questionNumber}\n\n${firstQuestion}`, {
-          reply_markup: skipQuestionKeyboard(),
-        });
-        return;
-      }
-    } catch (error) {
-      botLog.error({ err: error, userId }, "Query analysis failed, skipping clarification");
-      // Continue without clarification
-    }
-
-    // No clarification needed — go to draft keywords + rating
-    let draftKeywords: string[];
-    try {
-      draftKeywords = await runWithRecovery(
-        userId,
-        "GENERATE_KEYWORDS",
-        undefined,
-        () => generateDraftKeywords(query)
-      );
-    } catch (error) {
-      botLog.error({ err: error, userId }, "Draft keywords generation failed");
-      draftKeywords = generateKeywordsFallback(query).positive_keywords;
-    }
-
-    await startRatingFlow(context, userId, query, draftKeywords);
-  } else {
-    // Advanced mode: start with clarification questions
-    // Save query for recovery before starting LLM call
-    send(userId, { type: "SAVE_QUERY", query });
-
-    await context.send("Генерирую уточняющие вопросы...");
-
-    let questions: string[];
-    try {
-      questions = await runWithRecovery(
-        userId,
-        "GENERATE_QUESTIONS",
-        undefined,
-        () => generateClarificationQuestions(query)
-      );
-    } catch (error) {
-      botLog.error({ err: error, userId }, "LLM clarification generation failed");
-      // Fallback: skip clarification, go to draft keywords + rating
-      await context.send("Не удалось сгенерировать вопросы, перехожу к примерам...");
-
-      let draftKeywords: string[];
-      try {
-        draftKeywords = await runWithRecovery(
-          userId,
-          "GENERATE_KEYWORDS",
-          undefined,
-          () => generateDraftKeywords(query)
-        );
-      } catch {
-        draftKeywords = generateKeywordsFallback(query).positive_keywords;
-      }
-
-      await startRatingFlow(context, userId, query, draftKeywords);
-      return;
-    }
-
-    // Save clarification state
-    send(userId, {
-      type: "START_CLARIFICATION",
-      data: {
-        originalQuery: query,
-        questions,
-        answers: [],
-        currentIndex: 0,
-      },
-    });
-
-    // Send first question
-    const firstQuestion = questions[0] ?? "Какие конкретные характеристики важны?";
-    const questionNumber = `(1/${questions.length})`;
-    await context.send(format`${bold("Уточняющий вопрос")} ${questionNumber}\n\n${firstQuestion}`, {
-      reply_markup: skipQuestionKeyboard(),
-    });
+  // Check if user has any groups to monitor
+  const userGroups = queries.getUserGroups(userId);
+  if (userGroups.length === 0) {
+    // No groups - save query and redirect to addgroup flow
+    send(userId, { type: "SAVE_PENDING_QUERY", query });
+    send(userId, { type: "ADDGROUP" });
+    await context.send(
+      "Сначала нужно добавить хотя бы одну группу для мониторинга.\n\nВыбери группу:",
+      { reply_markup: groupPickerKeyboard(nextRequestId()) }
+    );
+    return;
   }
+
+  // Process the subscription query
+  await processSubscriptionQuery(context, userId, query);
 });
 
 // Handle callback queries (button clicks)

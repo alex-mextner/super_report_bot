@@ -460,4 +460,24 @@ export type BotEvent =
    *
    * This allows recovery to retry the analysis if bot restarts mid-operation.
    */
-  | { type: "SAVE_QUERY"; query: string };
+  | { type: "SAVE_QUERY"; query: string }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //                    PENDING QUERY EVENTS
+  //
+  //       For addgroup-first flow when user has no groups yet
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Save user's query when they don't have groups yet.
+   *
+   * The query will be processed after user adds groups via /addgroup flow.
+   */
+  | { type: "SAVE_PENDING_QUERY"; query: string }
+
+  /**
+   * Clear the saved pending query.
+   *
+   * Called after the query has been processed or when user cancels.
+   */
+  | { type: "CLEAR_PENDING_QUERY" };

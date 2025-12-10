@@ -434,6 +434,16 @@ export interface BotContext {
   pendingAiCorrection: AiCorrectionData | null;
 
   // ═══════════════════════════════════════════════════════════════════════════
+  //                    PENDING QUERY (for addgroup-first flow)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * User's query saved when they try to create subscription without groups.
+   * After adding groups via /addgroup flow, this query will be processed.
+   */
+  pendingQuery: string | null;
+
+  // ═══════════════════════════════════════════════════════════════════════════
   //                    OPERATION RECOVERY
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -486,6 +496,9 @@ export function createInitialContext(
 
     // AI correction - no session
     pendingAiCorrection: null,
+
+    // Pending query - no saved query
+    pendingQuery: null,
 
     // Operation recovery - no pending operation
     pendingOperation: null,

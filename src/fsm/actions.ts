@@ -728,3 +728,34 @@ export const saveQuery = {
     return context.pendingSub;
   },
 };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//                      PENDING QUERY ACTIONS
+//
+//       For saving user's query when they try to create subscription
+//       without having any groups. Query is processed after addgroup flow.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Save the user's query when they don't have groups yet.
+ *
+ * When user sends a subscription query but has no groups to monitor,
+ * we save the query and redirect them to add groups first.
+ * After they add groups, we'll process this saved query.
+ */
+export const savePendingQuery = {
+  pendingQuery: ({ event }: { event: BotEvent }) => {
+    if (event.type === "SAVE_PENDING_QUERY") return event.query;
+    return null;
+  },
+};
+
+/**
+ * Clear the pending query after it's been processed.
+ *
+ * Called after the query has been processed (either successfully
+ * or when user cancels the flow).
+ */
+export const clearPendingQuery = {
+  pendingQuery: () => null as BotContext["pendingQuery"],
+};
