@@ -79,6 +79,16 @@ CREATE TABLE IF NOT EXISTS subscription_groups (
   UNIQUE(subscription_id, group_id)
 );
 
+-- Groups metadata (country, marketplace flag, etc.)
+CREATE TABLE IF NOT EXISTS groups (
+  telegram_id INTEGER PRIMARY KEY,
+  title TEXT,
+  country TEXT,              -- ISO 3166-1 alpha-2: 'RS', 'RU', 'AM', etc.
+  city TEXT,                 -- 'Belgrade', 'Moscow', 'Yerevan'
+  is_marketplace INTEGER DEFAULT 0,  -- 1 = marketplace/flea market
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 -- User groups (groups added by user for monitoring, userbot joins these)
 CREATE TABLE IF NOT EXISTS user_groups (
   id INTEGER PRIMARY KEY,

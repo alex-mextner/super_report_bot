@@ -129,10 +129,16 @@ export function groupsKeyboard(
 ): InlineKeyboard {
   const kb = new InlineKeyboard();
 
+  // DEBUG: Log keyboard generation
+  console.log("[groupsKeyboard] Generating keyboard for groups:", groups.map(g => ({ id: g.id, title: g.title })));
+
   for (const group of groups) {
     const isSelected = selectedIds.has(group.id);
     const label = isSelected ? `✅ ${group.title}` : group.title;
-    kb.text(label, JSON.stringify({ action: "toggle_group", id: group.id }));
+    const callbackData = JSON.stringify({ action: "toggle_group", id: group.id });
+    // DEBUG: Log each button
+    console.log(`[groupsKeyboard] Button: "${label}" -> callback_data: ${callbackData}`);
+    kb.text(label, callbackData);
     kb.row();
   }
 

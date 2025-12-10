@@ -2340,6 +2340,13 @@ ${bold("Исключения:")} ${code(exclusionsText)}
     }
 
     case "toggle_group": {
+      // DEBUG: Log what we receive
+      botLog.debug({
+        rawCallbackData: context.data,
+        parsedData: data,
+        availableGroups: c.availableGroups.map((g) => ({ id: g.id, title: g.title })),
+      }, "toggle_group: received callback");
+
       if (currentState !== "selectingGroups" || c.availableGroups.length === 0) {
         await context.answer({ text: "Сессия истекла" });
         return;
