@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAdminSubscriptions } from "../hooks/useAdminSubscriptions";
+import { useAdminGroups, type AvailableGroup } from "../hooks/useAdminGroups";
 import type { AdminSubscription, SubscriptionGroup } from "../types";
 import "./AdminPage.css";
 
@@ -83,24 +84,25 @@ function KeywordEditor({ keywords, type, onChange }: KeywordEditorProps) {
 
 interface GroupEditorProps {
   groups: SubscriptionGroup[];
+  availableGroups: AvailableGroup[];
   onChange: (groups: SubscriptionGroup[]) => void;
 }
 
-function GroupEditor({ groups, onChange }: GroupEditorProps) {
-  const [newGroupId, setNewGroupId] = useState("");
-  const [newGroupTitle, setNewGroupTitle] = useState("");
+function GroupEditor({ groups, availableGroups, onChange }: GroupEditorProps) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const selectedIds = new Set(groups.map((g) => g.id));
+
+  const handleToggle = (group: AvailableGroup) => {
+    if (selectedIds.has(group.id)) {
+      onChange(groups.filter((g) => g.id !== group.id));
+    } else {
+      onChange([...groups, { id: group.id, title: group.title || `#${group.id}` }]);
+    }
+  };
 
   const handleRemove = (id: number) => {
     onChange(groups.filter((g) => g.id !== id));
-  };
-
-  const handleAdd = () => {
-    const id = Number(newGroupId);
-    if (id && newGroupTitle.trim() && !groups.some((g) => g.id === id)) {
-      onChange([...groups, { id, title: newGroupTitle.trim() }]);
-      setNewGroupId("");
-      setNewGroupTitle("");
-    }
   };
 
   return (
@@ -116,28 +118,28 @@ function GroupEditor({ groups, onChange }: GroupEditorProps) {
         ))}
         {groups.length === 0 && <span className="no-groups">Нет групп</span>}
       </div>
-      <div className="group-input-row">
-        <input
-          type="number"
-          value={newGroupId}
-          onChange={(e) => setNewGroupId(e.target.value)}
-          placeholder="ID группы"
-          className="group-id-input"
-        />
-        <input
-          type="text"
-          value={newGroupTitle}
-          onChange={(e) => setNewGroupTitle(e.target.value)}
-          placeholder="Название"
-          className="group-title-input"
-        />
-        <button
-          onClick={handleAdd}
-          className="group-add-btn"
-          disabled={!newGroupId || !newGroupTitle.trim()}
-        >
-          +
+      <div className="group-selector">
+        <button className="group-dropdown-btn" onClick={() => setIsOpen(!isOpen)}>
+          {isOpen ? "Скрыть список" : "Выбрать группы"}
         </button>
+        {isOpen && (
+          <div className="group-dropdown">
+            {availableGroups.length === 0 ? (
+              <div className="group-dropdown-empty">Нет доступных групп</div>
+            ) : (
+              availableGroups.map((g) => (
+                <label key={g.id} className="group-checkbox-item">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(g.id)}
+                    onChange={() => handleToggle(g)}
+                  />
+                  <span>{g.title || `#${g.id}`}</span>
+                </label>
+              ))
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -145,11 +147,12 @@ function GroupEditor({ groups, onChange }: GroupEditorProps) {
 
 interface SubscriptionRowProps {
   sub: AdminSubscription;
+  availableGroups: AvailableGroup[];
   onUpdateKeywords: (id: number, positive: string[], negative: string[]) => Promise<boolean>;
   onUpdateGroups: (id: number, groups: SubscriptionGroup[]) => Promise<boolean>;
 }
 
-function SubscriptionRow({ sub, onUpdateKeywords, onUpdateGroups }: SubscriptionRowProps) {
+function SubscriptionRow({ sub, availableGroups, onUpdateKeywords, onUpdateGroups }: SubscriptionRowProps) {
   const [expanded, setExpanded] = useState(false);
   const [positive, setPositive] = useState(sub.positive_keywords);
   const [negative, setNegative] = useState(sub.negative_keywords);
@@ -234,7 +237,7 @@ function SubscriptionRow({ sub, onUpdateKeywords, onUpdateGroups }: Subscription
 
           <div className="editor-section">
             <div className="editor-label">Группы</div>
-            <GroupEditor groups={groups} onChange={setGroups} />
+            <GroupEditor groups={groups} availableGroups={availableGroups} onChange={setGroups} />
           </div>
 
           {hasChanges && (
@@ -255,13 +258,14 @@ function SubscriptionRow({ sub, onUpdateKeywords, onUpdateGroups }: Subscription
 
 export function AdminPage() {
   const { subscriptions, loading, error, updateKeywords, updateGroups } = useAdminSubscriptions();
+  const { groups: availableGroups, loading: groupsLoading, error: groupsError } = useAdminGroups();
 
-  if (loading) {
+  if (loading || groupsLoading) {
     return <div className="admin-page loading">Загрузка...</div>;
   }
 
-  if (error) {
-    return <div className="admin-page error">{error}</div>;
+  if (error || groupsError) {
+    return <div className="admin-page error">{error || groupsError}</div>;
   }
 
   const activeCount = subscriptions.filter((s) => s.is_active).length;
@@ -282,6 +286,7 @@ export function AdminPage() {
           <SubscriptionRow
             key={sub.id}
             sub={sub}
+            availableGroups={availableGroups}
             onUpdateKeywords={updateKeywords}
             onUpdateGroups={updateGroups}
           />

@@ -288,51 +288,74 @@
   font-style: italic;
 }
 
-.group-input-row {
+.group-selector {
   display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
-.group-id-input {
-  width: 100px;
+.group-dropdown-btn {
   padding: 8px 12px;
   border: 1px solid var(--tg-theme-hint-color, #ddd);
   border-radius: 8px;
-  font-size: 14px;
   background: var(--tg-theme-bg-color, #fff);
-  color: var(--tg-theme-text-color, #000);
+  color: var(--tg-theme-link-color, #007aff);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
 }
 
-.group-title-input {
-  flex: 1;
-  padding: 8px 12px;
+.group-dropdown-btn:hover {
+  background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+}
+
+.group-dropdown {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
   border: 1px solid var(--tg-theme-hint-color, #ddd);
   border-radius: 8px;
-  font-size: 14px;
   background: var(--tg-theme-bg-color, #fff);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.group-dropdown-empty {
+  font-size: 13px;
+  color: var(--tg-theme-hint-color, #999);
+  font-style: italic;
+  padding: 8px;
+  text-align: center;
+}
+
+.group-checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
   color: var(--tg-theme-text-color, #000);
 }
 
-.group-id-input:focus,
-.group-title-input:focus {
-  outline: none;
-  border-color: var(--tg-theme-link-color, #007aff);
+.group-checkbox-item:hover {
+  background: var(--tg-theme-secondary-bg-color, #f5f5f5);
 }
 
-.group-add-btn {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 8px;
-  background: var(--tg-theme-button-color, #007aff);
-  color: var(--tg-theme-button-text-color, #fff);
-  font-size: 16px;
-  font-weight: 600;
+.group-checkbox-item input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
   cursor: pointer;
 }
 
-.group-add-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.group-checkbox-item span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Editor actions */

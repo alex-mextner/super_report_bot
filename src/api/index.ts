@@ -298,6 +298,16 @@ api.get("/subscriptions/:id/groups", (c) => {
 
 // === Admin API ===
 
+// GET /api/admin/groups - all available groups from DB (admin only)
+api.get("/admin/groups", (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const groups = queries.getAllGroups();
+  return c.json({ items: groups });
+});
+
 // GET /api/admin/subscriptions - all subscriptions (admin only)
 api.get("/admin/subscriptions", (c) => {
   if (!c.get("isAdmin")) {

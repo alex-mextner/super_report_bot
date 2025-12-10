@@ -84,6 +84,11 @@ const stmts = {
   ),
   removeGroup: db.prepare<void, [number]>("DELETE FROM monitored_groups WHERE telegram_id = ?"),
 
+  // All unique groups from user_groups
+  getAllGroups: db.prepare<{ group_id: number; group_title: string }, []>(
+    `SELECT DISTINCT group_id, group_title FROM user_groups ORDER BY group_title`
+  ),
+
   // Matched messages (deduplication) - DEPRECATED, use found_posts_analyzes
   isMessageMatched: db.prepare<{ found: number }, [number, number, number]>(
     `SELECT 1 as found FROM matched_messages
@@ -414,6 +419,13 @@ export const queries = {
   // Groups
   getMonitoredGroups(): MonitoredGroup[] {
     return stmts.getMonitoredGroups.all();
+  },
+
+  getAllGroups(): Array<{ id: number; title: string }> {
+    return stmts.getAllGroups.all().map((g) => ({
+      id: g.group_id,
+      title: g.group_title,
+    }));
   },
 
   addGroup(telegramId: number, title: string): void {

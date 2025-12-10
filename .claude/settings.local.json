@@ -10,7 +10,8 @@
       "Bash(/Users/ultra/.bun/bin/bun test:*)",
       "Bash(grep:*)",
       "Bash(find:*)",
-      "Bash(git show:*)"
+      "Bash(git show:*)",
+      "Bash(/Users/ultra/.bun/bin/bun:*)"
     ],
     "deny": [],
     "ask": []
