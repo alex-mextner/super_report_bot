@@ -56,6 +56,7 @@ import {
   invalidateSubscriptionsCache,
   isUserbotMember,
   ensureUserbotInGroup,
+  joinGroupByUserbot,
   scanFromCache,
 } from "../listener/index.ts";
 import { handleForward, analyzeForwardedMessage } from "./forward.ts";
@@ -526,11 +527,34 @@ bot.command("addgroup", async (context) => {
   queries.getOrCreateUser(userId, context.from?.firstName, context.from?.username);
   ensureIdle(userId);
 
-  send(userId, { type: "ADDGROUP" });
+  // Check for links in command arguments
+  const args = context.text?.replace(/^\/addgroup(@\w+)?\s*/i, "").trim() || "";
+  const links = parseTelegramLinks(args);
 
-  await context.send("Выбери группу или канал для добавления:", {
-    reply_markup: groupPickerKeyboard(nextRequestId()),
-  });
+  if (links.length === 0) {
+    // No links provided — show interactive picker
+    send(userId, { type: "ADDGROUP" });
+    await context.send("Выбери группу или канал для добавления:", {
+      reply_markup: groupPickerKeyboard(nextRequestId()),
+    });
+    return;
+  }
+
+  // Process links
+  await context.send(`Добавляю ${links.length} группу(ы)...`);
+
+  const results: string[] = [];
+  for (const link of links) {
+    const result = await addGroupByLink(userId, link);
+    const displayValue = link.type === "username" ? link.value : link.value;
+    if (result.success) {
+      results.push(`✅ ${result.title}`);
+    } else {
+      results.push(`❌ ${displayValue}: ${result.error}`);
+    }
+  }
+
+  await context.send(results.join("\n"));
 });
 
 // /groups command - list user's groups
@@ -615,6 +639,68 @@ bot.on("chat_shared", async (context) => {
   // Try to join and add
   await addGroupForUser(context, userId, newGroup);
 });
+
+// Parse Telegram group/channel links from text
+type ParsedLink = { type: "username" | "invite"; value: string };
+
+function parseTelegramLinks(text: string): ParsedLink[] {
+  const results: ParsedLink[] = [];
+  const seen = new Set<string>();
+
+  // Invite links: t.me/+hash or t.me/joinchat/hash
+  const inviteRegex = /(?:https?:\/\/)?t\.me\/(\+|joinchat\/)([a-zA-Z0-9_-]+)/gi;
+  let match;
+  while ((match = inviteRegex.exec(text)) !== null) {
+    const prefix = match[1];
+    const hash = match[2];
+    if (!prefix || !hash) continue;
+    const link = `t.me/${prefix}${hash}`;
+    if (!seen.has(link)) {
+      seen.add(link);
+      results.push({ type: "invite", value: link });
+    }
+  }
+
+  // Public usernames: t.me/username (not starting with + or joinchat/)
+  const usernameRegex = /(?:https?:\/\/)?t\.me\/([a-zA-Z][a-zA-Z0-9_]{3,})/gi;
+  while ((match = usernameRegex.exec(text)) !== null) {
+    const username = match[1]?.toLowerCase();
+    if (!username) continue;
+    // Skip if it was already matched as invite link
+    if (username === "joinchat") continue;
+    if (!seen.has(username)) {
+      seen.add(username);
+      results.push({ type: "username", value: `@${username}` });
+    }
+  }
+
+  return results;
+}
+
+// Add group by link (join userbot, save to DB)
+async function addGroupByLink(
+  userId: number,
+  link: ParsedLink
+): Promise<{ success: true; title: string } | { success: false; error: string }> {
+  // Check for duplicate by trying to resolve the link
+  const joinResult = await joinGroupByUserbot(
+    link.type === "username" ? link.value : `https://${link.value}`
+  );
+
+  if (!joinResult.success) {
+    return { success: false, error: joinResult.error };
+  }
+
+  // Check if already added
+  if (queries.hasUserGroup(userId, joinResult.chatId)) {
+    return { success: false, error: "Уже добавлена" };
+  }
+
+  // Save to DB (isChannel = false by default, we can't easily detect this from link)
+  queries.addUserGroup(userId, joinResult.chatId, joinResult.title, false);
+
+  return { success: true, title: joinResult.title };
+}
 
 // Helper to show add group prompt
 async function showAddGroupPrompt(
