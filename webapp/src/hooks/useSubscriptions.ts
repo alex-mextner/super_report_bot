@@ -38,11 +38,37 @@ export function useSubscriptions() {
     }
   }, []);
 
+  const updateKeywords = useCallback(
+    async (id: number, positive: string[], negative: string[]) => {
+      try {
+        await apiClient(`/api/subscriptions/${id}/keywords`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ positive, negative }),
+        });
+        // Update local state
+        setSubscriptions((prev) =>
+          prev.map((sub) =>
+            sub.id === id
+              ? { ...sub, positive_keywords: positive, negative_keywords: negative }
+              : sub
+          )
+        );
+        return true;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to update keywords");
+        return false;
+      }
+    },
+    []
+  );
+
   return {
     subscriptions,
     loading,
     error,
     refetch: fetchSubscriptions,
     deleteSubscription,
+    updateKeywords,
   };
 }

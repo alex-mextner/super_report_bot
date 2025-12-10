@@ -18,17 +18,24 @@
   font-weight: 500;
   color: var(--tg-theme-text-color, #000);
   word-break: break-word;
+  flex: 1;
 }
 
-.subscription-delete {
+.subscription-actions {
+  display: flex;
+  gap: 8px;
   flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
+}
+
+.subscription-edit,
+.subscription-delete {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   border: none;
   background: var(--tg-theme-secondary-bg-color, #f5f5f5);
   color: var(--tg-theme-hint-color, #999);
-  font-size: 18px;
+  font-size: 16px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -36,11 +43,17 @@
   transition: background 0.2s, color 0.2s;
 }
 
+.subscription-edit:hover {
+  background: #e0f2fe;
+  color: #0284c7;
+}
+
 .subscription-delete:hover {
   background: #fee2e2;
   color: #ef4444;
 }
 
+.subscription-edit:disabled,
 .subscription-delete:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -61,50 +74,58 @@
   color: #fff;
 }
 
-.subscription-keywords {
-  margin-bottom: 10px;
+.subscription-edit-section {
+  margin-bottom: 12px;
 }
 
-.keywords-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 6px;
+.edit-field {
+  margin-bottom: 12px;
 }
 
-.keywords-row:last-child {
-  margin-bottom: 0;
-}
-
-.keywords-label {
-  flex-shrink: 0;
-  width: 16px;
-  font-size: 14px;
+.edit-label {
+  font-size: 12px;
   font-weight: 600;
   color: var(--tg-theme-hint-color, #999);
+  margin-bottom: 6px;
+  text-transform: uppercase;
 }
 
-.keywords-list {
+.edit-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  gap: 8px;
+  margin-top: 12px;
 }
 
-.keyword-badge {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-weight: 500;
+.save-btn {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  border-radius: 8px;
+  background: #16a34a;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
-.keywords-list.positive .keyword-badge {
-  background: #dcfce7;
-  color: #16a34a;
+.save-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
-.keywords-list.negative .keyword-badge {
-  background: #fee2e2;
-  color: #ef4444;
+.cancel-btn {
+  padding: 10px 16px;
+  border: 1px solid var(--tg-theme-hint-color, #ddd);
+  border-radius: 8px;
+  background: var(--tg-theme-bg-color, #fff);
+  color: var(--tg-theme-text-color, #000);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.cancel-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .subscription-description {
@@ -112,4 +133,5 @@
   line-height: 1.4;
   color: var(--tg-theme-hint-color, #999);
   font-style: italic;
+  margin-top: 10px;
 }

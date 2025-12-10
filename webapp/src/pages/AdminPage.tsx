@@ -1,6 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAdminSubscriptions } from "../hooks/useAdminSubscriptions";
 import { useAdminGroups, type AvailableGroup } from "../hooks/useAdminGroups";
+import { useTelegram } from "../hooks/useTelegram";
+import { KeywordsDisplay } from "../components/KeywordsDisplay";
+import { KeywordEditor } from "../components/KeywordEditor";
 import type { AdminSubscription, SubscriptionGroup } from "../types";
 import "./AdminPage.css";
 
@@ -23,63 +27,6 @@ function formatUser(sub: AdminSubscription): string {
     return `@${sub.username}`;
   }
   return `#${sub.telegram_id}`;
-}
-
-interface KeywordEditorProps {
-  keywords: string[];
-  type: "positive" | "negative";
-  onChange: (keywords: string[]) => void;
-}
-
-function KeywordEditor({ keywords, type, onChange }: KeywordEditorProps) {
-  const [newKeyword, setNewKeyword] = useState("");
-
-  const handleAdd = () => {
-    const kw = newKeyword.trim().toLowerCase();
-    if (kw && !keywords.includes(kw)) {
-      onChange([...keywords, kw]);
-      setNewKeyword("");
-    }
-  };
-
-  const handleRemove = (kw: string) => {
-    onChange(keywords.filter((k) => k !== kw));
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      handleAdd();
-    }
-  };
-
-  return (
-    <div className="keyword-editor">
-      <div className="keyword-list">
-        {keywords.map((kw) => (
-          <span key={kw} className={`keyword-tag ${type}`}>
-            {kw}
-            <button className="keyword-remove" onClick={() => handleRemove(kw)}>
-              ×
-            </button>
-          </span>
-        ))}
-      </div>
-      <div className="keyword-input-row">
-        <input
-          type="text"
-          value={newKeyword}
-          onChange={(e) => setNewKeyword(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={type === "positive" ? "Добавить ключевое слово..." : "Добавить исключение..."}
-          className="keyword-input"
-        />
-        <button onClick={handleAdd} className="keyword-add-btn" disabled={!newKeyword.trim()}>
-          +
-        </button>
-      </div>
-    </div>
-  );
 }
 
 interface GroupEditorProps {
@@ -197,30 +144,11 @@ function SubscriptionRow({ sub, availableGroups, onUpdateKeywords, onUpdateGroup
       <div className="admin-sub-query">{sub.original_query}</div>
 
       {!expanded && (
-        <div className="admin-sub-preview">
-          <span className="preview-label">+</span>
-          {sub.positive_keywords.slice(0, 4).map((kw) => (
-            <span key={kw} className="preview-keyword positive">
-              {kw}
-            </span>
-          ))}
-          {sub.positive_keywords.length > 4 && (
-            <span className="preview-more">+{sub.positive_keywords.length - 4}</span>
-          )}
-          {sub.negative_keywords.length > 0 && (
-            <>
-              <span className="preview-label">−</span>
-              {sub.negative_keywords.slice(0, 2).map((kw) => (
-                <span key={kw} className="preview-keyword negative">
-                  {kw}
-                </span>
-              ))}
-              {sub.negative_keywords.length > 2 && (
-                <span className="preview-more">+{sub.negative_keywords.length - 2}</span>
-              )}
-            </>
-          )}
-        </div>
+        <KeywordsDisplay
+          positive={sub.positive_keywords}
+          negative={sub.negative_keywords}
+          maxShow={6}
+        />
       )}
 
       {expanded && (
@@ -257,8 +185,25 @@ function SubscriptionRow({ sub, availableGroups, onUpdateKeywords, onUpdateGroup
 }
 
 export function AdminPage() {
+  const navigate = useNavigate();
+  const { webApp } = useTelegram();
   const { subscriptions, loading, error, updateKeywords, updateGroups } = useAdminSubscriptions();
   const { groups: availableGroups, loading: groupsLoading, error: groupsError } = useAdminGroups();
+
+  // Setup Telegram BackButton
+  useEffect(() => {
+    if (!webApp) return;
+
+    const handleBack = () => navigate("/");
+
+    webApp.BackButton.show();
+    webApp.BackButton.onClick(handleBack);
+
+    return () => {
+      webApp.BackButton.offClick(handleBack);
+      webApp.BackButton.hide();
+    };
+  }, [webApp, navigate]);
 
   if (loading || groupsLoading) {
     return <div className="admin-page loading">Загрузка...</div>;

@@ -78,7 +78,7 @@ export async function runClassificationJob(): Promise<void> {
             if (!msg) continue;
 
             // Extract price from text
-            const { raw: priceRaw, normalized: priceNormalized } = extractPrice(msg.text);
+            const { raw: priceRaw, value: priceValue, currency: priceCurrency } = extractPrice(msg.text);
 
             const productId = queries.createProduct({
               message_id: msg.id,
@@ -87,7 +87,8 @@ export async function runClassificationJob(): Promise<void> {
               text: msg.text,
               category_code: item.category,
               price_raw: priceRaw,
-              price_normalized: priceNormalized,
+              price_value: priceValue,
+              price_currency: priceCurrency,
               sender_id: msg.senderId || null,
               sender_name: msg.senderName || null,
               message_date: msg.date,

@@ -8,6 +8,7 @@ interface SubscriptionListProps {
   loading: boolean;
   error: string | null;
   onDelete: (id: number) => Promise<boolean>;
+  onUpdateKeywords?: (id: number, positive: string[], negative: string[]) => Promise<boolean>;
 }
 
 export function SubscriptionList({
@@ -15,6 +16,7 @@ export function SubscriptionList({
   loading,
   error,
   onDelete,
+  onUpdateKeywords,
 }: SubscriptionListProps) {
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
@@ -59,6 +61,7 @@ export function SubscriptionList({
           key={sub.id}
           subscription={sub}
           onDelete={handleDelete}
+          onUpdateKeywords={onUpdateKeywords}
           deleting={deletingId === sub.id}
         />
       ))}

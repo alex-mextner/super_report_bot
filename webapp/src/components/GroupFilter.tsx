@@ -14,12 +14,6 @@ export function GroupFilter({ groups, selected, onSelect }: Props) {
 
   return (
     <div className="group-filter">
-      <button
-        className={`group-btn ${selected === null ? "active" : ""}`}
-        onClick={() => onSelect(null)}
-      >
-        Все ({groups.reduce((sum, g) => sum + g.count, 0)})
-      </button>
       {groups.map((group) => (
         <button
           key={group.id}

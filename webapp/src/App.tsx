@@ -6,6 +6,7 @@ import { HomePage } from "./pages/HomePage";
 import { ProductPage } from "./pages/ProductPage";
 import { SubscriptionsPage } from "./pages/SubscriptionsPage";
 import { AdminPage } from "./pages/AdminPage";
+import { AnalyticsPage } from "./pages/AnalyticsPage";
 import "./App.css";
 
 export function App() {
@@ -31,6 +32,7 @@ export function App() {
         <Route path="/product/:id" element={<ProductPage />} />
         <Route path="/subscriptions" element={<SubscriptionsPage />} />
         <Route path="/admin" element={<AdminPage />} />
+        <Route path="/analytics/:groupId" element={<AnalyticsPage />} />
       </Routes>
     </BrowserRouter>
   );

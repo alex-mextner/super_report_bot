@@ -16,6 +16,7 @@ import { recoverPendingOperations } from "./bot/recovery.ts";
 import { startListener, stopListener, invalidateSubscriptionsCache } from "./listener/index.ts";
 import { startApiServer } from "./api/index.ts";
 import { logger } from "./logger.ts";
+import { scheduleNightlyAnalytics, stopAnalyticsScheduler } from "./analytics/scheduler.ts";
 
 // Re-export for external use
 export { invalidateSubscriptionsCache };
@@ -71,11 +72,16 @@ async function main() {
   const apiPort = Number(process.env.API_PORT) || 3000;
   startApiServer(apiPort);
 
+  // Schedule nightly analytics (runs at 3:00 AM)
+  scheduleNightlyAnalytics();
+
   logger.info("Super Report Bot is running. Press Ctrl+C to stop.");
 
   // Graceful shutdown
   const shutdown = async () => {
     logger.info("Shutting down...");
+
+    stopAnalyticsScheduler();
 
     try {
       await stopListener();

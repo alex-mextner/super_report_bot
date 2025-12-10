@@ -8,7 +8,7 @@ import "./SubscriptionsPage.css";
 export function SubscriptionsPage() {
   const navigate = useNavigate();
   const { webApp } = useTelegram();
-  const { subscriptions, loading, error, deleteSubscription } = useSubscriptions();
+  const { subscriptions, loading, error, deleteSubscription, updateKeywords } = useSubscriptions();
 
   // Setup back button
   useEffect(() => {
@@ -31,6 +31,7 @@ export function SubscriptionsPage() {
         loading={loading}
         error={error}
         onDelete={deleteSubscription}
+        onUpdateKeywords={updateKeywords}
       />
     </div>
   );

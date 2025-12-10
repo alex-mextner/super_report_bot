@@ -165,7 +165,8 @@ CREATE TABLE IF NOT EXISTS products (
   text TEXT NOT NULL,
   category_code TEXT REFERENCES categories(code),
   price_raw TEXT,                   -- "50000 руб", "50к", "$500"
-  price_normalized INTEGER,         -- normalized price in RUB for comparison
+  price_normalized INTEGER,         -- deprecated, use price_value
+  price_currency TEXT,              -- ISO: RUB, USD, EUR, RSD
   sender_id INTEGER,
   sender_name TEXT,
   message_date INTEGER NOT NULL,    -- unix timestamp
@@ -211,3 +212,23 @@ CREATE TABLE IF NOT EXISTS message_media (
 
 -- Media indexes
 CREATE INDEX IF NOT EXISTS idx_message_media_msg ON message_media(message_id, group_id);
+
+-- ===========================================
+-- Group Analytics (precomputed stats)
+-- ===========================================
+
+-- Precomputed analytics per group
+CREATE TABLE IF NOT EXISTS group_analytics (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  group_id INTEGER NOT NULL UNIQUE,
+  stats_json TEXT NOT NULL,           -- JSON with all numeric stats
+  insights_text TEXT,                 -- LLM-generated text summary
+  insights_generated_at INTEGER,      -- unix timestamp
+  computed_at INTEGER NOT NULL,       -- unix timestamp
+  period_start INTEGER NOT NULL,      -- stats cover from this timestamp
+  period_end INTEGER NOT NULL,        -- to this timestamp
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_analytics_group ON group_analytics(group_id);

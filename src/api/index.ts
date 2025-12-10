@@ -271,6 +271,33 @@ api.delete("/subscriptions/:id", (c) => {
   return c.json({ success: true });
 });
 
+// PUT /api/subscriptions/:id/keywords - update keywords
+api.put("/subscriptions/:id/keywords", async (c) => {
+  const userId = c.get("userId");
+  if (!userId) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const id = Number(c.req.param("id"));
+
+  // Check if subscription belongs to user
+  const subscription = queries.getSubscriptionById(id, userId);
+  if (!subscription) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  const body = await c.req.json<{ positive: string[]; negative: string[] }>();
+
+  if (!Array.isArray(body.positive) || !Array.isArray(body.negative)) {
+    return c.json({ error: "Invalid body" }, 400);
+  }
+
+  queries.adminUpdateKeywords(id, body.positive, body.negative);
+  apiLog.info({ userId, subscriptionId: id }, "User updated keywords");
+
+  return c.json({ success: true });
+});
+
 // GET /api/subscriptions/:id/groups - groups for subscription
 api.get("/subscriptions/:id/groups", (c) => {
   const userId = c.get("userId");
@@ -564,6 +591,62 @@ function buildTelegramLink(groupId: number, messageId: number, topicId?: number)
   }
   return `https://t.me/c/${cleanChatId}/${messageId}`;
 }
+
+// ==============================
+// Analytics endpoints
+// ==============================
+
+// GET /api/analytics/:groupId - Get analytics for a group
+api.get("/analytics/:groupId", (c) => {
+  const groupId = Number(c.req.param("groupId"));
+
+  const analytics = queries.getGroupAnalytics(groupId);
+  if (!analytics) {
+    return c.json({ error: "No analytics available for this group" }, 404);
+  }
+
+  // Get group title from messages
+  const groups = queries.getDistinctMessageGroups();
+  const group = groups.find((g) => g.group_id === groupId);
+
+  apiLog.debug({ groupId }, "GET /api/analytics/:groupId");
+
+  return c.json({
+    groupId,
+    groupTitle: group?.group_title || `Group ${groupId}`,
+    stats: JSON.parse(analytics.stats_json),
+    insights: analytics.insights_text,
+    computedAt: analytics.computed_at,
+    insightsGeneratedAt: analytics.insights_generated_at,
+  });
+});
+
+// POST /api/analytics/refresh/:groupId - Force refresh analytics (admin only)
+api.post("/analytics/refresh/:groupId", async (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const groupId = Number(c.req.param("groupId"));
+
+  // Import dynamically to avoid circular deps
+  const { computeAndSaveGroupAnalytics } = await import("../analytics/compute.ts");
+  const { generateInsights } = await import("../analytics/insights.ts");
+
+  try {
+    const stats = await computeAndSaveGroupAnalytics(groupId);
+    const insights = await generateInsights(stats);
+    if (insights) {
+      queries.updateGroupInsights(groupId, insights);
+    }
+
+    apiLog.info({ groupId }, "Analytics refreshed");
+    return c.json({ success: true });
+  } catch (error) {
+    apiLog.error({ groupId, error }, "Failed to refresh analytics");
+    return c.json({ error: "Failed to refresh analytics" }, 500);
+  }
+});
 
 // ==============================
 // Media endpoints

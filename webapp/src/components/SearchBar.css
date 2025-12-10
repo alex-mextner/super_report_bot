@@ -1,6 +1,13 @@
 .search-bar {
-  position: relative;
+  display: flex;
+  gap: 8px;
+  align-items: center;
   padding: 0 16px 12px;
+}
+
+.search-input-wrapper {
+  position: relative;
+  flex: 1;
 }
 
 .search-input {
@@ -20,7 +27,7 @@
 
 .search-clear {
   position: absolute;
-  right: 28px;
+  right: 12px;
   top: 50%;
   transform: translateY(-50%);
   border: none;
@@ -29,4 +36,17 @@
   font-size: 20px;
   cursor: pointer;
   padding: 4px 8px;
+}
+
+.analytics-btn {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+  border-radius: 12px;
+  text-decoration: none;
+  font-size: 20px;
 }

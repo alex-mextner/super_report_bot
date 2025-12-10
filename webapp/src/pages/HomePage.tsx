@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { GroupFilter } from "../components/GroupFilter";
 import { SearchBar } from "../components/SearchBar";
@@ -13,6 +13,13 @@ export function HomePage() {
   const [search, setSearch] = useState("");
 
   const { groups } = useGroups();
+
+  // Select first group by default
+  useEffect(() => {
+    if (groups.length > 0 && groupId === null) {
+      setGroupId(groups[0].id);
+    }
+  }, [groups, groupId]);
   const { products, loading, hasMore, loadMore, total, searchStats } = useProducts(
     groupId ?? undefined,
     search || undefined
@@ -32,7 +39,7 @@ export function HomePage() {
         )}
       </div>
       <GroupFilter groups={groups} selected={groupId} onSelect={setGroupId} />
-      <SearchBar value={search} onChange={setSearch} />
+      <SearchBar value={search} onChange={setSearch} selectedGroupId={groupId} />
       <ProductList
         products={products}
         loading={loading}

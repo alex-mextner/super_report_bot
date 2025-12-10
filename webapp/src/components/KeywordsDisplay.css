@@ -1,0 +1,49 @@
+.keywords-display {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.keywords-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.keywords-label {
+  flex-shrink: 0;
+  width: 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tg-theme-hint-color, #999);
+}
+
+.keywords-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.keyword-badge {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.keywords-list.positive .keyword-badge {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.keywords-list.negative .keyword-badge {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+.keywords-more {
+  font-size: 12px;
+  color: var(--tg-theme-hint-color, #999);
+  font-style: italic;
+  padding: 2px 4px;
+}

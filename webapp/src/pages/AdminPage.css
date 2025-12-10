@@ -98,46 +98,6 @@
   line-height: 1.3;
 }
 
-/* Preview (collapsed) */
-.admin-sub-preview {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
-
-.preview-label {
-  font-weight: 600;
-  color: var(--tg-theme-hint-color, #999);
-  font-size: 12px;
-  margin-left: 4px;
-}
-
-.preview-label:first-child {
-  margin-left: 0;
-}
-
-.preview-keyword {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: var(--tg-theme-bg-color, #fff);
-}
-
-.preview-keyword.positive {
-  color: #34c759;
-}
-
-.preview-keyword.negative {
-  color: #ff3b30;
-}
-
-.preview-more {
-  font-size: 11px;
-  color: var(--tg-theme-hint-color, #999);
-  font-style: italic;
-}
-
 /* Expanded editor */
 .admin-sub-expanded {
   margin-top: 12px;
@@ -155,91 +115,6 @@
   color: var(--tg-theme-hint-color, #999);
   margin-bottom: 8px;
   text-transform: uppercase;
-}
-
-/* Keyword editor */
-.keyword-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.keyword-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  min-height: 28px;
-}
-
-.keyword-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  padding: 4px 8px;
-  border-radius: 6px;
-  background: var(--tg-theme-bg-color, #fff);
-}
-
-.keyword-tag.positive {
-  color: #34c759;
-  border: 1px solid #34c75940;
-}
-
-.keyword-tag.negative {
-  color: #ff3b30;
-  border: 1px solid #ff3b3040;
-}
-
-.keyword-remove {
-  background: none;
-  border: none;
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-  color: inherit;
-  opacity: 0.6;
-  padding: 0;
-}
-
-.keyword-remove:hover {
-  opacity: 1;
-}
-
-.keyword-input-row {
-  display: flex;
-  gap: 8px;
-}
-
-.keyword-input {
-  flex: 1;
-  padding: 8px 12px;
-  border: 1px solid var(--tg-theme-hint-color, #ddd);
-  border-radius: 8px;
-  font-size: 14px;
-  background: var(--tg-theme-bg-color, #fff);
-  color: var(--tg-theme-text-color, #000);
-}
-
-.keyword-input:focus {
-  outline: none;
-  border-color: var(--tg-theme-link-color, #007aff);
-}
-
-.keyword-add-btn {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 8px;
-  background: var(--tg-theme-button-color, #007aff);
-  color: var(--tg-theme-button-text-color, #fff);
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.keyword-add-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* Group editor */

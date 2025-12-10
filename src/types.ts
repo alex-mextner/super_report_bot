@@ -153,7 +153,9 @@ export interface Product {
   text: string;
   category_code: string | null;
   price_raw: string | null;
-  price_normalized: number | null;
+  price_normalized: number | null; // deprecated, use price_value
+  price_value: number | null;
+  price_currency: string | null; // ISO: RUB, USD, EUR, RSD
   sender_id: number | null;
   sender_name: string | null;
   message_date: number;

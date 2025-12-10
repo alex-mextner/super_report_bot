@@ -203,9 +203,9 @@ const stmts = {
   isProductClassified: db.prepare<{ found: number }, [number, number]>(
     "SELECT 1 as found FROM products WHERE message_id = ? AND group_id = ? LIMIT 1"
   ),
-  createProduct: db.prepare<void, [number, number, string, string, string | null, string | null, number | null, number | null, string | null, number]>(
-    `INSERT INTO products (message_id, group_id, group_title, text, category_code, price_raw, price_normalized, sender_id, sender_name, message_date)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  createProduct: db.prepare<void, [number, number, string, string, string | null, string | null, number | null, string | null, number | null, string | null, number]>(
+    `INSERT INTO products (message_id, group_id, group_title, text, category_code, price_raw, price_normalized, price_currency, sender_id, sender_name, message_date)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ),
   getProducts: db.prepare<Product, []>("SELECT * FROM products ORDER BY message_date DESC"),
   getProductsByCategory: db.prepare<Product, [string]>(
@@ -332,6 +332,27 @@ const stmts = {
   ),
   deleteMediaForMessage: db.prepare<void, [number, number]>(
     `DELETE FROM message_media WHERE message_id = ? AND group_id = ?`
+  ),
+
+  // Group analytics
+  getGroupAnalytics: db.prepare<
+    { id: number; group_id: number; stats_json: string; insights_text: string | null; insights_generated_at: number | null; computed_at: number; period_start: number; period_end: number },
+    [number]
+  >(
+    `SELECT * FROM group_analytics WHERE group_id = ?`
+  ),
+  upsertGroupAnalytics: db.prepare<void, [number, string, number, number, number]>(
+    `INSERT INTO group_analytics (group_id, stats_json, computed_at, period_start, period_end)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(group_id) DO UPDATE SET
+       stats_json = excluded.stats_json,
+       computed_at = excluded.computed_at,
+       period_start = excluded.period_start,
+       period_end = excluded.period_end,
+       updated_at = CURRENT_TIMESTAMP`
+  ),
+  updateGroupInsights: db.prepare<void, [string, number, number]>(
+    `UPDATE group_analytics SET insights_text = ?, insights_generated_at = ?, updated_at = CURRENT_TIMESTAMP WHERE group_id = ?`
   ),
 };
 
@@ -648,7 +669,8 @@ export const queries = {
     text: string;
     category_code: string | null;
     price_raw: string | null;
-    price_normalized: number | null;
+    price_value: number | null;
+    price_currency: string | null;
     sender_id: number | null;
     sender_name: string | null;
     message_date: number;
@@ -660,7 +682,8 @@ export const queries = {
       data.text,
       data.category_code,
       data.price_raw,
-      data.price_normalized,
+      data.price_value, // stored in price_normalized column for backward compat
+      data.price_currency,
       data.sender_id,
       data.sender_name,
       data.message_date
@@ -878,6 +901,34 @@ export const queries = {
 
   deleteMediaForMessage(messageId: number, groupId: number): void {
     stmts.deleteMediaForMessage.run(messageId, groupId);
+  },
+
+  // === Group Analytics ===
+  getGroupAnalytics(groupId: number): {
+    group_id: number;
+    stats_json: string;
+    insights_text: string | null;
+    insights_generated_at: number | null;
+    computed_at: number;
+    period_start: number;
+    period_end: number;
+  } | null {
+    return stmts.getGroupAnalytics.get(groupId) ?? null;
+  },
+
+  saveGroupAnalytics(
+    groupId: number,
+    statsJson: string,
+    periodStart: number,
+    periodEnd: number
+  ): void {
+    const computedAt = Math.floor(Date.now() / 1000);
+    stmts.upsertGroupAnalytics.run(groupId, statsJson, computedAt, periodStart, periodEnd);
+  },
+
+  updateGroupInsights(groupId: number, insightsText: string): void {
+    const generatedAt = Math.floor(Date.now() / 1000);
+    stmts.updateGroupInsights.run(insightsText, generatedAt, groupId);
   },
 };
 
