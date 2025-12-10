@@ -384,7 +384,7 @@ bot.command("start", async (context) => {
   const userId = context.from?.id;
   if (!userId) return;
 
-  queries.getOrCreateUser(userId);
+  queries.getOrCreateUser(userId, context.from?.firstName, context.from?.username);
   ensureIdle(userId);
 
   await context.send(format`
@@ -471,7 +471,7 @@ bot.command("settings", async (context) => {
   const userId = context.from?.id;
   if (!userId) return;
 
-  queries.getOrCreateUser(userId);
+  queries.getOrCreateUser(userId, context.from?.firstName, context.from?.username);
   const currentMode = queries.getUserMode(userId);
 
   const modeDescription =
@@ -519,7 +519,7 @@ bot.command("addgroup", async (context) => {
   const userId = context.from?.id;
   if (!userId) return;
 
-  queries.getOrCreateUser(userId);
+  queries.getOrCreateUser(userId, context.from?.firstName, context.from?.username);
   ensureIdle(userId);
 
   send(userId, { type: "ADDGROUP" });

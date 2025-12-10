@@ -78,3 +78,14 @@ export interface Subscription {
 export interface SubscriptionsResponse {
   items: Subscription[];
 }
+
+// Admin types
+export interface AdminSubscription extends Subscription {
+  telegram_id: number;
+  first_name: string | null;
+  username: string | null;
+}
+
+export interface AdminSubscriptionsResponse {
+  items: AdminSubscription[];
+}

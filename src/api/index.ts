@@ -296,6 +296,78 @@ api.get("/subscriptions/:id/groups", (c) => {
   });
 });
 
+// === Admin API ===
+
+// GET /api/admin/subscriptions - all subscriptions (admin only)
+api.get("/admin/subscriptions", (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const subscriptions = queries.getAllSubscriptionsWithUsers();
+
+  const items = subscriptions.map((sub) => {
+    const groups = queries.getSubscriptionGroups(sub.id);
+    return {
+      id: sub.id,
+      telegram_id: sub.telegram_id,
+      first_name: sub.first_name,
+      username: sub.username,
+      original_query: sub.original_query,
+      positive_keywords: sub.positive_keywords,
+      negative_keywords: sub.negative_keywords,
+      llm_description: sub.llm_description,
+      is_active: sub.is_active,
+      created_at: sub.created_at,
+      groups: groups.map((g) => ({
+        id: g.group_id,
+        title: g.group_title,
+      })),
+    };
+  });
+
+  apiLog.debug({ count: items.length }, "GET /api/admin/subscriptions");
+  return c.json({ items });
+});
+
+// PUT /api/admin/subscriptions/:id/keywords - update keywords (admin only)
+api.put("/admin/subscriptions/:id/keywords", async (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const id = Number(c.req.param("id"));
+  const body = await c.req.json<{ positive: string[]; negative: string[] }>();
+
+  if (!Array.isArray(body.positive) || !Array.isArray(body.negative)) {
+    return c.json({ error: "Invalid body" }, 400);
+  }
+
+  queries.adminUpdateKeywords(id, body.positive, body.negative);
+  apiLog.info({ subscriptionId: id }, "Admin updated keywords");
+
+  return c.json({ success: true });
+});
+
+// PUT /api/admin/subscriptions/:id/groups - update groups (admin only)
+api.put("/admin/subscriptions/:id/groups", async (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const id = Number(c.req.param("id"));
+  const body = await c.req.json<{ groups: { id: number; title: string }[] }>();
+
+  if (!Array.isArray(body.groups)) {
+    return c.json({ error: "Invalid body" }, 400);
+  }
+
+  queries.setSubscriptionGroups(id, body.groups);
+  apiLog.info({ subscriptionId: id, groupCount: body.groups.length }, "Admin updated groups");
+
+  return c.json({ success: true });
+});
+
 // POST /api/analyze-deep - deep product analysis with market prices
 api.post("/analyze-deep", async (c) => {
   const body = await c.req.json<{ text: string; groupTitle?: string }>();

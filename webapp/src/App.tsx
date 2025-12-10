@@ -5,6 +5,7 @@ import { setInitData } from "./api/client";
 import { HomePage } from "./pages/HomePage";
 import { ProductPage } from "./pages/ProductPage";
 import { SubscriptionsPage } from "./pages/SubscriptionsPage";
+import { AdminPage } from "./pages/AdminPage";
 import "./App.css";
 
 export function App() {
@@ -29,6 +30,7 @@ export function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/product/:id" element={<ProductPage />} />
         <Route path="/subscriptions" element={<SubscriptionsPage />} />
+        <Route path="/admin" element={<AdminPage />} />
       </Routes>
     </BrowserRouter>
   );

@@ -5,6 +5,7 @@ import { SearchBar } from "../components/SearchBar";
 import { ProductList } from "../components/ProductList";
 import { useGroups } from "../hooks/useGroups";
 import { useProducts } from "../hooks/useProducts";
+import { useUser } from "../hooks/useUser";
 import "./HomePage.css";
 
 export function HomePage() {
@@ -16,6 +17,7 @@ export function HomePage() {
     groupId ?? undefined,
     search || undefined
   );
+  const { isAdmin } = useUser();
 
   return (
     <div className="home-page">
@@ -23,6 +25,11 @@ export function HomePage() {
         <Link to="/subscriptions" className="subscriptions-link">
           Мои подписки
         </Link>
+        {isAdmin && (
+          <Link to="/admin" className="admin-link">
+            Админ
+          </Link>
+        )}
       </div>
       <GroupFilter groups={groups} selected={groupId} onSelect={setGroupId} />
       <SearchBar value={search} onChange={setSearch} />

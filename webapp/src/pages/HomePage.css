@@ -6,10 +6,12 @@
 .home-header {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
   padding: 12px 16px 8px;
 }
 
-.subscriptions-link {
+.subscriptions-link,
+.admin-link {
   font-size: 14px;
   color: var(--tg-theme-link-color, #3390ec);
   text-decoration: none;
@@ -18,7 +20,8 @@
   background: var(--tg-theme-bg-color, #fff);
 }
 
-.subscriptions-link:active {
+.subscriptions-link:active,
+.admin-link:active {
   opacity: 0.7;
 }
 

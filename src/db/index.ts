@@ -30,6 +30,12 @@ const stmts = {
   // Users
   getUser: db.prepare<User, [number]>("SELECT * FROM users WHERE telegram_id = ?"),
   createUser: db.prepare<void, [number]>("INSERT OR IGNORE INTO users (telegram_id) VALUES (?)"),
+  upsertUser: db.prepare<void, [number, string | null, string | null]>(
+    `INSERT INTO users (telegram_id, first_name, username) VALUES (?, ?, ?)
+     ON CONFLICT(telegram_id) DO UPDATE SET
+       first_name = COALESCE(excluded.first_name, first_name),
+       username = COALESCE(excluded.username, username)`
+  ),
   getUserMode: db.prepare<{ mode: UserMode }, [number]>(
     "SELECT COALESCE(mode, 'normal') as mode FROM users WHERE telegram_id = ?"
   ),
@@ -58,6 +64,17 @@ const stmts = {
   deactivateSubscription: db.prepare<void, [number, number]>(
     `UPDATE subscriptions SET is_active = 0
      WHERE id = ? AND user_id = (SELECT id FROM users WHERE telegram_id = ?)`
+  ),
+  getAllSubscriptionsWithUsers: db.prepare<
+    Subscription & { telegram_id: number; first_name: string | null; username: string | null },
+    []
+  >(
+    `SELECT s.*, u.telegram_id, u.first_name, u.username FROM subscriptions s
+     JOIN users u ON s.user_id = u.id
+     ORDER BY s.created_at DESC`
+  ),
+  adminUpdateKeywords: db.prepare<void, [string, string, number]>(
+    `UPDATE subscriptions SET positive_keywords = ?, negative_keywords = ? WHERE id = ?`
   ),
 
   // Monitored groups
@@ -330,8 +347,8 @@ function parseSubscription(row: Subscription): Subscription {
 
 export const queries = {
   // Users
-  getOrCreateUser(telegramId: number): User {
-    stmts.createUser.run(telegramId);
+  getOrCreateUser(telegramId: number, firstName?: string, username?: string): User {
+    stmts.upsertUser.run(telegramId, firstName ?? null, username ?? null);
     return stmts.getUser.get(telegramId)!;
   },
 
@@ -378,6 +395,19 @@ export const queries = {
 
   deactivateSubscription(subscriptionId: number, telegramId: number): void {
     stmts.deactivateSubscription.run(subscriptionId, telegramId);
+  },
+
+  getAllSubscriptionsWithUsers(): (Subscription & { telegram_id: number; first_name: string | null; username: string | null })[] {
+    return stmts.getAllSubscriptionsWithUsers.all().map((row) => ({
+      ...parseSubscription(row),
+      telegram_id: row.telegram_id,
+      first_name: row.first_name,
+      username: row.username,
+    }));
+  },
+
+  adminUpdateKeywords(subscriptionId: number, positive: string[], negative: string[]): void {
+    stmts.adminUpdateKeywords.run(JSON.stringify(positive), JSON.stringify(negative), subscriptionId);
   },
 
   // Groups
