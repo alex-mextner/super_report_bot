@@ -44,25 +44,31 @@ interface DeepSeekResponse {
 
 /**
  * Verify if a message matches the subscription description using DeepSeek
+ * @param hasPhoto - if true, the message contains photo(s) that DeepSeek cannot see
  */
 export async function verifyWithDeepSeek(
   messageText: string,
-  subscriptionDescription: string
+  subscriptionDescription: string,
+  hasPhoto?: boolean
 ): Promise<DeepSeekVerificationResult> {
   if (!DEEPSEEK_API_KEY) {
     throw new Error("DEEPSEEK_API_KEY not configured");
   }
 
+  const photoWarning = hasPhoto
+    ? "\n\nIMPORTANT: This message contains photo(s) that you CANNOT see. Do NOT guess about photo content based on emojis or text descriptions. Focus ONLY on analyzing the text content itself."
+    : "";
+
   const systemPrompt = `You are a message classifier. Your task is to determine if a message matches a search criteria.
 
 Respond ONLY with a JSON object in this exact format:
-{"match": true/false, "confidence": 0.0-1.0, "reason": "brief explanation"}
+{"match": true/false, "confidence": 0.0-1.0, "reason": "brief explanation in Russian"}
 
 Be strict but reasonable:
 - Match if the message is clearly relevant to the search criteria
 - Don't match if the message is only tangentially related
 - Consider synonyms and related concepts
-- Ignore formatting, emoji, typos`;
+- Ignore formatting, emoji, typos${photoWarning}`;
 
   const userPrompt = `Search criteria: "${subscriptionDescription}"
 

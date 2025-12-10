@@ -29,6 +29,9 @@ export async function verifyMatch(
 
   // Try Vision verification first if there's a photo
   const hasPhoto = message.media?.some((m) => m.type === "photo");
+  let visionReasoning: string | undefined;
+  let visionFailed = false;
+
   if (hasPhoto) {
     try {
       const firstPhoto = message.media!.find((m) => m.type === "photo")!;
@@ -43,7 +46,7 @@ export async function verifyMatch(
         "Vision verification result"
       );
 
-      // If Vision is confident enough, use its result
+      // If Vision is confident enough, use its result directly
       if (visionResult.confidence >= VISION_CONFIDENCE_THRESHOLD) {
         return {
           isMatch: visionResult.isMatch,
@@ -52,7 +55,9 @@ export async function verifyMatch(
           reasoning: visionResult.reasoning,
         };
       }
-      // Otherwise, fall through to text verification
+
+      // Vision uncertain — save reasoning with disclaimer
+      visionReasoning = `📷 Фото не удалось уверенно распознать: ${visionResult.reasoning || "нет описания"}`;
       llmLog.debug(
         { subscriptionId: subscription.id },
         "Vision uncertain, falling back to text"
@@ -62,13 +67,15 @@ export async function verifyMatch(
         { err: error, subscriptionId: subscription.id },
         "Vision verification failed, falling back to text"
       );
+      visionFailed = true;
       // Continue to text-based verification
     }
   }
 
   // Text-based verification with DeepSeek
+  // Pass hasPhoto flag so DeepSeek doesn't guess about photo content from emojis
   try {
-    const result = await verifyWithDeepSeek(text, description);
+    const result = await verifyWithDeepSeek(text, description, hasPhoto);
 
     const isMatch = result.isMatch && result.confidence >= DEEPSEEK_CONFIDENCE_THRESHOLD;
 
@@ -79,6 +86,8 @@ export async function verifyMatch(
       isMatch,
       textPreview: text.slice(0, 80),
       description: description.slice(0, 50),
+      hasPhoto,
+      visionFailed,
     };
 
     if (isMatch) {
@@ -90,11 +99,24 @@ export async function verifyMatch(
       llmLog.debug(logData, "DeepSeek no match");
     }
 
+    // Build reasoning: prefer Vision reasoning if available (even if uncertain)
+    let finalReasoning: string | undefined;
+    if (visionReasoning) {
+      // Vision was uncertain — use its reasoning with disclaimer
+      finalReasoning = visionReasoning;
+    } else if (visionFailed && hasPhoto) {
+      // Vision failed completely — add disclaimer to DeepSeek reasoning
+      finalReasoning = `📷 Не удалось проанализировать фото. ${result.reasoning || ""}`.trim();
+    } else {
+      // No photo or Vision wasn't attempted
+      finalReasoning = result.reasoning;
+    }
+
     return {
       isMatch,
       confidence: result.confidence,
-      label: result.isMatch ? "text_match" : "text_no_match",
-      reasoning: result.reasoning,
+      label: visionReasoning ? "vision_uncertain_text_verified" : (result.isMatch ? "text_match" : "text_no_match"),
+      reasoning: finalReasoning,
     };
   } catch (error) {
     llmLog.error(
@@ -107,7 +129,7 @@ export async function verifyMatch(
       isMatch: false,
       confidence: 0,
       label: "error",
-      reasoning: undefined,
+      reasoning: hasPhoto ? "📷 Не удалось проанализировать сообщение" : undefined,
     };
   }
 }
