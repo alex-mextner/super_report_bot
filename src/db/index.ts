@@ -348,6 +348,7 @@ function parseSubscription(row: Subscription): Subscription {
 export const queries = {
   // Users
   getOrCreateUser(telegramId: number, firstName?: string, username?: string): User {
+    console.log("[getOrCreateUser]", { telegramId, firstName, username });
     stmts.upsertUser.run(telegramId, firstName ?? null, username ?? null);
     return stmts.getUser.get(telegramId)!;
   },
