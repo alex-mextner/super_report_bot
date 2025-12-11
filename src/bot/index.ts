@@ -1422,43 +1422,59 @@ bot.on("message", async (context) => {
 
   // Handle editing existing subscription positive keywords
   if (currentState === "editingSubPositive" && c.editingSubscriptionId) {
-    const keywords = text
+    const newKeywords = text
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
 
-    if (keywords.length === 0) {
+    if (newKeywords.length === 0) {
       await context.send("Нужно указать хотя бы одно слово.");
       return;
     }
 
-    queries.updatePositiveKeywords(c.editingSubscriptionId, userId, keywords);
-    send(userId, { type: "TEXT_KEYWORDS", keywords });
-    await context.send(`✅ Позитивные слова обновлены: ${keywords.join(", ")}`);
+    const sub = queries.getSubscriptionById(c.editingSubscriptionId, userId);
+    if (!sub) {
+      send(userId, { type: "CANCEL" });
+      await context.send("Подписка не найдена.");
+      return;
+    }
+
+    const combined = [...sub.positive_keywords, ...newKeywords];
+    const unique = [...new Set(combined)];
+    queries.updatePositiveKeywords(c.editingSubscriptionId, userId, unique);
+    invalidateSubscriptionsCache();
+
+    send(userId, { type: "CANCEL" });
+    await context.send(`✅ Добавлено: ${newKeywords.join(", ")}\nТекущие: ${unique.join(", ")}`);
     return;
   }
 
   // Handle editing existing subscription negative keywords
   if (currentState === "editingSubNegative" && c.editingSubscriptionId) {
-    const lowerText = text.toLowerCase();
-    let keywords: string[];
+    const newKeywords = text
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
-    if (lowerText === "нет" || lowerText === "-" || lowerText === "очистить") {
-      keywords = [];
-    } else {
-      keywords = text
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
+    if (newKeywords.length === 0) {
+      await context.send("Нужно указать хотя бы одно слово.");
+      return;
     }
 
-    queries.updateNegativeKeywords(c.editingSubscriptionId, userId, keywords);
-    send(userId, { type: "TEXT_KEYWORDS", keywords });
-    await context.send(
-      keywords.length > 0
-        ? `✅ Негативные слова обновлены: ${keywords.join(", ")}`
-        : "✅ Негативные слова очищены"
-    );
+    const sub = queries.getSubscriptionById(c.editingSubscriptionId, userId);
+    if (!sub) {
+      send(userId, { type: "CANCEL" });
+      await context.send("Подписка не найдена.");
+      return;
+    }
+
+    const combined = [...sub.negative_keywords, ...newKeywords];
+    const unique = [...new Set(combined)];
+    queries.updateNegativeKeywords(c.editingSubscriptionId, userId, unique);
+    invalidateSubscriptionsCache();
+
+    send(userId, { type: "CANCEL" });
+    await context.send(`✅ Добавлено: ${newKeywords.join(", ")}\nТекущие: ${unique.join(", ")}`);
     return;
   }
 
