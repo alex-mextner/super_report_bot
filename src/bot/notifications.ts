@@ -30,6 +30,7 @@ export interface DelayedNotification {
   media?: MediaItem[];
   reasoning?: string;
   subscriptionId: number;
+  competitorCount?: number; // ~N potential buyers (for Pro/Business)
   scheduledAt: number; // timestamp when to send
   wasDelayed: boolean; // true if delayed due to Premium competition
 }
@@ -50,7 +51,8 @@ let notifyUserFn: ((
   senderUsername?: string,
   media?: MediaItem[],
   reasoning?: string,
-  subscriptionId?: number
+  subscriptionId?: number,
+  competitorCount?: number
 ) => Promise<void>) | null = null;
 
 export function setNotifyUserFn(fn: typeof notifyUserFn): void {
@@ -150,7 +152,8 @@ export async function processDelayedQueue(): Promise<void> {
         notification.senderUsername,
         notification.media,
         delayedReasoning,
-        notification.subscriptionId
+        notification.subscriptionId,
+        notification.competitorCount
       );
 
       botLog.info(

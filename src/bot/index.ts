@@ -51,6 +51,7 @@ import {
   getAnalyzePrice,
   canUseFreeAnalyze,
   sendPaymentInvoice,
+  canSeeFora,
   type PaymentPayload,
 } from "./payments.ts";
 import { runWithRecovery } from "./operations.ts";
@@ -4276,7 +4277,8 @@ function buildNotificationCaption(
   messageText: string,
   senderName?: string,
   senderUsername?: string,
-  maxLength: number = 1000 // Telegram caption limit is 1024
+  maxLength: number = 1000, // Telegram caption limit is 1024
+  competitorCount?: number // Number of other users hunting the same product
 ): string {
   // Group line (with link if username available)
   const groupLine = groupUsername
@@ -4291,7 +4293,12 @@ function buildNotificationCaption(
       : senderName;
   }
 
-  const suffix = `\n\n${groupLine}\n${authorLine}`;
+  // Competitor line (only shown for Pro/Business users)
+  const competitorLine = competitorCount && competitorCount > 0
+    ? `\n👥 ~${competitorCount} человек тоже ищут это`
+    : "";
+
+  const suffix = `\n\n${groupLine}\n${authorLine}${competitorLine}`;
   const availableForText = maxLength - suffix.length - 3; // -3 for "..."
   const truncatedText = messageText.length > availableForText
     ? messageText.slice(0, availableForText) + "..."
@@ -4365,10 +4372,14 @@ export async function notifyUser(
   senderUsername?: string,
   media?: MediaItem[],
   reasoning?: string,
-  subscriptionId?: number
+  subscriptionId?: number,
+  competitorCount?: number // Number of other users hunting the same product (for Pro/Business)
 ): Promise<void> {
   try {
     const keyboard = buildNotificationKeyboard(messageId, groupId, subscriptionId, telegramId);
+
+    // Only show competitor count if user has Pro/Business plan
+    const showCompetitors = canSeeFora(telegramId) ? competitorCount : undefined;
 
     // If we have media, send with photo/video
     if (media && media.length > 0) {
@@ -4378,7 +4389,8 @@ export async function notifyUser(
         messageText,
         senderName,
         senderUsername,
-        1000 // Leave some room for Telegram formatting
+        1000, // Leave some room for Telegram formatting
+        showCompetitors
       );
 
       if (media.length === 1) {
@@ -4449,7 +4461,8 @@ export async function notifyUser(
         messageText,
         senderName,
         senderUsername,
-        4000 // Telegram message limit is 4096
+        4000, // Telegram message limit is 4096
+        showCompetitors
       );
 
       await bot.api.sendMessage({

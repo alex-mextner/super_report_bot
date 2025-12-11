@@ -441,10 +441,20 @@ async function processMessage(msg: Message): Promise<void> {
 
   if (candidates.length === 0) return;
 
+  // Count unique users from candidates for "fora" feature (rounded up to nearest 5)
+  const uniqueUserIds = new Set(candidates.map((c) => c.subscription.user_id));
+  const totalCandidateUsers = uniqueUserIds.size;
+  // Round up to nearest 5 for privacy (minimum 5 if more than 1 user)
+  const roundedCompetitorCount = totalCandidateUsers > 1
+    ? Math.ceil(totalCandidateUsers / 5) * 5
+    : 0; // Don't show if user is alone
+
   listenerLog.info(
     {
       event: "candidates_found",
       count: candidates.length,
+      uniqueUsers: totalCandidateUsers,
+      competitorCount: roundedCompetitorCount,
       topScore: candidates[0]?.ngramScore?.toFixed(3),
       textPreview: incomingMsg.text.slice(0, 50),
     },
@@ -554,6 +564,7 @@ async function processMessage(msg: Message): Promise<void> {
               media: notificationMedia,
               reasoning: verification.reasoning,
               subscriptionId: subscription.id,
+              competitorCount: roundedCompetitorCount,
             });
             listenerLog.info(
               {
@@ -578,7 +589,8 @@ async function processMessage(msg: Message): Promise<void> {
               incomingMsg.sender_username,
               notificationMedia,
               verification.reasoning,
-              subscription.id
+              subscription.id,
+              roundedCompetitorCount
             );
             listenerLog.info(
               {
@@ -656,7 +668,8 @@ async function processMessage(msg: Message): Promise<void> {
             incomingMsg.sender_username,
             incomingMsg.media,
             `Высокий скор совпадения: ${((candidate.ngramScore ?? 0) * 100).toFixed(0)}%`,
-            subscription.id
+            subscription.id,
+            roundedCompetitorCount
           );
         }
       }
