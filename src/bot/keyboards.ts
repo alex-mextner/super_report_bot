@@ -191,6 +191,14 @@ export function aiEditKeyboard(subscriptionId: number): InlineKeyboard {
     );
 }
 
+// Keyboard for initial AI editing prompt (no "Apply" since no changes yet)
+export function aiEditStartKeyboard(subscriptionId: number): InlineKeyboard {
+  return new InlineKeyboard().text(
+    "↩️ Назад",
+    JSON.stringify({ action: "cancel_ai_edit", id: subscriptionId })
+  );
+}
+
 // Keyboard for initial AI correction prompt (no "Apply" since no changes yet)
 export function pendingAiCorrectionStartKeyboard(): InlineKeyboard {
   return new InlineKeyboard()

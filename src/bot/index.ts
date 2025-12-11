@@ -24,6 +24,7 @@ import {
   groupsKeyboard,
   skipQuestionKeyboard,
   aiEditKeyboard,
+  aiEditStartKeyboard,
   pendingAiEditKeyboard,
   pendingAiCorrectionStartKeyboard,
   nextRequestId,
@@ -2607,7 +2608,7 @@ ${bold("Описание:")} ${sub.llm_description}
 • "добавь в исключения офис"
 • "измени описание на ..."`,
         {
-          reply_markup: aiEditKeyboard(subscriptionId),
+          reply_markup: aiEditStartKeyboard(subscriptionId),
         }
       );
       break;
@@ -3471,7 +3472,7 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
       await context.editText(
         `Опиши, как изменить критерии поиска для подписки "${subscription.original_query}".\n\n` +
           `Например: «добавь слова про скидки» или «убери слишком строгие фильтры»`,
-        { reply_markup: aiEditKeyboard(subscriptionId) }
+        { reply_markup: aiEditStartKeyboard(subscriptionId) }
       );
       break;
     }
@@ -3606,7 +3607,7 @@ ${bold("ИИ:")} ${result.summary}
         botLog.error({ err: error, userId, subscriptionId }, "Miss analysis failed");
         await context.editText(
           `Ошибка анализа. Опиши своими словами что изменить в подписке "${subscription.original_query}":`,
-          { reply_markup: aiEditKeyboard(subscriptionId) }
+          { reply_markup: aiEditStartKeyboard(subscriptionId) }
         );
       }
       break;
