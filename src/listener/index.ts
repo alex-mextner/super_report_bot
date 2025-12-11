@@ -46,6 +46,10 @@ const FUZZY_FALLBACK_THRESHOLD = 0.3; // Threshold for fuzzy search fallback
 const processedAlbums = new Map<string, number>();
 const ALBUM_CACHE_TTL = 30000; // 30 seconds - albums arrive within ~1-2 seconds
 
+// In-memory lock to prevent race condition in LLM verification
+// Key: `${subscriptionId}:${messageId}:${groupId}`
+const processingMessages = new Set<string>();
+
 // Clean old entries periodically
 setInterval(() => {
   const now = Date.now();
@@ -465,6 +469,13 @@ async function processMessage(msg: Message): Promise<void> {
   for (const candidate of candidates) {
     const { subscription } = candidate;
 
+    // In-memory lock to prevent race condition during LLM verification
+    const lockKey = `${subscription.id}:${incomingMsg.id}:${incomingMsg.group_id}`;
+    if (processingMessages.has(lockKey)) {
+      listenerLog.debug({ lockKey }, "Already processing, skipping");
+      continue;
+    }
+
     // Check deduplication (same subscription already processed this message)
     if (queries.isAnalysisMatched(subscription.id, incomingMsg.id, incomingMsg.group_id)) {
       listenerLog.debug(
@@ -482,6 +493,9 @@ async function processMessage(msg: Message): Promise<void> {
       );
       continue;
     }
+
+    // Acquire lock before LLM verification
+    processingMessages.add(lockKey);
 
     try {
       // Use multi-item verification - splits message and verifies each item
@@ -528,7 +542,7 @@ async function processMessage(msg: Message): Promise<void> {
           // Build notification text from matched items only
           const notificationText =
             verification.matchedItems.length > 0
-              ? verification.matchedItems.join("\n\n---\n\n")
+              ? verification.matchedItems.map(item => `・${item.trim()}`).join("\n")
               : originalText;
 
           // Filter media to only include photos from matched items
@@ -673,6 +687,9 @@ async function processMessage(msg: Message): Promise<void> {
           );
         }
       }
+    } finally {
+      // Release lock
+      processingMessages.delete(lockKey);
     }
   }
 }
