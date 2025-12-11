@@ -94,12 +94,12 @@ const stmts = {
 
   // Subscriptions
   getActiveSubscriptions: db.prepare<Subscription, []>(
-    "SELECT * FROM subscriptions WHERE is_active = 1"
+    "SELECT * FROM subscriptions WHERE is_active = 1 AND is_paused = 0"
   ),
   getSubscriptionsForGroup: db.prepare<Subscription, [number]>(
     `SELECT DISTINCT s.* FROM subscriptions s
      JOIN subscription_groups sg ON s.id = sg.subscription_id
-     WHERE s.is_active = 1 AND sg.group_id = ?`
+     WHERE s.is_active = 1 AND s.is_paused = 0 AND sg.group_id = ?`
   ),
   getUserSubscriptions: db.prepare<Subscription, [number]>(
     `SELECT s.* FROM subscriptions s
@@ -112,6 +112,14 @@ const stmts = {
   ),
   deactivateSubscription: db.prepare<void, [number, number]>(
     `UPDATE subscriptions SET is_active = 0
+     WHERE id = ? AND user_id = (SELECT id FROM users WHERE telegram_id = ?)`
+  ),
+  pauseSubscription: db.prepare<void, [number, number]>(
+    `UPDATE subscriptions SET is_paused = 1
+     WHERE id = ? AND user_id = (SELECT id FROM users WHERE telegram_id = ?)`
+  ),
+  resumeSubscription: db.prepare<void, [number, number]>(
+    `UPDATE subscriptions SET is_paused = 0
      WHERE id = ? AND user_id = (SELECT id FROM users WHERE telegram_id = ?)`
   ),
   getAllSubscriptionsWithUsers: db.prepare<
@@ -257,14 +265,14 @@ const stmts = {
     `UPDATE subscriptions SET keyword_embeddings = ? WHERE id = ?`
   ),
   getSubscriptionsWithoutEmbeddings: db.prepare<Subscription, []>(
-    `SELECT * FROM subscriptions WHERE is_active = 1 AND keyword_embeddings IS NULL`
+    `SELECT * FROM subscriptions WHERE is_active = 1 AND is_paused = 0 AND keyword_embeddings IS NULL`
   ),
 
   // Get all unique group IDs from active subscription groups
   getAllSubscriptionGroupIds: db.prepare<{ group_id: number }, []>(
     `SELECT DISTINCT sg.group_id FROM subscription_groups sg
      JOIN subscriptions s ON sg.subscription_id = s.id
-     WHERE s.is_active = 1`
+     WHERE s.is_active = 1 AND s.is_paused = 0`
   ),
 
   // Categories
@@ -529,6 +537,14 @@ export const queries = {
 
   deactivateSubscription(subscriptionId: number, telegramId: number): void {
     stmts.deactivateSubscription.run(subscriptionId, telegramId);
+  },
+
+  pauseSubscription(subscriptionId: number, telegramId: number): void {
+    stmts.pauseSubscription.run(subscriptionId, telegramId);
+  },
+
+  resumeSubscription(subscriptionId: number, telegramId: number): void {
+    stmts.resumeSubscription.run(subscriptionId, telegramId);
   },
 
   getAllSubscriptionsWithUsers(): (Subscription & { telegram_id: number; first_name: string | null; username: string | null })[] {

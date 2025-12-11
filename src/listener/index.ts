@@ -1039,7 +1039,8 @@ export async function scanGroupHistory(
                 incomingMsg.sender_name,
                 incomingMsg.sender_username,
                 incomingMsg.media,
-                verification.reasoning
+                verification.reasoning,
+                subscription.id
               );
             }
           }
@@ -1067,7 +1068,8 @@ export async function scanGroupHistory(
                 incomingMsg.sender_name,
                 incomingMsg.sender_username,
                 incomingMsg.media,
-                `Высокий скор совпадения: ${(candidateScore * 100).toFixed(0)}%`
+                `Высокий скор совпадения: ${(candidateScore * 100).toFixed(0)}%`,
+                subscription.id
               );
             }
           }
@@ -1339,7 +1341,8 @@ export async function scanFromCache(
           match.senderName,
           match.senderUsername,
           undefined, // no media in cache scan
-          match.reasoning
+          match.reasoning,
+          subscription.id
         );
       }
     }

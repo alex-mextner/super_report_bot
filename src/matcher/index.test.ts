@@ -12,6 +12,7 @@ function createSubscription(overrides: Partial<Subscription> = {}): Subscription
     negative_keywords: [],
     llm_description: "Test subscription",
     is_active: 1,
+    is_paused: 0,
     created_at: new Date().toISOString(),
     ...overrides,
   };

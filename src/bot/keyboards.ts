@@ -77,7 +77,8 @@ export const subscriptionKeyboard = (
   subscriptionId: number,
   hasNegativeKeywords: boolean,
   hasDisabledNegative: boolean,
-  mode: UserMode = "advanced"
+  mode: UserMode = "advanced",
+  isPaused: boolean = false
 ) => {
   const kb = new InlineKeyboard();
 
@@ -107,6 +108,12 @@ export const subscriptionKeyboard = (
       kb.row();
     }
   }
+
+  // Pause/Resume button available in all modes
+  kb.text(
+    isPaused ? "▶️ Возобновить" : "⏸️ Пауза",
+    JSON.stringify({ action: isPaused ? "resume" : "pause", id: subscriptionId })
+  ).row();
 
   // AI edit button available in all modes
   kb.text(

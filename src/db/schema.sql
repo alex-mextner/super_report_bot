@@ -18,8 +18,11 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   negative_keywords TEXT NOT NULL,  -- JSON array
   llm_description TEXT NOT NULL,
   is_active INTEGER DEFAULT 1,
+  is_paused INTEGER DEFAULT 0,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Note: idx_subscriptions_paused created in migration 014_add_is_paused.ts
 
 -- Monitored groups (userbot)
 CREATE TABLE IF NOT EXISTS monitored_groups (

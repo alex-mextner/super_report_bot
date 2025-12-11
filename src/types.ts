@@ -54,6 +54,7 @@ export interface Subscription {
   llm_description: string;
   keyword_embeddings?: KeywordEmbeddings; // stored as JSON in DB, for BGE-M3 semantic matching
   is_active: number; // SQLite boolean
+  is_paused: number; // SQLite boolean - temporary pause
   created_at: string;
 }
 

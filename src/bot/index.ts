@@ -579,13 +579,15 @@ bot.command("list", async (context) => {
   const subscriptions = queries.getUserSubscriptions(userId);
 
   if (subscriptions.length === 0) {
-    await context.send("У тебя пока нет активных подписок. Отправь описание того, что хочешь найти.");
+    await context.send("У тебя пока нет подписок. Отправь описание того, что хочешь найти.");
     return;
   }
 
   for (const sub of subscriptions) {
     const hasNeg = sub.negative_keywords.length > 0;
     const hasDisabledNeg = (sub.disabled_negative_keywords?.length ?? 0) > 0;
+    const isPaused = sub.is_paused === 1;
+    const pauseLabel = isPaused ? " ⏸️" : "";
 
     let messageText;
     if (mode === "advanced") {
@@ -597,20 +599,20 @@ bot.command("list", async (context) => {
       }
 
       messageText = format`
-${bold("Подписка #" + sub.id)}
+${bold("Подписка #" + sub.id + pauseLabel)}
 ${bold("Запрос:")} ${sub.original_query}
 ${bold("Ключевые слова:")} ${code(sub.positive_keywords.join(", "))}
 ${bold("Исключения:")} ${code(exclusionsText)}
       `;
     } else {
       messageText = format`
-${bold("Подписка #" + sub.id)}
+${bold("Подписка #" + sub.id + pauseLabel)}
 ${bold("Запрос:")} ${sub.original_query}
       `;
     }
 
     await context.send(messageText, {
-      reply_markup: subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg, mode),
+      reply_markup: subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg, mode, isPaused),
     });
   }
 });
@@ -2321,6 +2323,94 @@ ${c.pendingSub.llmDescription}
       break;
     }
 
+    case "pause": {
+      const subscriptionId = Number(data.id);
+      queries.pauseSubscription(subscriptionId, userId);
+      invalidateSubscriptionsCache();
+      await context.answer({ text: "Подписка приостановлена" });
+
+      // Update the message to show paused state
+      const sub = queries.getSubscriptionById(subscriptionId, userId);
+      if (sub) {
+        const hasNeg = sub.negative_keywords.length > 0;
+        const hasDisabledNeg = (sub.disabled_negative_keywords?.length ?? 0) > 0;
+        const mode = queries.getUserMode(userId);
+
+        let messageText;
+        if (mode === "advanced") {
+          let exclusionsText = "нет";
+          if (hasNeg) {
+            exclusionsText = sub.negative_keywords.join(", ");
+          } else if (hasDisabledNeg) {
+            exclusionsText = `(отключены: ${sub.disabled_negative_keywords!.join(", ")})`;
+          }
+          messageText = format`
+${bold("Подписка #" + sub.id + " ⏸️")}
+${bold("Запрос:")} ${sub.original_query}
+${bold("Ключевые слова:")} ${code(sub.positive_keywords.join(", "))}
+${bold("Исключения:")} ${code(exclusionsText)}
+          `;
+        } else {
+          messageText = format`
+${bold("Подписка #" + sub.id + " ⏸️")}
+${bold("Запрос:")} ${sub.original_query}
+          `;
+        }
+
+        await context.editText(messageText);
+        await context.editReplyMarkup(subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg, mode, true));
+      }
+      break;
+    }
+
+    case "resume": {
+      const subscriptionId = Number(data.id);
+      queries.resumeSubscription(subscriptionId, userId);
+      invalidateSubscriptionsCache();
+      await context.answer({ text: "Подписка возобновлена" });
+
+      // Update the message to show active state
+      const sub = queries.getSubscriptionById(subscriptionId, userId);
+      if (sub) {
+        const hasNeg = sub.negative_keywords.length > 0;
+        const hasDisabledNeg = (sub.disabled_negative_keywords?.length ?? 0) > 0;
+        const mode = queries.getUserMode(userId);
+
+        let messageText;
+        if (mode === "advanced") {
+          let exclusionsText = "нет";
+          if (hasNeg) {
+            exclusionsText = sub.negative_keywords.join(", ");
+          } else if (hasDisabledNeg) {
+            exclusionsText = `(отключены: ${sub.disabled_negative_keywords!.join(", ")})`;
+          }
+          messageText = format`
+${bold("Подписка #" + sub.id)}
+${bold("Запрос:")} ${sub.original_query}
+${bold("Ключевые слова:")} ${code(sub.positive_keywords.join(", "))}
+${bold("Исключения:")} ${code(exclusionsText)}
+          `;
+        } else {
+          messageText = format`
+${bold("Подписка #" + sub.id)}
+${bold("Запрос:")} ${sub.original_query}
+          `;
+        }
+
+        await context.editText(messageText);
+        await context.editReplyMarkup(subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg, mode, false));
+      }
+      break;
+    }
+
+    case "pause_from_notification": {
+      const subscriptionId = Number(data.id);
+      queries.pauseSubscription(subscriptionId, userId);
+      invalidateSubscriptionsCache();
+      await context.answer({ text: "Подписка приостановлена. /list чтобы возобновить." });
+      break;
+    }
+
     case "edit_positive": {
       const subscriptionId = Number(data.id);
       const sub = queries.getSubscriptionById(subscriptionId, userId);
@@ -3041,7 +3131,8 @@ ${bold("Выбери группы для мониторинга:")}
             dbMsg.sender_name ?? undefined,
             dbMsg.sender_username ?? undefined,
             undefined, // no media for cached examples
-            "🔥 Ты отметил как релевантный"
+            "🔥 Ты отметил как релевантный",
+            subscriptionId
           );
 
           // Mark as matched to avoid duplicate in scanFromCache
@@ -3810,11 +3901,15 @@ function buildNotificationKeyboard(
     }],
   ];
 
-  // Add "Miss" button if subscription ID available (short keys for 64-byte limit)
+  // Add "Miss" and "Pause" buttons if subscription ID available (short keys for 64-byte limit)
   if (subscriptionId) {
     keyboard.push([{
       text: "👎 Мимо",
       callback_data: JSON.stringify({ a: "miss", s: subscriptionId, m: messageId, g: groupId }),
+    }]);
+    keyboard.push([{
+      text: "⏸️ Остановить подписку",
+      callback_data: JSON.stringify({ action: "pause_from_notification", id: subscriptionId }),
     }]);
   }
 

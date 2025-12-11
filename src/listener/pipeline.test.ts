@@ -52,6 +52,7 @@ function createTestSubscription(overrides: Partial<Subscription> = {}): Subscrip
     negative_keywords: [],
     llm_description: "Объявления о продаже iPhone 15",
     is_active: 1,
+    is_paused: 0,
     created_at: new Date().toISOString(),
     ...overrides,
   };

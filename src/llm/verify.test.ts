@@ -39,6 +39,7 @@ const createMockSubscription = (id: number, llm_description: string) => ({
   negative_keywords: [] as string[],
   llm_description,
   is_active: 1,
+  is_paused: 0,
   created_at: "2024-01-01 00:00:00",
 });
 
