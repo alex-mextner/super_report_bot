@@ -43,6 +43,11 @@ if (process.platform === "darwin" && process.env.NODE_ENV !== "test") {
 
 const db = new Database("data.db", { create: true });
 
+// SQLite concurrency settings
+db.exec("PRAGMA journal_mode=WAL");
+db.exec("PRAGMA busy_timeout=5000");
+db.exec("PRAGMA synchronous=NORMAL");
+
 // Track if sqlite-vec was successfully loaded
 let sqliteVecLoaded = false;
 
