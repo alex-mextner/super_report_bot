@@ -13,6 +13,8 @@ export const hf = new InferenceClient(HF_TOKEN);
 export const MODELS = {
   // For keyword generation (DeepSeek R1 via Novita provider)
   DEEPSEEK_R1: "deepseek-ai/DeepSeek-R1",
+  // Fast model for simple tasks (Qwen 2.5 via Nebius)
+  QWEN_FAST: "Qwen/Qwen2.5-72B-Instruct",
   // Fallback for keyword generation
   MISTRAL: "mistralai/Mistral-7B-Instruct-v0.3",
   // For zero-shot classification (verification)

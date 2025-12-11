@@ -1,4 +1,5 @@
 import { chatWithDeepSeek, type ChatMessage } from "./deepseek.ts";
+import { hf, MODELS, withRetry } from "./index.ts";
 import { llmLog } from "../logger.ts";
 
 export interface EditInterpretationResult {
@@ -64,7 +65,61 @@ interface CurrentParams {
 }
 
 /**
+ * Parse LLM response JSON
+ */
+function parseEditResponse(
+  response: string,
+  current: CurrentParams
+): EditInterpretationResult {
+  const jsonMatch = response.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    llmLog.warn({ response: response.slice(0, 200) }, "Failed to parse edit response");
+    return {
+      ...current,
+      summary: "Не удалось интерпретировать команду. Попробуй переформулировать.",
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    return {
+      positive_keywords: parsed.positive_keywords || current.positive_keywords,
+      negative_keywords: parsed.negative_keywords || current.negative_keywords,
+      llm_description: parsed.llm_description || parsed.description || current.llm_description,
+      summary: parsed.summary || "Изменения применены",
+    };
+  } catch {
+    llmLog.warn({ json: jsonMatch[0].slice(0, 200) }, "Invalid JSON in edit response");
+    return {
+      ...current,
+      summary: "Ошибка парсинга ответа. Попробуй ещё раз.",
+    };
+  }
+}
+
+/**
+ * Try HuggingFace (Qwen) for fast response
+ */
+async function tryHuggingFace(
+  systemPrompt: string,
+  messages: Array<{ role: "user" | "assistant" | "system"; content: string }>
+): Promise<string> {
+  const result = await hf.chatCompletion({
+    model: MODELS.QWEN_FAST,
+    provider: "nebius",
+    messages: [
+      { role: "system", content: systemPrompt },
+      ...messages,
+    ],
+    max_tokens: 1500,
+    temperature: 0.3,
+  });
+  return result.choices[0]?.message?.content || "";
+}
+
+/**
  * Interpret user's free-form edit command and return updated subscription parameters
+ * Uses HuggingFace (Qwen) with retry, falls back to DeepSeek API
  */
 export async function interpretEditCommand(
   command: string,
@@ -80,41 +135,41 @@ export async function interpretEditCommand(
   // Limit conversation history to last 6 messages to avoid token overflow
   const recentHistory = conversationHistory.slice(-6);
 
-  const messages: ChatMessage[] = [
-    { role: "system", content: systemPrompt },
+  const chatMessages = [
     ...recentHistory.map((m) => ({
       role: m.role as "user" | "assistant",
       content: m.content,
     })),
-    { role: "user", content: command },
+    { role: "user" as const, content: command },
   ];
 
-  const response = await chatWithDeepSeek(messages, { temperature: 0.3 });
-
-  // Parse JSON from response
-  const jsonMatch = response.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    llmLog.warn({ response: response.slice(0, 200) }, "Failed to parse edit response");
-    // Return current values with error summary
-    return {
-      ...current,
-      summary: "Не удалось интерпретировать команду. Попробуй переформулировать.",
-    };
+  // Try HuggingFace (Qwen) first — faster
+  try {
+    const response = await withRetry(
+      () => tryHuggingFace(systemPrompt, chatMessages),
+      3, // 3 retries
+      1000 // 1s base delay
+    );
+    llmLog.debug({ provider: "huggingface", response: response.slice(0, 200) }, "Edit command via HF");
+    return parseEditResponse(response, current);
+  } catch (hfError) {
+    llmLog.warn({ error: hfError }, "HuggingFace edit failed, trying DeepSeek fallback");
   }
 
+  // Fallback to DeepSeek API
   try {
-    const parsed = JSON.parse(jsonMatch[0]);
-    return {
-      positive_keywords: parsed.positive_keywords || current.positive_keywords,
-      negative_keywords: parsed.negative_keywords || current.negative_keywords,
-      llm_description: parsed.llm_description || parsed.description || current.llm_description,
-      summary: parsed.summary || "Изменения применены",
-    };
-  } catch (e) {
-    llmLog.warn({ json: jsonMatch[0].slice(0, 200) }, "Invalid JSON in edit response");
+    const messages: ChatMessage[] = [
+      { role: "system", content: systemPrompt },
+      ...chatMessages,
+    ];
+    const response = await chatWithDeepSeek(messages, { temperature: 0.3 });
+    llmLog.debug({ provider: "deepseek", response: response.slice(0, 200) }, "Edit command via DeepSeek");
+    return parseEditResponse(response, current);
+  } catch (dsError) {
+    llmLog.error({ error: dsError }, "Both HuggingFace and DeepSeek failed for edit");
     return {
       ...current,
-      summary: "Ошибка парсинга ответа. Попробуй ещё раз.",
+      summary: "Ошибка LLM. Попробуй позже или переформулируй.",
     };
   }
 }
