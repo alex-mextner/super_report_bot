@@ -1703,6 +1703,275 @@ export const queries = {
       .all(messageId, groupId)
       .map((r) => r.telegram_id);
   },
+
+  // --- User Sessions (MTProto for publishing) ---
+
+  getUserSession(telegramId: number): {
+    id: number;
+    phone: string;
+    session_string: string;
+    is_active: number;
+  } | null {
+    const user = this.getUserByTelegramId(telegramId);
+    if (!user) return null;
+
+    return db
+      .prepare<
+        { id: number; phone: string; session_string: string; is_active: number },
+        [number]
+      >("SELECT id, phone, session_string, is_active FROM user_sessions WHERE user_id = ?")
+      .get(user.id) ?? null;
+  },
+
+  saveUserSession(telegramId: number, phone: string, sessionString: string): void {
+    const user = this.getUserByTelegramId(telegramId);
+    if (!user) return;
+
+    db.prepare(`
+      INSERT INTO user_sessions (user_id, phone, session_string)
+      VALUES (?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        phone = excluded.phone,
+        session_string = excluded.session_string,
+        is_active = 1,
+        last_used_at = unixepoch()
+    `).run(user.id, phone, sessionString);
+  },
+
+  updateSessionLastUsed(telegramId: number): void {
+    const user = this.getUserByTelegramId(telegramId);
+    if (!user) return;
+
+    db.prepare("UPDATE user_sessions SET last_used_at = unixepoch() WHERE user_id = ?")
+      .run(user.id);
+  },
+
+  deactivateUserSession(telegramId: number): void {
+    const user = this.getUserByTelegramId(telegramId);
+    if (!user) return;
+
+    db.prepare("UPDATE user_sessions SET is_active = 0 WHERE user_id = ?")
+      .run(user.id);
+  },
+
+  // --- Publications ---
+
+  createPublication(data: {
+    telegramId: number;
+    presetId: number;
+    text: string;
+    media?: string[]; // file_ids
+  }): number | null {
+    const user = this.getUserByTelegramId(data.telegramId);
+    if (!user) return null;
+
+    const mediaJson = data.media ? JSON.stringify(data.media) : null;
+
+    const result = db.prepare(`
+      INSERT INTO publications (user_id, preset_id, text, media)
+      VALUES (?, ?, ?, ?)
+    `).run(user.id, data.presetId, data.text, mediaJson);
+
+    return Number(result.lastInsertRowid);
+  },
+
+  getPublication(id: number): {
+    id: number;
+    user_id: number;
+    telegram_id: number;
+    preset_id: number;
+    text: string;
+    media: string | null;
+    status: string;
+    total_groups: number;
+    published_groups: number;
+    failed_groups: number;
+    error_message: string | null;
+    created_at: number;
+  } | null {
+    return db
+      .prepare<
+        {
+          id: number;
+          user_id: number;
+          telegram_id: number;
+          preset_id: number;
+          text: string;
+          media: string | null;
+          status: string;
+          total_groups: number;
+          published_groups: number;
+          failed_groups: number;
+          error_message: string | null;
+          created_at: number;
+        },
+        [number]
+      >(`
+        SELECT p.*, u.telegram_id
+        FROM publications p
+        JOIN users u ON p.user_id = u.id
+        WHERE p.id = ?
+      `)
+      .get(id) ?? null;
+  },
+
+  getUserPublications(telegramId: number, limit: number = 10): Array<{
+    id: number;
+    preset_id: number;
+    text: string;
+    status: string;
+    total_groups: number;
+    published_groups: number;
+    created_at: number;
+  }> {
+    const user = this.getUserByTelegramId(telegramId);
+    if (!user) return [];
+
+    return db
+      .prepare<
+        {
+          id: number;
+          preset_id: number;
+          text: string;
+          status: string;
+          total_groups: number;
+          published_groups: number;
+          created_at: number;
+        },
+        [number, number]
+      >(`
+        SELECT id, preset_id, text, status, total_groups, published_groups, created_at
+        FROM publications
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+      `)
+      .all(user.id, limit);
+  },
+
+  updatePublicationStatus(
+    id: number,
+    status: "pending" | "processing" | "completed" | "failed" | "cancelled",
+    errorMessage?: string
+  ): void {
+    if (status === "processing") {
+      db.prepare("UPDATE publications SET status = ?, started_at = unixepoch() WHERE id = ?")
+        .run(status, id);
+    } else if (status === "completed" || status === "failed") {
+      db.prepare("UPDATE publications SET status = ?, error_message = ?, completed_at = unixepoch() WHERE id = ?")
+        .run(status, errorMessage ?? null, id);
+    } else {
+      db.prepare("UPDATE publications SET status = ?, error_message = ? WHERE id = ?")
+        .run(status, errorMessage ?? null, id);
+    }
+  },
+
+  incrementPublicationProgress(id: number, success: boolean): void {
+    if (success) {
+      db.prepare("UPDATE publications SET published_groups = published_groups + 1 WHERE id = ?")
+        .run(id);
+    } else {
+      db.prepare("UPDATE publications SET failed_groups = failed_groups + 1 WHERE id = ?")
+        .run(id);
+    }
+  },
+
+  setPublicationTotalGroups(id: number, total: number): void {
+    db.prepare("UPDATE publications SET total_groups = ? WHERE id = ?")
+      .run(total, id);
+  },
+
+  // --- Publication Posts ---
+
+  createPublicationPosts(publicationId: number, groupIds: number[], baseDelay: number = 180): void {
+    const now = Math.floor(Date.now() / 1000);
+
+    for (let i = 0; i < groupIds.length; i++) {
+      const groupId = groupIds[i];
+      // 3-5 min delay between posts + random ±30 sec
+      const delay = baseDelay + Math.floor(Math.random() * 120) + (Math.random() * 60 - 30);
+      const scheduledAt = now + (i * delay);
+
+      db.prepare(`
+        INSERT INTO publication_posts (publication_id, group_id, scheduled_at)
+        VALUES (?, ?, ?)
+      `).run(publicationId, groupId!, Math.floor(scheduledAt));
+    }
+  },
+
+  getPendingPublicationPosts(limit: number = 5): Array<{
+    id: number;
+    publication_id: number;
+    group_id: number;
+    scheduled_at: number;
+  }> {
+    const now = Math.floor(Date.now() / 1000);
+    return db
+      .prepare<
+        { id: number; publication_id: number; group_id: number; scheduled_at: number },
+        [number, number]
+      >(`
+        SELECT id, publication_id, group_id, scheduled_at
+        FROM publication_posts
+        WHERE status = 'pending' AND scheduled_at <= ?
+        ORDER BY scheduled_at ASC
+        LIMIT ?
+      `)
+      .all(now, limit);
+  },
+
+  updatePublicationPostStatus(
+    id: number,
+    status: "pending" | "scheduled" | "sent" | "failed",
+    messageId?: number,
+    errorMessage?: string
+  ): void {
+    if (status === "sent") {
+      db.prepare(`
+        UPDATE publication_posts
+        SET status = ?, message_id = ?, sent_at = unixepoch()
+        WHERE id = ?
+      `).run(status, messageId ?? null, id);
+    } else {
+      db.prepare(`
+        UPDATE publication_posts
+        SET status = ?, error_message = ?
+        WHERE id = ?
+      `).run(status, errorMessage ?? null, id);
+    }
+  },
+
+  // --- Publication Limits ---
+
+  getDailyPublicationCount(telegramId: number): number {
+    const user = this.getUserByTelegramId(telegramId);
+    if (!user) return 0;
+
+    const today = new Date().toISOString().split("T")[0];
+    const result = db
+      .prepare<{ count: number }, [number, string]>(
+        "SELECT count FROM publication_limits WHERE user_id = ? AND date = ?"
+      )
+      .get(user.id, today!);
+
+    return result?.count ?? 0;
+  },
+
+  incrementDailyPublicationCount(telegramId: number): void {
+    const user = this.getUserByTelegramId(telegramId);
+    if (!user) return;
+
+    const today = new Date().toISOString().split("T")[0]!;
+    db.prepare(`
+      INSERT INTO publication_limits (user_id, date, count)
+      VALUES (?, ?, 1)
+      ON CONFLICT(user_id, date) DO UPDATE SET count = count + 1
+    `).run(user.id, today);
+  },
+
+  canPublishToday(telegramId: number, maxPerDay: number = 10): boolean {
+    return this.getDailyPublicationCount(telegramId) < maxPerDay;
+  },
 };
 
 export { db };

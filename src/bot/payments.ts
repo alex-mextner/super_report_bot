@@ -11,6 +11,7 @@
 import type { Bot } from "gramio";
 import { queries } from "../db/index.ts";
 import { botLog } from "../logger.ts";
+import { startPublication } from "../publisher/index.ts";
 
 // Plan prices in Stars
 export const PLAN_PRICES = {
@@ -46,6 +47,7 @@ export interface PaymentPayload {
   presetId?: number;
   accessType?: "lifetime" | "subscription";
   days?: number; // for promotions duration
+  publicationId?: number; // for publications
 }
 
 /**
@@ -336,10 +338,21 @@ export async function handleSuccessfulPayment(
       }
 
       case "publication": {
-        // Publication will be handled separately
+        if (!payload.publicationId) {
+          return { success: false, message: "Публикация не указана" };
+        }
+
+        // Update publication status and start processing
+        queries.updatePublicationStatus(payload.publicationId, "pending");
+
+        // Start publication in background (creates posts, triggers worker)
+        startPublication(payload.publicationId).catch((err) => {
+          botLog.error({ error: err, publicationId: payload.publicationId }, "Failed to start publication");
+        });
+
         return {
           success: true,
-          message: "✅ Оплата принята, готовлю публикацию...",
+          message: "✅ Оплата принята! Публикация начата.\n\nОбъявления будут отправляться с задержками (анти-спам).",
         };
       }
 

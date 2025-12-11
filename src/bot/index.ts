@@ -105,6 +105,19 @@ import {
   analyzeForwardKeyboard,
   forwardActionsKeyboard,
 } from "./forward.ts";
+import {
+  handlePublishCommand,
+  handleConnectTelegram,
+  handlePublicationText,
+  handleCreatePublication,
+  handlePublishToPreset,
+  handleConfirmPublication,
+  handleMyPublications,
+  handleDisconnectAccount,
+  handleCancelAuth,
+  handleCancelPublication,
+  isInPublicationFlow,
+} from "./publish.ts";
 import { botLog } from "../logger.ts";
 import type {
   UserMode,
@@ -844,6 +857,15 @@ ${list}
   `);
 });
 
+// /publish command - publish ads to flea markets
+bot.command("publish", async (context) => {
+  const userId = context.from?.id;
+  if (!userId) return;
+
+  ensureIdle(userId);
+  await handlePublishCommand(bot, userId);
+});
+
 // Handle chat_shared event (user selected a group/channel via requestChat)
 bot.on("chat_shared", async (context) => {
   const userId = context.from?.id;
@@ -1400,6 +1422,12 @@ bot.on("message", async (context) => {
 
   // For non-forward messages, require text
   if (!context.text || context.text.startsWith("/")) return;
+
+  // Check publication flow first (phone/code/password/text input)
+  if (isInPublicationFlow(userId)) {
+    const handled = await handlePublicationText(bot, userId, context.text);
+    if (handled) return;
+  }
 
   const currentState = fsmState(userId);
   const c = ctx(userId);
@@ -4591,6 +4619,103 @@ ${msg.text.slice(0, 500)}${msg.text.length > 500 ? "..." : ""}`,
     case "cancel_promo": {
       await context.answer({ text: "Отменено" });
       await context.editText("Продвижение отменено.");
+      break;
+    }
+
+    // ══════════════════════════════════════════════════════════
+    //                  PUBLICATION CALLBACKS
+    // ══════════════════════════════════════════════════════════
+
+    case "connect_telegram": {
+      await handleConnectTelegram(
+        bot,
+        userId,
+        async () => { await context.answer(); },
+        (text, keyboard) => editCallbackMessage(context, text, { parse_mode: "Markdown", ...keyboard })
+      );
+      break;
+    }
+
+    case "create_publication": {
+      await handleCreatePublication(
+        bot,
+        userId,
+        async () => { await context.answer(); },
+        (text, keyboard) => editCallbackMessage(context, text, { parse_mode: "Markdown", ...keyboard })
+      );
+      break;
+    }
+
+    case "my_publications": {
+      await handleMyPublications(
+        bot,
+        userId,
+        async () => { await context.answer(); },
+        (text, keyboard) => editCallbackMessage(context, text, { parse_mode: "Markdown", ...keyboard })
+      );
+      break;
+    }
+
+    case "disconnect_account": {
+      await handleDisconnectAccount(
+        bot,
+        userId,
+        async () => { await context.answer(); },
+        (text, keyboard) => editCallbackMessage(context, text, { parse_mode: "Markdown", ...keyboard })
+      );
+      break;
+    }
+
+    case "cancel_auth": {
+      await handleCancelAuth(
+        bot,
+        userId,
+        async () => { await context.answer(); },
+        (text, keyboard) => editCallbackMessage(context, text, { parse_mode: "Markdown", ...keyboard })
+      );
+      break;
+    }
+
+    case "cancel_publication": {
+      await handleCancelPublication(
+        bot,
+        userId,
+        async () => { await context.answer(); },
+        (text, keyboard) => editCallbackMessage(context, text, { parse_mode: "Markdown", ...keyboard })
+      );
+      break;
+    }
+
+    case "publish_to_preset": {
+      const presetId = typeof data.id === "number" ? data.id : parseInt(String(data.id), 10);
+      if (!presetId || isNaN(presetId)) {
+        await context.answer({ text: "Ошибка данных" });
+        return;
+      }
+
+      await handlePublishToPreset(
+        bot,
+        userId,
+        presetId,
+        async () => { await context.answer(); },
+        (text, keyboard) => editCallbackMessage(context, text, { parse_mode: "Markdown", ...keyboard })
+      );
+      break;
+    }
+
+    case "confirm_publication": {
+      const publicationId = typeof data.id === "number" ? data.id : parseInt(String(data.id), 10);
+      if (!publicationId || isNaN(publicationId)) {
+        await context.answer({ text: "Ошибка данных" });
+        return;
+      }
+
+      await handleConfirmPublication(
+        bot,
+        userId,
+        publicationId,
+        async () => { await context.answer(); }
+      );
       break;
     }
   }

@@ -371,3 +371,63 @@ CREATE INDEX IF NOT EXISTS idx_promotions_active ON promotions(is_active, ends_a
 CREATE INDEX IF NOT EXISTS idx_promotions_user ON promotions(user_id);
 CREATE INDEX IF NOT EXISTS idx_promotions_group ON promotions(group_id);
 CREATE INDEX IF NOT EXISTS idx_promotions_product ON promotions(message_id, product_group_id);
+
+-- User Publications
+-- ===========================================
+
+-- User MTProto sessions for publishing from their account
+CREATE TABLE IF NOT EXISTS user_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  phone TEXT NOT NULL,
+  session_string TEXT NOT NULL,    -- encrypted MTProto session
+  is_active INTEGER DEFAULT 1,
+  created_at INTEGER DEFAULT (unixepoch()),
+  last_used_at INTEGER,
+  UNIQUE(user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id);
+
+-- Publications (user's listing to publish across preset groups)
+CREATE TABLE IF NOT EXISTS publications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  preset_id INTEGER NOT NULL REFERENCES region_presets(id),
+  text TEXT NOT NULL,
+  media TEXT,                       -- JSON array of file_ids or paths
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'cancelled')),
+  total_groups INTEGER DEFAULT 0,
+  published_groups INTEGER DEFAULT 0,
+  failed_groups INTEGER DEFAULT 0,
+  error_message TEXT,
+  created_at INTEGER DEFAULT (unixepoch()),
+  started_at INTEGER,
+  completed_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_publications_user ON publications(user_id);
+CREATE INDEX IF NOT EXISTS idx_publications_status ON publications(status);
+
+-- Individual posts within a publication
+CREATE TABLE IF NOT EXISTS publication_posts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  publication_id INTEGER NOT NULL REFERENCES publications(id) ON DELETE CASCADE,
+  group_id INTEGER NOT NULL,        -- telegram group id
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'scheduled', 'sent', 'failed')),
+  message_id INTEGER,               -- telegram message id after posting
+  scheduled_at INTEGER,             -- when to post
+  sent_at INTEGER,
+  error_message TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_publication_posts_pub ON publication_posts(publication_id);
+CREATE INDEX IF NOT EXISTS idx_publication_posts_status ON publication_posts(status, scheduled_at);
+
+-- Daily publication limits tracking
+CREATE TABLE IF NOT EXISTS publication_limits (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  date TEXT NOT NULL,               -- YYYY-MM-DD
+  count INTEGER DEFAULT 0,
+  PRIMARY KEY (user_id, date)
+);

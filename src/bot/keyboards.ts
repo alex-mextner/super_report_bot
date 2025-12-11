@@ -714,3 +714,65 @@ export function presetSelectionKeyboard(
 
   return kb;
 }
+
+// =====================================================
+// Publication keyboards
+// =====================================================
+
+/**
+ * Main /publish menu keyboard
+ */
+export function publishMenuKeyboard(hasSession: boolean): InlineKeyboard {
+  const kb = new InlineKeyboard();
+
+  if (hasSession) {
+    kb.text("📝 Создать объявление", JSON.stringify({ action: "create_publication" }));
+    kb.row();
+    kb.text("📋 Мои публикации", JSON.stringify({ action: "my_publications" }));
+    kb.row();
+    kb.text("🔌 Отключить аккаунт", JSON.stringify({ action: "disconnect_account" }));
+  } else {
+    kb.text("🔗 Подключить Telegram", JSON.stringify({ action: "connect_telegram" }));
+  }
+
+  return kb;
+}
+
+/**
+ * Preset selection for publication
+ */
+export function publishPresetKeyboard(
+  presets: Array<{ id: number; region_name: string; group_count: number }>
+): InlineKeyboard {
+  const kb = new InlineKeyboard();
+
+  for (const preset of presets) {
+    kb.text(
+      `📦 ${preset.region_name} (${preset.group_count} групп)`,
+      JSON.stringify({ action: "publish_to_preset", id: preset.id })
+    );
+    kb.row();
+  }
+
+  kb.text("❌ Отмена", JSON.stringify({ action: "cancel_publication" }));
+
+  return kb;
+}
+
+/**
+ * Publication confirmation keyboard
+ */
+export function publishConfirmKeyboard(publicationId: number): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("✅ Опубликовать — 100⭐", JSON.stringify({ action: "confirm_publication", id: publicationId }))
+    .row()
+    .text("❌ Отмена", JSON.stringify({ action: "cancel_publication" }));
+}
+
+/**
+ * Cancel auth keyboard
+ */
+export function cancelAuthKeyboard(): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("❌ Отмена", JSON.stringify({ action: "cancel_auth" }));
+}

@@ -22,6 +22,11 @@ import {
   stopDelayedQueueProcessor,
   setNotifyUserFn,
 } from "./bot/notifications.ts";
+import {
+  startPublicationWorker,
+  stopPublicationWorker,
+  isPublisherEnabled,
+} from "./publisher/index.ts";
 
 // Re-export for external use
 export { invalidateSubscriptionsCache };
@@ -65,6 +70,12 @@ async function main() {
   setNotifyUserFn(notifyUser);
   startDelayedQueueProcessor();
 
+  // Start publication worker (if publisher is enabled)
+  if (isPublisherEnabled()) {
+    startPublicationWorker();
+    logger.info({ component: "publisher" }, "Publication worker started");
+  }
+
   // Recover any interrupted operations from previous run (non-blocking)
   recoverPendingOperations(bot);
 
@@ -92,6 +103,7 @@ async function main() {
 
     stopAnalyticsScheduler();
     stopDelayedQueueProcessor();
+    stopPublicationWorker();
 
     try {
       await stopListener();
