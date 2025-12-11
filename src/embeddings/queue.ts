@@ -31,6 +31,7 @@ const MAX_QUEUE_SIZE = 10000;
 export function queueForEmbedding(messageId: number, text: string): void {
   // Skip if sqlite-vec not available
   if (!isSqliteVecAvailable()) {
+    listenerLog.debug("Embedding queue: sqlite-vec not available, skipping");
     return;
   }
 
@@ -39,8 +40,9 @@ export function queueForEmbedding(messageId: number, text: string): void {
     if (queries.hasEmbedding(messageId)) {
       return;
     }
-  } catch {
+  } catch (e) {
     // Table might not exist yet
+    listenerLog.warn({ err: e }, "Embedding queue: hasEmbedding check failed");
     return;
   }
 
@@ -51,6 +53,7 @@ export function queueForEmbedding(messageId: number, text: string): void {
   }
 
   queue.push({ id: messageId, text });
+  listenerLog.debug({ messageId, queueSize: queue.length }, "Message queued for embedding");
 
   // Start processing if not already running
   if (!isProcessing && !retryTimeout) {

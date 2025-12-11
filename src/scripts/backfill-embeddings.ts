@@ -7,7 +7,7 @@
 import { queries } from "../db/index.ts";
 import { getEmbeddings, checkBgeHealth } from "../llm/embeddings.ts";
 
-const BATCH_SIZE = 100;
+const BATCH_SIZE = 32; // BGE-M3 max batch size
 
 async function main() {
   console.log("🔍 Checking BGE server health...");
