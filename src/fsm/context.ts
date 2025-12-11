@@ -223,6 +223,12 @@ export interface RatingExamplesData {
      * Generated = we couldn't find good real examples
      */
     isGenerated: boolean;
+
+    /**
+     * Was this message soft-deleted in the original group?
+     * Shown with "(удалено)" label but still useful for ratings
+     */
+    isDeleted?: boolean;
   }>;
 
   /**

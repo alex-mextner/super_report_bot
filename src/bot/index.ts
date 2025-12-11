@@ -15,6 +15,7 @@ import {
   analyzeQueryAndGenerateQuestions,
   formatClarificationContext,
 } from "../llm/clarify.ts";
+import { searchBrave, generateExamplesFromBrave } from "../llm/brave.ts";
 import {
   confirmKeyboard,
   subscriptionKeyboard,
@@ -147,9 +148,10 @@ async function showExampleForRating(
   index: number,
   total: number
 ): Promise<void> {
+  const deletedLabel = example.isDeleted ? " (удалено)" : "";
   const sourceLabel = example.isGenerated
     ? "🤖 Сгенерированный пример"
-    : `📍 ${example.groupTitle}`;
+    : `📍 ${example.groupTitle}${deletedLabel}`;
 
   await context.send(
     format`${bold(`Пример ${index + 1}/${total}`)} ${sourceLabel}
@@ -240,20 +242,37 @@ async function startRatingFlow(
     botLog.debug({ userId, found: examples.length }, "Found similar messages for rating");
   }
 
-  // If not enough examples, generate them via LLM
+  // If not enough examples, try Brave search first, then LLM
   if (examples.length < 3) {
-    botLog.debug({ userId, existing: examples.length }, "Generating synthetic examples");
-    try {
-      const generated = await runWithRecovery(
-        userId,
-        "GENERATE_EXAMPLES",
-        undefined,
-        () => generateExampleMessages(query)
-      );
-      const synthetic = generatedToRatingExamples(generated);
-      examples = [...examples, ...synthetic].slice(0, 3);
-    } catch (error) {
-      botLog.error({ err: error, userId }, "Failed to generate examples");
+    botLog.debug({ userId, existing: examples.length }, "Not enough examples, trying Brave search");
+
+    // Try Brave search for real-world context
+    const braveResults = await searchBrave(query);
+    if (braveResults.length > 0) {
+      try {
+        const braveExamples = await generateExamplesFromBrave(query, braveResults);
+        examples = [...examples, ...braveExamples].slice(0, 3);
+        botLog.debug({ userId, afterBrave: examples.length }, "Added Brave-based examples");
+      } catch (error) {
+        botLog.warn({ err: error, userId }, "Failed to generate Brave examples");
+      }
+    }
+
+    // Still not enough? Fall back to pure LLM generation
+    if (examples.length < 3) {
+      botLog.debug({ userId, existing: examples.length }, "Still not enough, generating via LLM");
+      try {
+        const generated = await runWithRecovery(
+          userId,
+          "GENERATE_EXAMPLES",
+          undefined,
+          () => generateExampleMessages(query)
+        );
+        const synthetic = generatedToRatingExamples(generated);
+        examples = [...examples, ...synthetic].slice(0, 3);
+      } catch (error) {
+        botLog.error({ err: error, userId }, "Failed to generate examples");
+      }
     }
   }
 
@@ -298,11 +317,17 @@ async function startRatingFlow(
         groupId: e.groupId,
         groupTitle: e.groupTitle,
         isGenerated: e.isGenerated,
+        isDeleted: e.isDeleted,
       })),
       ratings: [],
       currentIndex: 0,
     },
   });
+
+  // Explain what examples are for
+  await context.send(`📝 Покажу примеры — оцени их, чтобы я лучше понял что искать.
+
+Бот использует ИИ, ключевые слова и семантический анализ — находит посты с опечатками, на разных языках, сформулированные по-разному, и даже анализирует картинки если из текста мало что понятно.`);
 
   await showExampleForRating(context, userId, examples[0]!, 0, examples.length);
 }
@@ -2981,6 +3006,43 @@ ${bold("Выбери группы для мониторинга:")}
         negativeKeywords,
         llmDescription
       );
+
+      // Send hot examples as notifications (real, not deleted)
+      const ratingData = c.ratingExamples;
+      let hotSentCount = 0;
+      if (ratingData?.ratings) {
+        for (const r of ratingData.ratings) {
+          if (r.rating !== "hot") continue;
+
+          const msg = ratingData.messages.find((m) => m.id === r.messageId);
+          if (!msg || msg.isGenerated) continue; // skip generated
+
+          // Check if message exists and not deleted
+          const dbMsg = queries.getMessage(msg.id, msg.groupId);
+          if (!dbMsg || dbMsg.is_deleted) continue;
+
+          // Send notification
+          await notifyUser(
+            userId,
+            msg.groupTitle,
+            msg.text,
+            originalQuery,
+            msg.id,
+            msg.groupId,
+            dbMsg.sender_name ?? undefined,
+            dbMsg.sender_username ?? undefined,
+            undefined, // no media for cached examples
+            "🔥 Ты отметил как релевантный"
+          );
+
+          // Mark as matched to avoid duplicate in scanFromCache
+          queries.markMessageMatched(subscriptionId, msg.id, msg.groupId);
+          hotSentCount++;
+        }
+        if (hotSentCount > 0) {
+          botLog.info({ userId, subscriptionId, hotSentCount }, "Sent hot examples as notifications");
+        }
+      }
 
       // Generate BGE-M3 embeddings in background (non-blocking)
       generateKeywordEmbeddings(positiveKeywords, negativeKeywords)

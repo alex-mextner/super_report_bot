@@ -14,6 +14,7 @@ export interface CachedMessage {
   senderName?: string;
   senderUsername?: string;
   date: number; // unix timestamp
+  isDeleted?: boolean; // true if soft-deleted
 }
 
 // Convert StoredMessage from DB to CachedMessage interface
@@ -130,4 +131,22 @@ export function saveTopic(groupId: number, topicId: number, title: string | null
 export function getTopicsByGroup(groupId: number): Array<{ id: number; title: string | null }> {
   const topics = queries.getTopicsByGroup(groupId);
   return topics.map((t) => ({ id: t.topic_id, title: t.title }));
+}
+
+// Get messages including soft-deleted ones (for example search)
+export function getMessagesIncludingDeleted(groupId: number): CachedMessage[] {
+  const messages = queries.getMessagesIncludingDeleted(groupId, 1000, 0);
+  return messages.map((m) => ({
+    id: m.message_id,
+    groupId: m.group_id,
+    groupTitle: m.group_title ?? "",
+    topicId: m.topic_id ?? undefined,
+    topicTitle: m.topic_title ?? undefined,
+    text: m.text,
+    senderId: m.sender_id ?? undefined,
+    senderName: m.sender_name ?? undefined,
+    senderUsername: m.sender_username ?? undefined,
+    date: m.timestamp,
+    isDeleted: m.is_deleted === 1,
+  }));
 }

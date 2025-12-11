@@ -1,5 +1,6 @@
-import { getMessages, getAllCachedMessages } from "../cache/messages.ts";
-import { calculateKeywordNgramSimilarity } from "../matcher/ngram.ts";
+import { getMessagesIncludingDeleted, getAllCachedMessages } from "../cache/messages.ts";
+import { calculateKeywordNgramSimilarity, phraseMatches } from "../matcher/ngram.ts";
+import { generateNgrams } from "../matcher/normalize.ts";
 import { semanticSearch } from "../embeddings/search.ts";
 import type { RatingExample } from "../types.ts";
 import { botLog } from "../logger.ts";
@@ -10,6 +11,7 @@ export interface SimilarMessage {
   groupId: number;
   groupTitle: string;
   score: number;
+  isDeleted?: boolean;
 }
 
 /**
@@ -89,6 +91,7 @@ export async function findSimilarMessages(
 
 /**
  * Fallback: N-gram based similarity search (used when BGE unavailable)
+ * Now includes soft-deleted messages and uses bridge check for negative keywords
  */
 function findSimilarByNgram(
   keywords: string[],
@@ -101,10 +104,10 @@ function findSimilarByNgram(
 
   const scored: SimilarMessage[] = [];
 
-  // Get messages from specified groups or all cached
+  // Get messages from specified groups INCLUDING deleted ones
   const messagesToCheck =
     groupIds.length > 0
-      ? groupIds.flatMap((gid) => getMessages(gid))
+      ? groupIds.flatMap((gid) => getMessagesIncludingDeleted(gid))
       : getAllCachedMessages();
 
   botLog.debug(
@@ -112,20 +115,29 @@ function findSimilarByNgram(
     "N-gram fallback: searching for similar messages"
   );
 
-  // Pre-compute negative keywords set for fast lookup
-  const negativeSet = new Set(negativeKeywords.map((k) => k.toLowerCase()));
-
   for (const msg of messagesToCheck) {
     // Skip very short messages
     if (!msg.text || msg.text.length < 20) continue;
 
-    // Check for negative keywords
+    // Check for negative keywords with bridge check for multi-word phrases
     const textLower = msg.text.toLowerCase();
     let hasNegative = false;
-    for (const neg of negativeSet) {
-      if (textLower.includes(neg)) {
-        hasNegative = true;
-        break;
+
+    for (const neg of negativeKeywords) {
+      const negLower = neg.toLowerCase();
+      if (negLower.includes(" ")) {
+        // Multi-word: use bridge check (n-gram phrase matching)
+        const textNgrams = generateNgrams(textLower, 3);
+        if (phraseMatches(textNgrams, negLower, 0.85)) {
+          hasNegative = true;
+          break;
+        }
+      } else {
+        // Single word: simple includes
+        if (textLower.includes(negLower)) {
+          hasNegative = true;
+          break;
+        }
       }
     }
     if (hasNegative) continue;
@@ -140,6 +152,7 @@ function findSimilarByNgram(
         groupId: msg.groupId,
         groupTitle: msg.groupTitle,
         score,
+        isDeleted: msg.isDeleted,
       });
     }
   }
@@ -182,7 +195,8 @@ export async function findSimilarWithFallback(
   const keywords = tokenizeQuery(query);
   if (keywords.length === 0) return results;
 
-  const thresholds = [0.15, 0.05, 0.01];
+  // Minimum threshold 0.10 to avoid irrelevant results
+  const thresholds = [0.15, 0.10];
 
   for (const threshold of thresholds) {
     const ngramResults = findSimilarByNgram(
@@ -216,5 +230,6 @@ export function toRatingExamples(messages: SimilarMessage[]): RatingExample[] {
     groupId: msg.groupId,
     groupTitle: msg.groupTitle,
     isGenerated: false,
+    isDeleted: msg.isDeleted,
   }));
 }

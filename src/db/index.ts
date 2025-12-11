@@ -323,6 +323,10 @@ const stmts = {
     `SELECT * FROM messages WHERE group_id = ? AND is_deleted = 0
      ORDER BY timestamp DESC LIMIT ? OFFSET ?`
   ),
+  getMessagesByGroupIncludingDeleted: db.prepare<StoredMessage, [number, number, number]>(
+    `SELECT * FROM messages WHERE group_id = ?
+     ORDER BY timestamp DESC LIMIT ? OFFSET ?`
+  ),
   getMessagesByGroupAndTopic: db.prepare<StoredMessage, [number, number, number, number]>(
     `SELECT * FROM messages WHERE group_id = ? AND topic_id = ? AND is_deleted = 0
      ORDER BY timestamp DESC LIMIT ? OFFSET ?`
@@ -939,6 +943,11 @@ export const queries = {
       return stmts.getMessagesByGroup.all(groupId, limit, offset);
     }
     return stmts.getAllMessages.all(limit, offset);
+  },
+
+  // Get messages including soft-deleted (for example search)
+  getMessagesIncludingDeleted(groupId: number, limit: number = 1000, offset: number = 0): StoredMessage[] {
+    return stmts.getMessagesByGroupIncludingDeleted.all(groupId, limit, offset);
   },
 
   getMessagesCount(groupId?: number): number {
