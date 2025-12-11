@@ -352,11 +352,8 @@ export const startGroupSelection = {
     if (event.type === "START_GROUP_SELECTION") return event.available;
     return [];
   },
-  // Pre-select all groups by default
-  selectedGroups: ({ event }: { event: BotEvent }) => {
-    if (event.type === "START_GROUP_SELECTION") return event.available;
-    return [];
-  },
+  // Start with no groups selected by default
+  selectedGroups: () => [] as BotContext["selectedGroups"],
 };
 
 /**
