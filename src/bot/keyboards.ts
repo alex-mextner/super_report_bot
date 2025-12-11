@@ -723,6 +723,9 @@ export function regionSelectionKeyboard(
     kb.row();
   }
 
+  // "Other" button for users from unlisted countries
+  kb.text("🌍 Другой", JSON.stringify({ action: "select_region", code: "other" }));
+
   return kb;
 }
 

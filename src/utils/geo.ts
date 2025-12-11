@@ -364,6 +364,7 @@ export function getDefaultCurrency(countryCode: string): string | null {
  * Get human-readable country name in Russian
  */
 export function getCountryName(code: string): string {
+  if (code === "other") return "Другой";
   const country = COUNTRIES.find((c) => c.code === code);
   if (!country) return code;
   // Return first Russian name (capitalized)
