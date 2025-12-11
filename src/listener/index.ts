@@ -322,6 +322,7 @@ async function toIncomingMessage(msg: Message): Promise<IncomingMessage | null> 
     id: msg.id,
     group_id: chat.id,
     group_title: chat.title || "Unknown",
+    group_username: (chat as { username?: string }).username ?? undefined,
     text,
     sender_name: msg.sender?.displayName || "Unknown",
     sender_username: msg.sender?.username ?? undefined,
@@ -512,6 +513,7 @@ async function processMessage(msg: Message): Promise<void> {
           await notifyUser(
             userTelegramId,
             incomingMsg.group_title,
+            incomingMsg.group_username,
             notificationText,
             subscription.original_query,
             incomingMsg.id,
@@ -588,6 +590,7 @@ async function processMessage(msg: Message): Promise<void> {
           await notifyUser(
             userTelegramId,
             incomingMsg.group_title,
+            incomingMsg.group_username,
             originalText,
             subscription.original_query,
             incomingMsg.id,
@@ -1032,6 +1035,7 @@ export async function scanGroupHistory(
               await notifyUser(
                 userTelegramId,
                 incomingMsg.group_title,
+                incomingMsg.group_username,
                 incomingMsg.text,
                 subscription.original_query,
                 incomingMsg.id,
@@ -1061,6 +1065,7 @@ export async function scanGroupHistory(
               await notifyUser(
                 userTelegramId,
                 incomingMsg.group_title,
+                incomingMsg.group_username,
                 incomingMsg.text,
                 subscription.original_query,
                 incomingMsg.id,
@@ -1334,6 +1339,7 @@ export async function scanFromCache(
         await notifyUser(
           userTelegramId,
           match.groupTitle,
+          undefined, // no group username in cache scan
           match.text,
           subscription.original_query,
           match.messageId,

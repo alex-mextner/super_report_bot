@@ -165,6 +165,7 @@ export interface IncomingMessage {
   id: number;
   group_id: number;
   group_title: string;
+  group_username?: string; // public username for link to group
   text: string;
   sender_name: string;
   sender_username?: string;

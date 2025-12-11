@@ -3124,6 +3124,7 @@ ${bold("Выбери группы для мониторинга:")}
           await notifyUser(
             userId,
             msg.groupTitle,
+            undefined, // no group username for cached examples
             msg.text,
             originalQuery,
             msg.id,
@@ -3853,33 +3854,40 @@ function buildMessageLink(groupId: number, messageId: number): string {
 
 /**
  * Build caption for notification message
+ * Format:
+ *   <Quote from post>
+ *
+ *   Группа: <Group Name> (link if public)
+ *   <Sender Name> @username
  */
 function buildNotificationCaption(
   groupTitle: string,
-  subscriptionQuery: string,
+  groupUsername: string | undefined,
   messageText: string,
   senderName?: string,
   senderUsername?: string,
-  reasoning?: string,
   maxLength: number = 1000 // Telegram caption limit is 1024
 ): string {
+  // Group line (with link if username available)
+  const groupLine = groupUsername
+    ? `Группа: [${groupTitle}](https://t.me/${groupUsername})`
+    : `Группа: ${groupTitle}`;
+
+  // Author line
   let authorLine = "";
   if (senderName) {
     authorLine = senderUsername
-      ? `\nАвтор: ${senderName} (@${senderUsername})`
-      : `\nАвтор: ${senderName}`;
+      ? `${senderName} @${senderUsername}`
+      : senderName;
   }
 
-  // Add reasoning line if available
-  const reasonLine = reasoning ? `\n\n💡 Причина: ${reasoning}` : "";
-
-  const prefix = `🔔 Найдено совпадение!\n\nГруппа: ${groupTitle}\n\nЗапрос: ${subscriptionQuery}${authorLine}${reasonLine}\n\nСообщение:\n`;
-  const availableForText = maxLength - prefix.length - 3; // -3 for "..."
+  const suffix = `\n\n${groupLine}\n${authorLine}`;
+  const availableForText = maxLength - suffix.length - 3; // -3 for "..."
   const truncatedText = messageText.length > availableForText
     ? messageText.slice(0, availableForText) + "..."
     : messageText;
 
-  return prefix + truncatedText;
+  return truncatedText + suffix;
 }
 
 /**
@@ -3922,6 +3930,7 @@ function buildNotificationKeyboard(
 export async function notifyUser(
   telegramId: number,
   groupTitle: string,
+  groupUsername: string | undefined,
   messageText: string,
   subscriptionQuery: string,
   messageId?: number,
@@ -3939,16 +3948,15 @@ export async function notifyUser(
     if (media && media.length > 0) {
       const caption = buildNotificationCaption(
         groupTitle,
-        subscriptionQuery,
+        groupUsername,
         messageText,
         senderName,
         senderUsername,
-        reasoning,
         1000 // Leave some room for Telegram formatting
       );
 
       if (media.length === 1) {
-        // Single photo or video
+        // Single photo or video — caption + keyboard in same message
         const item = media[0]!;
         const blob = new Blob([item.buffer], { type: item.mimeType });
 
@@ -3957,6 +3965,7 @@ export async function notifyUser(
             chat_id: telegramId,
             photo: blob,
             caption,
+            parse_mode: "Markdown",
             reply_markup: keyboard,
           });
         } else {
@@ -3964,9 +3973,20 @@ export async function notifyUser(
             chat_id: telegramId,
             video: blob,
             caption,
+            parse_mode: "Markdown",
             reply_markup: keyboard,
           });
         }
+
+        // Send query + reasoning as separate message
+        const detailsText = reasoning
+          ? `**${subscriptionQuery}**\n💡 Причина: ${reasoning}`
+          : `**${subscriptionQuery}**`;
+        await bot.api.sendMessage({
+          chat_id: telegramId,
+          text: detailsText,
+          parse_mode: "Markdown",
+        });
       } else {
         // Album (2-10 media items)
         const mediaGroup = media.slice(0, 10).map((item, i) => {
@@ -3975,6 +3995,7 @@ export async function notifyUser(
             type: item.type as "photo" | "video",
             media: blob,
             caption: i === 0 ? caption : undefined,
+            parse_mode: i === 0 ? ("Markdown" as const) : undefined,
           };
         });
 
@@ -3983,31 +4004,43 @@ export async function notifyUser(
           media: mediaGroup as Parameters<typeof bot.api.sendMediaGroup>[0]["media"],
         });
 
-        // Send keyboard separately (Telegram API limitation for media groups)
-        if (keyboard) {
-          await bot.api.sendMessage({
-            chat_id: telegramId,
-            text: "👆 Детали",
-            reply_markup: keyboard,
-          });
-        }
+        // Send query + reasoning + keyboard as separate message
+        const detailsText = reasoning
+          ? `**${subscriptionQuery}**\n💡 Причина: ${reasoning}`
+          : `**${subscriptionQuery}**`;
+        await bot.api.sendMessage({
+          chat_id: telegramId,
+          text: detailsText,
+          parse_mode: "Markdown",
+          reply_markup: keyboard,
+        });
       }
     } else {
       // Text-only notification
       const caption = buildNotificationCaption(
         groupTitle,
-        subscriptionQuery,
+        groupUsername,
         messageText,
         senderName,
         senderUsername,
-        reasoning,
         4000 // Telegram message limit is 4096
       );
 
       await bot.api.sendMessage({
         chat_id: telegramId,
         text: caption,
+        parse_mode: "Markdown",
         reply_markup: keyboard,
+      });
+
+      // Send query + reasoning as separate message
+      const detailsText = reasoning
+        ? `**${subscriptionQuery}**\n💡 Причина: ${reasoning}`
+        : `**${subscriptionQuery}**`;
+      await bot.api.sendMessage({
+        chat_id: telegramId,
+        text: detailsText,
+        parse_mode: "Markdown",
       });
     }
 
