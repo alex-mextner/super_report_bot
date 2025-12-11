@@ -11,6 +11,7 @@
 import { queries } from "../db/index.ts";
 import { apiLog } from "../logger.ts";
 import { analyzeListingImage, type ListingImageAnalysis } from "./vision.ts";
+import { semanticSearch } from "../embeddings/search.ts";
 import type { GroupMetadata } from "../types.ts";
 
 const BRAVE_API = "https://api.search.brave.com/res/v1/web/search";
@@ -791,13 +792,42 @@ function buildTelegramLink(groupId: number, messageId: number): string | null {
   return `https://t.me/c/${chatId}/${messageId}`;
 }
 
-function findSimilarInHistory(items: Array<{ name: string }>, limit: number = 5): SimilarProduct[] {
+async function findSimilarInHistory(items: Array<{ name: string }>, limit: number = 5): Promise<SimilarProduct[]> {
   if (items.length === 0) return [];
 
   const firstItem = items[0];
   if (!firstItem) return [];
 
-  const keywords = firstItem.name.toLowerCase().split(/\s+/).slice(0, 3).join(" ");
+  try {
+    // Semantic search via BGE-M3 + sqlite-vec
+    const similar = await semanticSearch(firstItem.name, limit * 3);
+
+    return similar
+      .map((msg) => {
+        const priceInfo = extractPriceFromText(msg.text);
+        return {
+          id: msg.id,
+          groupId: msg.groupId,
+          messageId: msg.messageId,
+          text: msg.text.slice(0, 150),
+          price: priceInfo?.price ?? null,
+          currency: priceInfo?.currency ?? null,
+          date: msg.timestamp,
+          link: buildTelegramLink(msg.groupId, msg.messageId),
+        };
+      })
+      .filter((p) => p.price !== null)
+      .slice(0, limit);
+  } catch (error) {
+    // Fallback to LIKE search if semantic search fails
+    apiLog.warn({ err: error }, "Semantic search failed, falling back to LIKE");
+    return findSimilarByLike(firstItem.name, limit);
+  }
+}
+
+// Fallback: simple LIKE search (used when BGE unavailable)
+function findSimilarByLike(name: string, limit: number): SimilarProduct[] {
+  const keywords = name.toLowerCase().split(/\s+/).slice(0, 3).join(" ");
   const messages = queries.searchMessagesLike(keywords, 20);
 
   return messages
@@ -818,59 +848,192 @@ function findSimilarInHistory(items: Array<{ name: string }>, limit: number = 5)
     .slice(0, limit);
 }
 
+// ============= Overall Verdict Helpers =============
+
+function formatNumber(n: number): string {
+  return n.toLocaleString("ru-RU", { maximumFractionDigits: 0 });
+}
+
+function formatPhotoSection(img: ListingImageAnalysis | undefined): string | null {
+  if (!img) return null;
+
+  const qualityMap: Record<string, string> = {
+    real_photo: "Реальное фото",
+    stock_photo: "Возможно stock-фото ⚠️",
+    screenshot: "Скриншот ⚠️",
+    unknown: "Фото",
+  };
+
+  const quality = qualityMap[img.quality] || "Фото";
+  const lines = [`📷 ${quality}`];
+
+  if (img.description) {
+    lines.push(`   └ ${img.description}`);
+  }
+
+  if (img.suspiciousFlags?.length > 0) {
+    for (const flag of img.suspiciousFlags) {
+      lines.push(`   └ ⚠️ ${flag}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function formatPriceSection(item: ItemAnalysis): string {
+  const lines: string[] = [];
+
+  // Item name + price + verdict
+  const verdictEmoji: Record<string, string> = {
+    good_deal: "✅",
+    overpriced: "❌",
+    fair: "➖",
+    unknown: "❓",
+  };
+  const verdictText: Record<string, string> = {
+    good_deal: "выгодная цена",
+    overpriced: "завышена",
+    fair: "адекватная цена",
+    unknown: "",
+  };
+
+  const emoji = verdictEmoji[item.priceVerdict] || "";
+  const verdict = verdictText[item.priceVerdict] || "";
+  const currency = item.displayCurrency || item.extractedCurrency || "";
+
+  let priceStr = "";
+  if (item.priceInDisplayCurrency) {
+    priceStr = `${formatNumber(item.priceInDisplayCurrency)} ${currency}`;
+  } else if (item.extractedPrice) {
+    priceStr = item.extractedPrice;
+  }
+
+  if (priceStr) {
+    lines.push(`💰 ${item.name}: ${priceStr}${verdict ? ` — ${verdict}` : ""} ${emoji}`);
+  } else {
+    lines.push(`💰 ${item.name}: цена не указана ${emoji}`);
+  }
+
+  // Market price range
+  if (item.priceDataFound && item.marketPriceMin && item.marketPriceMax) {
+    const marketCurrency = item.displayCurrency || item.marketCurrency || "";
+    const min = item.marketAvgInDisplayCurrency
+      ? formatNumber(item.marketPriceMin * (item.marketAvgInDisplayCurrency / (item.marketPriceAvg || 1)))
+      : formatNumber(item.marketPriceMin);
+    const max = item.marketAvgInDisplayCurrency
+      ? formatNumber(item.marketPriceMax * (item.marketAvgInDisplayCurrency / (item.marketPriceAvg || 1)))
+      : formatNumber(item.marketPriceMax);
+    const avg = item.marketAvgInDisplayCurrency
+      ? formatNumber(item.marketAvgInDisplayCurrency)
+      : item.marketPriceAvg
+        ? formatNumber(item.marketPriceAvg)
+        : null;
+
+    let marketLine = `   └ Рынок: ${min}–${max} ${marketCurrency}`;
+    if (avg) {
+      marketLine += ` (avg ${avg})`;
+    }
+    lines.push(marketLine);
+  } else if (!item.priceDataFound) {
+    lines.push("   └ Рыночные данные не найдены");
+  }
+
+  // Not recommended reason
+  if (!item.worthBuying && item.worthBuyingReason) {
+    lines.push(`   └ 🚫 ${item.worthBuyingReason}`);
+  }
+
+  return lines.join("\n");
+}
+
+function formatHistorySection(similar: SimilarProduct[] | undefined): string | null {
+  if (!similar || similar.length === 0) return null;
+
+  const withPrice = similar.filter((s) => s.price !== null);
+  if (withPrice.length === 0) return null;
+
+  const prices = withPrice.map((s) => s.price!);
+  const minPrice = Math.min(...prices);
+  const maxPrice = Math.max(...prices);
+  const currency = withPrice[0]?.currency || "";
+
+  return `📜 История: ${withPrice.length} похожих за ${formatNumber(minPrice)}–${formatNumber(maxPrice)} ${currency}`;
+}
+
+function formatFlagsSection(flags: string[]): string | null {
+  if (!flags || flags.length === 0) return null;
+
+  const lines = ["⚠️ Обрати внимание:"];
+  for (const flag of flags) {
+    lines.push(`   • ${flag}`);
+  }
+  return lines.join("\n");
+}
+
+function generateFinalConclusion(items: ItemAnalysis[], scamRisk: ScamRisk, listingType: string | null): string {
+  if (scamRisk.level === "high") {
+    return "🚫 Высокий риск мошенничества — не рекомендуется";
+  }
+
+  if (scamRisk.level === "medium") {
+    return "⚡ Умеренный риск — проверьте продавца и товар лично";
+  }
+
+  const goodDeals = items.filter((i) => i.priceVerdict === "good_deal");
+  const overpriced = items.filter((i) => i.priceVerdict === "overpriced");
+  const noData = items.filter((i) => !i.priceDataFound);
+
+  if (goodDeals.length > 0 && overpriced.length === 0) {
+    return "✅ Хорошее предложение";
+  }
+
+  if (overpriced.length > 0) {
+    return "💸 Цена завышена — можно поторговаться";
+  }
+
+  if (noData.length === items.length) {
+    return "❓ Недостаточно данных для оценки цены";
+  }
+
+  if (listingType === "rent") {
+    return "🏠 Проверьте документы и осмотрите объект лично";
+  }
+
+  return "➖ Адекватное предложение";
+}
+
 // ============= Overall Verdict =============
 
 function generateOverallVerdict(
   items: ItemAnalysis[],
   scamRisk: ScamRisk,
-  listingType: string | null
+  listingType: string | null,
+  imageAnalysis?: ListingImageAnalysis,
+  similarItems?: SimilarProduct[]
 ): string {
-  const parts: string[] = [];
+  const sections: string[] = [];
 
-  // Scam risk summary
-  if (scamRisk.level === "high") {
-    parts.push("⚠️ ВЫСОКИЙ РИСК МОШЕННИЧЕСТВА");
-  } else if (scamRisk.level === "medium") {
-    parts.push("⚡ Умеренный риск — будьте внимательны");
+  // 1. Photo section
+  const photoSection = formatPhotoSection(imageAnalysis);
+  if (photoSection) sections.push(photoSection);
+
+  // 2. Price section for each item
+  for (const item of items) {
+    sections.push(formatPriceSection(item));
   }
 
-  // Price summary
-  const goodDeals = items.filter((i) => i.priceVerdict === "good_deal");
-  const overpriced = items.filter((i) => i.priceVerdict === "overpriced");
+  // 3. History section
+  const historySection = formatHistorySection(similarItems);
+  if (historySection) sections.push(historySection);
 
-  if (goodDeals.length > 0) {
-    parts.push(`✅ Выгодная цена: ${goodDeals.map((i) => i.name).join(", ")}`);
-  }
-  if (overpriced.length > 0) {
-    parts.push(`❌ Завышена цена: ${overpriced.map((i) => i.name).join(", ")}`);
-  }
+  // 4. Flags section (only if there are flags)
+  const flagsSection = formatFlagsSection(scamRisk.flags);
+  if (flagsSection) sections.push(flagsSection);
 
-  // Not recommended (only if negative reviews found)
-  const notWorth = items.filter((i) => !i.worthBuying && i.worthBuyingReason);
-  if (notWorth.length > 0) {
-    for (const item of notWorth) {
-      parts.push(`🚫 Не рекомендуется: ${item.name}`);
-      if (item.worthBuyingReason) {
-        parts.push(`   └ ${item.worthBuyingReason}`);
-      }
-    }
-  }
+  // 5. Final conclusion
+  sections.push(generateFinalConclusion(items, scamRisk, listingType));
 
-  // Insufficient data (price not found, but NOT "not recommended")
-  const noData = items.filter((i) => !i.priceDataFound && i.worthBuying);
-  if (noData.length > 0) {
-    parts.push(`❓ Недостаточно данных для оценки: ${noData.map((i) => i.name).join(", ")}`);
-  }
-
-  if (parts.length === 0) {
-    if (listingType === "rent") {
-      parts.push("Объявление об аренде. Проверьте документы и осмотрите объект лично.");
-    } else {
-      parts.push("Анализ завершён.");
-    }
-  }
-
-  return parts.join("\n");
+  return sections.join("\n\n");
 }
 
 // ============= Main Function =============
@@ -961,10 +1124,16 @@ export async function deepAnalyze(
   };
 
   // Step 5: Find similar in history
-  const similarItems = findSimilarInHistory(listingInfo.items);
+  const similarItems = await findSimilarInHistory(listingInfo.items);
 
   // Step 6: Generate overall verdict
-  const overallVerdict = generateOverallVerdict(items, scamRisk, listingInfo.listingType);
+  const overallVerdict = generateOverallVerdict(
+    items,
+    scamRisk,
+    listingInfo.listingType,
+    imageAnalysis,
+    similarItems
+  );
 
   apiLog.info(
     {

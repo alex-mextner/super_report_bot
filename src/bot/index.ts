@@ -212,18 +212,17 @@ async function startRatingFlow(
   context: any,
   userId: number,
   query: string,
-  draftKeywords: string[],
   clarificationContext?: string
 ): Promise<void> {
   // Get user's groups
   const userGroups = queries.getUserGroups(userId);
   const groupIds = userGroups.map((g) => g.id);
 
-  // Search for similar messages in cache
+  // Search for similar messages in cache using query directly (semantic search)
   let examples: RatingExample[] = [];
 
   if (groupIds.length > 0) {
-    const similar = findSimilarWithFallback(draftKeywords, groupIds, 3);
+    const similar = await findSimilarWithFallback(query, groupIds, 3);
     examples = toRatingExamples(similar);
     botLog.debug({ userId, found: examples.length }, "Found similar messages for rating");
   }
@@ -909,21 +908,8 @@ async function processSubscriptionQuery(context: any, userId: number, query: str
       // Continue without clarification
     }
 
-    // No clarification needed — go to draft keywords + rating
-    let draftKeywords: string[];
-    try {
-      draftKeywords = await runWithRecovery(
-        userId,
-        "GENERATE_KEYWORDS",
-        undefined,
-        () => generateDraftKeywords(query)
-      );
-    } catch (error) {
-      botLog.error({ err: error, userId }, "Draft keywords generation failed");
-      draftKeywords = generateKeywordsFallback(query).positive_keywords;
-    }
-
-    await startRatingFlow(context, userId, query, draftKeywords);
+    // No clarification needed — go directly to rating (semantic search by query)
+    await startRatingFlow(context, userId, query);
   } else {
     // Advanced mode: start with clarification questions
     // Save query for recovery before starting LLM call
@@ -941,22 +927,9 @@ async function processSubscriptionQuery(context: any, userId: number, query: str
       );
     } catch (error) {
       botLog.error({ err: error, userId }, "LLM clarification generation failed");
-      // Fallback: skip clarification, go to draft keywords + rating
+      // Fallback: skip clarification, go directly to rating (semantic search by query)
       await context.send("Не удалось сгенерировать вопросы, перехожу к примерам...");
-
-      let draftKeywords: string[];
-      try {
-        draftKeywords = await runWithRecovery(
-          userId,
-          "GENERATE_KEYWORDS",
-          undefined,
-          () => generateDraftKeywords(query)
-        );
-      } catch {
-        draftKeywords = generateKeywordsFallback(query).positive_keywords;
-      }
-
-      await startRatingFlow(context, userId, query, draftKeywords);
+      await startRatingFlow(context, userId, query);
       return;
     }
 
@@ -1676,25 +1649,13 @@ ${bold("ИИ:")} ${result.summary}
         reply_markup: skipQuestionKeyboard(),
       });
     } else {
-      // All questions answered — generate draft keywords and start rating flow
+      // All questions answered — start rating flow (semantic search by query)
       await context.send("Анализирую ответы...");
       const updatedC = ctx(userId);
       const finalAnswers = updatedC.clarification?.answers || [...answers, text];
       const clarificationContext = formatClarificationContext(questions, finalAnswers);
 
-      let draftKeywords: string[];
-      try {
-        draftKeywords = await runWithRecovery(
-          userId,
-          "GENERATE_KEYWORDS",
-          undefined,
-          () => generateDraftKeywords(originalQuery)
-        );
-      } catch {
-        draftKeywords = generateKeywordsFallback(originalQuery).positive_keywords;
-      }
-
-      await startRatingFlow(context, userId, originalQuery, draftKeywords, clarificationContext);
+      await startRatingFlow(context, userId, originalQuery, clarificationContext);
     }
     return;
   }
@@ -2038,24 +1999,12 @@ ${c.pendingSub.llmDescription}
           reply_markup: skipQuestionKeyboard(),
         });
       } else {
-        // All questions done — start rating flow
+        // All questions done — start rating flow (semantic search by query)
         await context.answer({ text: "Генерирую..." });
         await context.editText("Анализирую ответы...");
         const clarificationContext = formatClarificationContext(questions, answers);
 
-        let draftKeywords: string[];
-        try {
-          draftKeywords = await runWithRecovery(
-            userId,
-            "GENERATE_KEYWORDS",
-            undefined,
-            () => generateDraftKeywords(originalQuery)
-          );
-        } catch {
-          draftKeywords = generateKeywordsFallback(originalQuery).positive_keywords;
-        }
-
-        await startRatingFlow(context, userId, originalQuery, draftKeywords, clarificationContext);
+        await startRatingFlow(context, userId, originalQuery, clarificationContext);
       }
       break;
     }

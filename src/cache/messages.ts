@@ -1,5 +1,6 @@
 import { queries } from "../db/index.ts";
 import { listenerLog } from "../logger.ts";
+import { queueForEmbedding } from "../embeddings/queue.ts";
 import type { StoredMessage } from "../types.ts";
 
 export interface CachedMessage {
@@ -47,6 +48,15 @@ export function addMessage(msg: CachedMessage): void {
     sender_username: msg.senderUsername ?? null,
     timestamp: msg.date,
   });
+
+  // Queue for embedding indexing (async, non-blocking)
+  // Skip very short messages that won't produce meaningful embeddings
+  if (msg.text.length > 20) {
+    const stored = queries.getMessage(msg.id, msg.groupId);
+    if (stored) {
+      queueForEmbedding(stored.id, msg.text);
+    }
+  }
 }
 
 export function updateMessage(groupId: number, messageId: number, newText: string): void {

@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import * as sqliteVec from "sqlite-vec";
 import type {
   User,
   UserMode,
@@ -20,7 +21,46 @@ import type {
 } from "../types.ts";
 import { runMigrations } from "./migrations.ts";
 
+// macOS builtin SQLite doesn't support extensions - use Homebrew's SQLite
+// https://alexgarcia.xyz/sqlite-vec/js.html
+if (process.platform === "darwin" && process.env.NODE_ENV !== "test") {
+  try {
+    // Try common Homebrew paths
+    const sqlitePaths = [
+      "/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib", // Apple Silicon
+      "/usr/local/opt/sqlite3/lib/libsqlite3.dylib", // Intel Mac
+    ];
+    for (const path of sqlitePaths) {
+      if (Bun.file(path).size > 0) {
+        Database.setCustomSQLite(path);
+        break;
+      }
+    }
+  } catch {
+    // Ignore, will try with default SQLite
+  }
+}
+
 const db = new Database("data.db", { create: true });
+
+// Track if sqlite-vec was successfully loaded
+let sqliteVecLoaded = false;
+
+// Load sqlite-vec extension for vector search (skip in test env - dynamic extension loading not supported)
+if (process.env.NODE_ENV !== "test") {
+  try {
+    sqliteVec.load(db);
+    sqliteVecLoaded = true;
+    console.log("sqlite-vec extension loaded successfully");
+  } catch (e) {
+    console.warn("sqlite-vec extension could not be loaded:", e);
+  }
+}
+
+/** Check if sqlite-vec extension is available */
+export function isSqliteVecAvailable(): boolean {
+  return sqliteVecLoaded;
+}
 
 // Initialize schema
 const schema = await Bun.file(new URL("./schema.sql", import.meta.url)).text();
@@ -1082,6 +1122,92 @@ export const queries = {
 
   getRecentlyActiveUsers(sinceTimestamp: number): User[] {
     return stmts.getActiveUsers.all(sinceTimestamp);
+  },
+
+  // === Message Embeddings (semantic search) ===
+
+  saveMessageEmbedding(messageId: number, embedding: number[]): void {
+    const vec = new Float32Array(embedding);
+    const bytes = new Uint8Array(vec.buffer);
+    db.prepare(`
+      INSERT OR REPLACE INTO message_embeddings (message_id, embedding)
+      VALUES (?, ?)
+    `).run(messageId, bytes);
+  },
+
+  findSimilarByEmbedding(
+    embedding: number[],
+    limit: number,
+    groupIds?: number[]
+  ): Array<StoredMessage & { distance: number }> {
+    const vec = new Float32Array(embedding);
+    const bytes = new Uint8Array(vec.buffer);
+
+    if (groupIds && groupIds.length > 0) {
+      // Filter by specific groups
+      const placeholders = groupIds.map(() => "?").join(",");
+      return db
+        .prepare<StoredMessage & { distance: number }, [Uint8Array, number, ...number[]]>(`
+          SELECT m.*, e.distance
+          FROM message_embeddings e
+          JOIN messages m ON m.id = e.message_id
+          WHERE e.embedding MATCH ?
+            AND k = ?
+            AND m.group_id IN (${placeholders})
+            AND m.is_deleted = 0
+          ORDER BY e.distance
+        `)
+        .all(bytes, limit, ...groupIds);
+    }
+
+    // All groups
+    return db
+      .prepare<StoredMessage & { distance: number }, [Uint8Array, number]>(`
+        SELECT m.*, e.distance
+        FROM message_embeddings e
+        JOIN messages m ON m.id = e.message_id
+        WHERE e.embedding MATCH ?
+          AND k = ?
+          AND m.is_deleted = 0
+        ORDER BY e.distance
+      `)
+      .all(bytes, limit);
+  },
+
+  getMessagesWithoutEmbedding(limit: number): StoredMessage[] {
+    return db
+      .prepare<StoredMessage, [number]>(`
+        SELECT m.* FROM messages m
+        LEFT JOIN message_embeddings e ON m.id = e.message_id
+        WHERE e.message_id IS NULL
+          AND m.is_deleted = 0
+          AND LENGTH(m.text) > 20
+        ORDER BY m.id
+        LIMIT ?
+      `)
+      .all(limit);
+  },
+
+  countMessagesWithoutEmbedding(): number {
+    const result = db
+      .prepare<{ count: number }, []>(`
+        SELECT COUNT(*) as count FROM messages m
+        LEFT JOIN message_embeddings e ON m.id = e.message_id
+        WHERE e.message_id IS NULL
+          AND m.is_deleted = 0
+          AND LENGTH(m.text) > 20
+      `)
+      .get();
+    return result?.count || 0;
+  },
+
+  hasEmbedding(messageId: number): boolean {
+    const result = db
+      .prepare<{ found: number }, [number]>(
+        "SELECT 1 as found FROM message_embeddings WHERE message_id = ? LIMIT 1"
+      )
+      .get(messageId);
+    return result !== null;
   },
 };
 

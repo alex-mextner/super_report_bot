@@ -1,5 +1,6 @@
 import { getMessages, getAllCachedMessages } from "../cache/messages.ts";
 import { calculateKeywordNgramSimilarity } from "../matcher/ngram.ts";
+import { semanticSearch } from "../embeddings/search.ts";
 import type { RatingExample } from "../types.ts";
 import { botLog } from "../logger.ts";
 
@@ -12,15 +13,89 @@ export interface SimilarMessage {
 }
 
 /**
- * Find similar messages in cache by keywords
- * Returns top N messages sorted by similarity score
+ * Simple tokenization for N-gram fallback (no LLM needed)
+ * Extracts meaningful words from query
  */
-export function findSimilarMessages(
-  keywords: string[],
+function tokenizeQuery(query: string): string[] {
+  return query
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ") // keep letters, numbers, spaces
+    .split(/\s+/)
+    .filter((w) => w.length >= 2) // skip single chars
+    .slice(0, 10); // limit tokens
+}
+
+/**
+ * Find similar messages using semantic search with N-gram fallback
+ * Returns top N messages sorted by similarity score
+ *
+ * @param query - user's search query text
+ * @param groupIds - groups to search in
+ * @param maxResults - max number of results
+ * @param negativeKeywords - words to exclude from results
+ */
+export async function findSimilarMessages(
+  query: string,
   groupIds: number[],
   maxResults: number = 3,
-  negativeKeywords: string[] = [],
-  threshold: number = 0.25
+  negativeKeywords: string[] = []
+): Promise<SimilarMessage[]> {
+  if (!query || query.trim().length === 0) return [];
+
+  // Pre-compute negative keywords set for filtering
+  const negativeSet = new Set(negativeKeywords.map((k) => k.toLowerCase()));
+
+  try {
+    // Semantic search via BGE-M3 + sqlite-vec
+    const similar = await semanticSearch(
+      query,
+      maxResults * 3, // fetch more to filter
+      groupIds.length > 0 ? groupIds : undefined
+    );
+
+    botLog.debug(
+      { query: query.slice(0, 50), groupIds, found: similar.length },
+      "Semantic search for similar messages"
+    );
+
+    // Filter by negative keywords and convert format
+    const results = similar
+      .filter((msg) => {
+        const textLower = msg.text.toLowerCase();
+        return !Array.from(negativeSet).some((neg) => textLower.includes(neg));
+      })
+      .map((msg) => ({
+        id: msg.id,
+        text: msg.text,
+        groupId: msg.groupId,
+        groupTitle: msg.groupTitle ?? "",
+        score: 1 - msg.distance, // distance → score (lower distance = higher score)
+      }))
+      .slice(0, maxResults);
+
+    botLog.debug(
+      { found: results.length, maxResults },
+      "Semantic similar messages search complete"
+    );
+
+    return results;
+  } catch (error) {
+    // Fallback to N-gram search if semantic search fails
+    botLog.warn({ err: error }, "Semantic search failed, falling back to N-gram");
+    const keywords = tokenizeQuery(query);
+    return findSimilarByNgram(keywords, groupIds, maxResults, negativeKeywords);
+  }
+}
+
+/**
+ * Fallback: N-gram based similarity search (used when BGE unavailable)
+ */
+function findSimilarByNgram(
+  keywords: string[],
+  groupIds: number[],
+  maxResults: number,
+  negativeKeywords: string[],
+  threshold: number = 0.15
 ): SimilarMessage[] {
   if (keywords.length === 0) return [];
 
@@ -34,7 +109,7 @@ export function findSimilarMessages(
 
   botLog.debug(
     { keywords: keywords.slice(0, 5), groupIds, messagesCount: messagesToCheck.length },
-    "Searching for similar messages"
+    "N-gram fallback: searching for similar messages"
   );
 
   // Pre-compute negative keywords set for fast lookup
@@ -75,7 +150,7 @@ export function findSimilarMessages(
 
   botLog.debug(
     { found: scored.length, returned: results.length, threshold },
-    "Similar messages search complete"
+    "N-gram similar messages search complete"
   );
 
   return results;
@@ -83,19 +158,34 @@ export function findSimilarMessages(
 
 /**
  * Find similar messages with progressive threshold relaxation
- * First tries standard threshold, then relaxes it to find more matches
+ * First tries semantic search, then falls back to N-gram with relaxed thresholds
+ *
+ * @param query - user's search query text
+ * @param groupIds - groups to search in
+ * @param maxResults - max number of results
+ * @param negativeKeywords - words to exclude from results
  */
-export function findSimilarWithFallback(
-  keywords: string[],
+export async function findSimilarWithFallback(
+  query: string,
   groupIds: number[],
   maxResults: number = 3,
   negativeKeywords: string[] = []
-): SimilarMessage[] {
-  // Thresholds to try in order (progressively relaxed)
-  const thresholds = [0.25, 0.15, 0.05];
+): Promise<SimilarMessage[]> {
+  // First try semantic search
+  const results = await findSimilarMessages(query, groupIds, maxResults, negativeKeywords);
+
+  if (results.length >= maxResults) {
+    return results;
+  }
+
+  // If not enough results, try N-gram with progressively relaxed thresholds
+  const keywords = tokenizeQuery(query);
+  if (keywords.length === 0) return results;
+
+  const thresholds = [0.15, 0.05, 0.01];
 
   for (const threshold of thresholds) {
-    const results = findSimilarMessages(
+    const ngramResults = findSimilarByNgram(
       keywords,
       groupIds,
       maxResults,
@@ -103,20 +193,17 @@ export function findSimilarWithFallback(
       threshold
     );
 
-    if (results.length >= maxResults) {
-      botLog.debug({ threshold, found: results.length }, "Found enough similar messages");
-      return results;
+    if (ngramResults.length >= maxResults) {
+      botLog.debug({ threshold, found: ngramResults.length }, "Found enough via N-gram fallback");
+      return ngramResults;
     }
 
-    // If we found some but not enough, keep what we have at this threshold
-    // and continue trying lower thresholds for remaining slots
-    if (results.length > 0 && threshold === thresholds[thresholds.length - 1]) {
-      return results;
+    if (ngramResults.length > results.length) {
+      return ngramResults;
     }
   }
 
-  // Return whatever we found at the lowest threshold
-  return findSimilarMessages(keywords, groupIds, maxResults, negativeKeywords, 0.01);
+  return results;
 }
 
 /**
