@@ -351,3 +351,48 @@ export function addGroupKeyboard(chatId: number, title?: string): InlineKeyboard
     })
   );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//                       GROUP METADATA KEYBOARDS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Yes/No/Skip keyboard for marketplace question
+ */
+export function marketplaceKeyboard(): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("Да", JSON.stringify({ action: "metadata_marketplace", value: true }))
+    .text("Нет", JSON.stringify({ action: "metadata_marketplace", value: false }))
+    .row()
+    .text("Пропустить →", JSON.stringify({ action: "metadata_skip" }));
+}
+
+/**
+ * Skip-only keyboard for text input questions (country/city/currency)
+ */
+export function metadataSkipKeyboard(): InlineKeyboard {
+  return new InlineKeyboard().text("Пропустить →", JSON.stringify({ action: "metadata_skip" }));
+}
+
+/**
+ * Keyboard for pre-filled value confirmation
+ * Shows checkmark button with value, and Change/Skip options
+ */
+export function metadataPrefilledKeyboard(value: string, displayLabel: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(`✓ ${displayLabel}`, JSON.stringify({ action: "metadata_confirm", value }))
+    .row()
+    .text("Изменить", JSON.stringify({ action: "metadata_change" }))
+    .text("Пропустить →", JSON.stringify({ action: "metadata_skip" }));
+}
+
+/**
+ * Keyboard for pre-filled currency confirmation (includes currency code)
+ */
+export function metadataCurrencyKeyboard(currencyCode: string, displayLabel: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(`✓ ${displayLabel} (${currencyCode})`, JSON.stringify({ action: "metadata_confirm", value: currencyCode }))
+    .row()
+    .text("Изменить", JSON.stringify({ action: "metadata_change" }))
+    .text("Пропустить →", JSON.stringify({ action: "metadata_skip" }));
+}

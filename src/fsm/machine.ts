@@ -130,6 +130,24 @@ export const userMachine = setup({
      * We need groups to monitor for the subscription to work.
      */
     hasSelectedGroups: guards.hasSelectedGroups,
+
+    /**
+     * Is the current metadata step the last one (currency)?
+     * Used to decide when to finish metadata collection for a group.
+     */
+    isLastMetadataStep: guards.isLastMetadataStep,
+
+    /**
+     * Does the metadata queue have more groups to process?
+     * After one group done, check if more groups need metadata.
+     */
+    hasMoreGroupsInQueue: guards.hasMoreGroupsInQueue,
+
+    /**
+     * Combined: last step AND more groups in queue.
+     * Used to decide if we should process next group after current finishes.
+     */
+    isLastStepWithMoreGroups: guards.isLastStepWithMoreGroups,
   },
 
   /**
@@ -315,6 +333,41 @@ export const userMachine = setup({
 
     /** Clear the pending query after processing */
     clearPendingQuery: assign(actions.clearPendingQuery),
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // GROUP METADATA COLLECTION ACTIONS
+    // Collecting marketplace/country/city/currency after adding a group
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /** Initialize queue for multiple groups added via links */
+    startMetadataQueue: assign(actions.startMetadataQueue),
+
+    /** Start metadata collection for a single group */
+    startMetadataCollection: assign(actions.startMetadataCollection),
+
+    /** User answered marketplace question */
+    setMetadataMarketplace: assign(actions.setMetadataMarketplace),
+
+    /** User entered text for country/city/currency */
+    setMetadataText: assign(actions.setMetadataText),
+
+    /** User confirmed pre-filled value */
+    confirmPrefilledMetadata: assign(actions.confirmPrefilledMetadata),
+
+    /** User wants to change pre-filled value */
+    changePrefilledMetadata: assign(actions.changePrefilledMetadata),
+
+    /** User skipped current metadata step */
+    skipMetadataStep: assign(actions.skipMetadataStep),
+
+    /** Clear metadata collection state */
+    clearGroupMetadata: assign(actions.clearGroupMetadata),
+
+    /** Move to next group in queue */
+    advanceMetadataQueue: assign(actions.advanceMetadataQueue),
+
+    /** Clear metadata queue */
+    clearMetadataQueue: assign(actions.clearMetadataQueue),
   },
 }).createMachine({
   /**
@@ -1040,6 +1093,24 @@ export const userMachine = setup({
           target: "idle",
           actions: "clearAddingGroups",
         },
+
+        /**
+         * Start collecting metadata for a group (after successful join).
+         * Handler sends this after addGroupForUser succeeds.
+         */
+        START_METADATA_COLLECTION: {
+          target: "collectingGroupMetadata",
+          actions: "startMetadataCollection",
+        },
+
+        /**
+         * Initialize queue for multiple groups (added via links).
+         * Handler sends this before START_METADATA_COLLECTION for first group.
+         */
+        START_METADATA_QUEUE: {
+          target: "addingGroup",
+          actions: "startMetadataQueue",
+        },
       },
     },
 
@@ -1081,6 +1152,130 @@ export const userMachine = setup({
         CANCEL: {
           target: "idle",
           actions: "clearAddingGroups",
+        },
+      },
+    },
+
+    /**
+     * ═════════════════════════════════════════════════════════════════════════════
+     *                    STATE: COLLECTING_GROUP_METADATA
+     * ═════════════════════════════════════════════════════════════════════════════
+     *
+     * After successfully adding a group, we ask optional metadata questions:
+     *   1. Is this a marketplace? (Yes/No/Skip)
+     *   2. Country? (text with fuzzy match to ISO / Skip)
+     *   3. City? (text / Skip)
+     *   4. Currency? (text with fuzzy match to ISO / Skip)
+     *
+     * All questions can be skipped. Values can be pre-filled from group title.
+     * After the last question (or skip), we return to addingGroup or process
+     * next group from queue.
+     */
+    collectingGroupMetadata: {
+      on: {
+        /**
+         * User answered Yes or No to marketplace question.
+         * Advances to country step.
+         */
+        METADATA_MARKETPLACE: {
+          target: "collectingGroupMetadata",
+          actions: "setMetadataMarketplace",
+        },
+
+        /**
+         * User entered text for country/city/currency.
+         * Handler normalizes before sending this event.
+         */
+        METADATA_TEXT: [
+          // If currency step (last) and more groups in queue - process next
+          {
+            target: "collectingGroupMetadata",
+            guard: "isLastStepWithMoreGroups",
+            actions: ["setMetadataText", "clearGroupMetadata", "advanceMetadataQueue"],
+          },
+          // If currency step (last) and no more groups - return to addingGroup
+          {
+            target: "addingGroup",
+            guard: "isLastMetadataStep",
+            actions: ["setMetadataText", "clearGroupMetadata", "clearMetadataQueue"],
+          },
+          // Otherwise advance to next step
+          {
+            target: "collectingGroupMetadata",
+            actions: "setMetadataText",
+          },
+        ],
+
+        /**
+         * User confirmed pre-filled value (clicked checkmark button).
+         */
+        METADATA_CONFIRM_PREFILLED: [
+          // Last step with more groups
+          {
+            target: "collectingGroupMetadata",
+            guard: "isLastStepWithMoreGroups",
+            actions: ["confirmPrefilledMetadata", "clearGroupMetadata", "advanceMetadataQueue"],
+          },
+          // Last step, no more groups
+          {
+            target: "addingGroup",
+            guard: "isLastMetadataStep",
+            actions: ["confirmPrefilledMetadata", "clearGroupMetadata", "clearMetadataQueue"],
+          },
+          // Otherwise advance
+          {
+            target: "collectingGroupMetadata",
+            actions: "confirmPrefilledMetadata",
+          },
+        ],
+
+        /**
+         * User wants to change pre-filled value (switch to text input).
+         */
+        METADATA_CHANGE_PREFILLED: {
+          target: "collectingGroupMetadata",
+          actions: "changePrefilledMetadata",
+        },
+
+        /**
+         * User skipped current question.
+         */
+        METADATA_SKIP: [
+          // Last step with more groups
+          {
+            target: "collectingGroupMetadata",
+            guard: "isLastStepWithMoreGroups",
+            actions: ["clearGroupMetadata", "advanceMetadataQueue"],
+          },
+          // Last step, no more groups
+          {
+            target: "addingGroup",
+            guard: "isLastMetadataStep",
+            actions: ["clearGroupMetadata", "clearMetadataQueue"],
+          },
+          // Otherwise advance to next step
+          {
+            target: "collectingGroupMetadata",
+            actions: "skipMetadataStep",
+          },
+        ],
+
+        /**
+         * Start metadata collection for next group (from queue).
+         * Handler sends this after processing queue.
+         */
+        START_METADATA_COLLECTION: {
+          target: "collectingGroupMetadata",
+          actions: "startMetadataCollection",
+        },
+
+        /**
+         * User cancels metadata collection.
+         * Skip all remaining metadata and return to adding groups.
+         */
+        CANCEL: {
+          target: "addingGroup",
+          actions: ["clearGroupMetadata", "clearMetadataQueue"],
         },
       },
     },

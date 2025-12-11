@@ -31,10 +31,23 @@ import {
   removeKeywordsKeyboard,
   ratingKeyboard,
   settingsKeyboard,
+  marketplaceKeyboard,
+  metadataSkipKeyboard,
+  metadataPrefilledKeyboard,
+  metadataCurrencyKeyboard,
 } from "./keyboards.ts";
 import { runWithRecovery } from "./operations.ts";
 import { interpretEditCommand } from "../llm/edit.ts";
 import { generateKeywordEmbeddings, checkBgeHealth } from "../llm/embeddings.ts";
+import {
+  parseGroupTitle,
+  matchCountry,
+  matchCurrency,
+  matchCity,
+  getDefaultCurrency,
+  getCountryName,
+  getCurrencyName,
+} from "../utils/geo.ts";
 
 /**
  * Regenerate BGE-M3 embeddings for a subscription (background, non-blocking)
@@ -659,17 +672,43 @@ bot.command("addgroup", async (context) => {
   await context.send(`Добавляю ${links.length} группу(ы)...`);
 
   const results: string[] = [];
+  const addedGroups: Array<{ groupId: number; groupTitle: string }> = [];
+
   for (const link of links) {
     const result = await addGroupByLink(userId, link);
     const displayValue = link.type === "username" ? link.value : link.value;
     if (result.success) {
       results.push(`✅ ${result.title}`);
+      addedGroups.push({ groupId: result.groupId!, groupTitle: result.title! });
     } else {
       results.push(`❌ ${displayValue}: ${result.error}`);
     }
   }
 
   await context.send(results.join("\n"));
+
+  // If groups were added — start metadata collection for each
+  if (addedGroups.length > 0) {
+    // Enter addingGroup state first
+    send(userId, { type: "ADDGROUP" });
+
+    // If multiple groups, create queue
+    if (addedGroups.length > 1) {
+      send(userId, { type: "START_METADATA_QUEUE", groups: addedGroups });
+    }
+
+    // Start with first group
+    const firstGroup = addedGroups[0]!;
+    const prefilled = parseGroupTitle(firstGroup.groupTitle);
+    send(userId, {
+      type: "START_METADATA_COLLECTION",
+      groupId: firstGroup.groupId,
+      groupTitle: firstGroup.groupTitle,
+      prefilled,
+    });
+
+    await askNextMetadataQuestion(context, userId);
+  }
 });
 
 // /groups command - list user's groups
@@ -796,7 +835,7 @@ function parseTelegramLinks(text: string): ParsedLink[] {
 async function addGroupByLink(
   userId: number,
   link: ParsedLink
-): Promise<{ success: true; title: string } | { success: false; error: string }> {
+): Promise<{ success: true; title: string; groupId: number } | { success: false; error: string }> {
   // Check for duplicate by trying to resolve the link
   const joinResult = await joinGroupByUserbot(
     link.type === "username" ? link.value : `https://${link.value}`
@@ -814,7 +853,7 @@ async function addGroupByLink(
   // Save to DB (isChannel = false by default, we can't easily detect this from link)
   queries.addUserGroup(userId, joinResult.chatId, joinResult.title, false);
 
-  return { success: true, title: joinResult.title };
+  return { success: true, title: joinResult.title, groupId: joinResult.chatId };
 }
 
 // Helper to show add group prompt
@@ -829,11 +868,13 @@ async function showAddGroupPrompt(
 }
 
 // Add group for user (join userbot if needed, save to DB)
+// Returns groupId on success for metadata collection
 async function addGroupForUser(
   context: { send: (text: string, options?: object) => Promise<unknown> },
   userId: number,
-  group: PendingGroup
-): Promise<void> {
+  group: PendingGroup,
+  skipMetadata: boolean = false
+): Promise<{ success: boolean; groupId?: number }> {
   const icon = group.isChannel ? "📢" : "👥";
 
   // Try to join
@@ -845,11 +886,133 @@ async function addGroupForUser(
     await context.send(`${icon} "${group.title}" добавлена!`, {
       reply_markup: { remove_keyboard: true },
     });
-    await showAddGroupPrompt(context, userId);
+
+    if (skipMetadata) {
+      await showAddGroupPrompt(context, userId);
+      return { success: true, groupId: group.id };
+    }
+
+    // Start metadata collection
+    const prefilled = parseGroupTitle(group.title || "");
+    send(userId, {
+      type: "START_METADATA_COLLECTION",
+      groupId: group.id,
+      groupTitle: group.title || "Unknown",
+      prefilled,
+    });
+
+    await askNextMetadataQuestion(context, userId);
+    return { success: true, groupId: group.id };
   } else {
     await context.send(`Не удалось добавить "${group.title}": ${result.error}`, {
       reply_markup: { remove_keyboard: true },
     });
+    await showAddGroupPrompt(context, userId);
+    return { success: false };
+  }
+}
+
+// Helper: ask next metadata question based on current step
+async function askNextMetadataQuestion(
+  context: { send: (text: string, options?: object) => Promise<unknown> },
+  userId: number
+): Promise<void> {
+  const userCtx = ctx(userId);
+  const meta = userCtx.pendingGroupMetadata;
+
+  if (!meta) {
+    botLog.warn({ userId }, "askNextMetadataQuestion called but no pendingGroupMetadata");
+    await showAddGroupPrompt(context, userId);
+    return;
+  }
+
+  switch (meta.step) {
+    case "marketplace":
+      await context.send(`Продают ли товары в группе "${meta.groupTitle}"?`, {
+        reply_markup: marketplaceKeyboard(),
+      });
+      break;
+
+    case "country":
+      if (meta.prefilled.country && !meta.awaitingTextInput) {
+        // Has prefilled country — show confirm button
+        const countryName = getCountryName(meta.prefilled.country);
+        await context.send("Страна группы:", {
+          reply_markup: metadataPrefilledKeyboard(meta.prefilled.country, `${countryName} (${meta.prefilled.country})`),
+        });
+      } else {
+        await context.send("В какой стране находится группа? (например: Сербия, Россия)", {
+          reply_markup: metadataSkipKeyboard(),
+        });
+      }
+      break;
+
+    case "city":
+      if (meta.prefilled.city && !meta.awaitingTextInput) {
+        await context.send("Город группы:", {
+          reply_markup: metadataPrefilledKeyboard(meta.prefilled.city, meta.prefilled.city),
+        });
+      } else {
+        await context.send("Какой город? (например: Белград, Москва)", {
+          reply_markup: metadataSkipKeyboard(),
+        });
+      }
+      break;
+
+    case "currency": {
+      // Prefill currency from country if available
+      const defaultCurrency = meta.country ? getDefaultCurrency(meta.country) : null;
+      if (defaultCurrency && !meta.awaitingTextInput) {
+        const currencyName = getCurrencyName(defaultCurrency);
+        await context.send("Валюта группы:", {
+          reply_markup: metadataCurrencyKeyboard(defaultCurrency, currencyName),
+        });
+      } else {
+        await context.send("Какая основная валюта? (например: динары, рубли, евро)", {
+          reply_markup: metadataSkipKeyboard(),
+        });
+      }
+      break;
+    }
+  }
+}
+
+// Helper: save metadata to DB and show next group or add prompt
+async function finishMetadataCollection(
+  context: { send: (text: string, options?: object) => Promise<unknown> },
+  userId: number
+): Promise<void> {
+  const userCtx = ctx(userId);
+  const meta = userCtx.pendingGroupMetadata;
+  const queue = userCtx.metadataQueue;
+
+  // Save to DB if we have metadata
+  if (meta) {
+    queries.upsertGroupMetadata({
+      telegramId: meta.groupId,
+      title: meta.groupTitle,
+      country: meta.country,
+      city: meta.city,
+      currency: meta.currency,
+      isMarketplace: meta.isMarketplace ?? false,
+    });
+    botLog.info({ groupId: meta.groupId, meta }, "Group metadata saved");
+  }
+
+  // Check if more groups in queue
+  if (queue && queue.groups.length > 1) {
+    // Next group
+    const nextGroup = queue.groups[1]!;
+    const prefilled = parseGroupTitle(nextGroup.groupTitle);
+    send(userId, {
+      type: "START_METADATA_COLLECTION",
+      groupId: nextGroup.groupId,
+      groupTitle: nextGroup.groupTitle,
+      prefilled,
+    });
+    await askNextMetadataQuestion(context, userId);
+  } else {
+    // All done
     await showAddGroupPrompt(context, userId);
   }
 }
@@ -1163,6 +1326,96 @@ bot.on("message", async (context) => {
       await addGroupForUser(context, userId, group);
     } else {
       await context.send("Неверный формат. Отправь ссылку вида t.me/+XXX или нажми Пропустить.");
+    }
+    return;
+  }
+
+  // Handle text input for group metadata (country, city, currency)
+  if (currentState === "collectingGroupMetadata" && c.pendingGroupMetadata?.awaitingTextInput) {
+    const meta = c.pendingGroupMetadata;
+    const step = meta.step;
+    const inputText = text.trim();
+
+    let matchedValue: string | null = null;
+    let displayName: string | null = null;
+
+    switch (step) {
+      case "country": {
+        const match = matchCountry(inputText);
+        if (match) {
+          matchedValue = match.code;
+          displayName = `${match.name} (${match.code})`;
+        }
+        break;
+      }
+      case "city": {
+        const match = matchCity(inputText);
+        if (match) {
+          matchedValue = match.city;
+          displayName = match.city;
+        } else {
+          // Accept any city name if no match (just normalize case)
+          matchedValue = inputText;
+          displayName = inputText;
+        }
+        break;
+      }
+      case "currency": {
+        const match = matchCurrency(inputText);
+        if (match) {
+          matchedValue = match.code;
+          displayName = `${match.name} (${match.code})`;
+        }
+        break;
+      }
+    }
+
+    if (matchedValue && displayName) {
+      // Send the matched value
+      send(userId, { type: "METADATA_TEXT", text: matchedValue });
+
+      const updatedMeta = ctx(userId).pendingGroupMetadata;
+      const isLastStep = step === "currency";
+
+      if (isLastStep) {
+        await context.send(`${displayName}`);
+        // Save metadata and finish
+        await finishMetadataCollection(context, userId);
+
+        // Check if there are more groups in queue
+        const updatedCtx = ctx(userId);
+        if (updatedCtx.metadataQueue && updatedCtx.metadataQueue.groups.length > 0) {
+          // Start next group
+          const nextGroup = updatedCtx.metadataQueue.groups[0]!;
+          const prefilled = parseGroupTitle(nextGroup.groupTitle);
+          send(userId, {
+            type: "START_METADATA_COLLECTION",
+            groupId: nextGroup.groupId,
+            groupTitle: nextGroup.groupTitle,
+            prefilled,
+          });
+
+          await askNextMetadataQuestion(context, userId);
+        } else {
+          await showAddGroupPrompt(context, userId);
+        }
+      } else {
+        await context.send(`${displayName}`);
+        // Ask next question
+        await askNextMetadataQuestion(context, userId);
+      }
+    } else {
+      // No match found
+      let hint = "";
+      switch (step) {
+        case "country":
+          hint = "Не могу распознать страну. Попробуй написать по-другому (например: Сербия, Serbia, RS)";
+          break;
+        case "currency":
+          hint = "Не могу распознать валюту. Попробуй написать код (EUR, RSD) или название (евро, динар)";
+          break;
+      }
+      await context.send(hint, { reply_markup: metadataSkipKeyboard() });
     }
     return;
   }
@@ -3108,6 +3361,158 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
         botLog.error({ err: e, groupId }, "Failed to add group quick");
         await editCallbackMessage(context, "Не удалось добавить группу. Используй /addgroup.");
       }
+      break;
+    }
+
+    // =====================================================
+    // Group metadata collection handlers
+    // =====================================================
+
+    case "metadata_marketplace": {
+      if (currentState !== "collectingGroupMetadata" || !c.pendingGroupMetadata) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      const isMarketplace = (data as { value?: boolean }).value ?? false;
+      send(userId, { type: "METADATA_MARKETPLACE", isMarketplace });
+
+      await context.answer({ text: isMarketplace ? "Да" : "Нет" });
+
+      // Ask next question (country)
+      await askNextMetadataQuestion(
+        { send: (text, opts) => bot.api.sendMessage({ chat_id: userId, text, ...opts }) },
+        userId
+      );
+      break;
+    }
+
+    case "metadata_skip": {
+      if (currentState !== "collectingGroupMetadata" || !c.pendingGroupMetadata) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      const meta = c.pendingGroupMetadata;
+      const isLastStep = meta.step === "currency";
+
+      send(userId, { type: "METADATA_SKIP" });
+      await context.answer({ text: "Пропущено" });
+
+      if (isLastStep) {
+        // Save metadata and finish
+        const ctxWrapper = { send: (text: string, opts?: object) => bot.api.sendMessage({ chat_id: userId, text, ...opts }) };
+        await finishMetadataCollection(ctxWrapper, userId);
+
+        // Check if there are more groups in queue
+        const updatedCtx = ctx(userId);
+        if (updatedCtx.metadataQueue && updatedCtx.metadataQueue.groups.length > 0) {
+          // Start next group
+          const nextGroup = updatedCtx.metadataQueue.groups[0]!;
+          const prefilled = parseGroupTitle(nextGroup.groupTitle);
+          send(userId, {
+            type: "START_METADATA_COLLECTION",
+            groupId: nextGroup.groupId,
+            groupTitle: nextGroup.groupTitle,
+            prefilled,
+          });
+
+          await askNextMetadataQuestion(ctxWrapper, userId);
+        } else {
+          // No more groups, show add group prompt
+          await showAddGroupPrompt(ctxWrapper, userId);
+        }
+      } else {
+        // Ask next question
+        await askNextMetadataQuestion(
+          { send: (text, opts) => bot.api.sendMessage({ chat_id: userId, text, ...opts }) },
+          userId
+        );
+      }
+      break;
+    }
+
+    case "metadata_confirm": {
+      if (currentState !== "collectingGroupMetadata" || !c.pendingGroupMetadata) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      const value = (data as { value?: string }).value;
+      if (!value) {
+        await context.answer({ text: "Ошибка данных" });
+        return;
+      }
+
+      const meta = c.pendingGroupMetadata;
+      const isLastStep = meta.step === "currency";
+
+      // Confirm prefilled value (sends METADATA_TEXT which advances step)
+      send(userId, { type: "METADATA_TEXT", text: value });
+      await context.answer({ text: "Подтверждено" });
+
+      if (isLastStep) {
+        // Save metadata and finish
+        const ctxWrapper = { send: (text: string, opts?: object) => bot.api.sendMessage({ chat_id: userId, text, ...opts }) };
+        await finishMetadataCollection(ctxWrapper, userId);
+
+        // Check if there are more groups in queue
+        const updatedCtx = ctx(userId);
+        if (updatedCtx.metadataQueue && updatedCtx.metadataQueue.groups.length > 0) {
+          // Start next group
+          const nextGroup = updatedCtx.metadataQueue.groups[0]!;
+          const prefilled = parseGroupTitle(nextGroup.groupTitle);
+          send(userId, {
+            type: "START_METADATA_COLLECTION",
+            groupId: nextGroup.groupId,
+            groupTitle: nextGroup.groupTitle,
+            prefilled,
+          });
+
+          await askNextMetadataQuestion(ctxWrapper, userId);
+        } else {
+          // No more groups, show add group prompt
+          await showAddGroupPrompt(ctxWrapper, userId);
+        }
+      } else {
+        // Ask next question
+        await askNextMetadataQuestion(
+          { send: (text, opts) => bot.api.sendMessage({ chat_id: userId, text, ...opts }) },
+          userId
+        );
+      }
+      break;
+    }
+
+    case "metadata_change": {
+      if (currentState !== "collectingGroupMetadata" || !c.pendingGroupMetadata) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      // Switch to text input mode
+      send(userId, { type: "METADATA_CHANGE_PREFILLED" });
+      await context.answer({ text: "Введи значение" });
+
+      const meta = ctx(userId).pendingGroupMetadata!;
+      let prompt = "";
+      switch (meta.step) {
+        case "country":
+          prompt = "Введи страну (например: Сербия, Россия, Черногория):";
+          break;
+        case "city":
+          prompt = "Введи город (например: Белград, Москва):";
+          break;
+        case "currency":
+          prompt = "Введи валюту (например: динар, евро, рубль):";
+          break;
+      }
+
+      await bot.api.sendMessage({
+        chat_id: userId,
+        text: prompt,
+        reply_markup: metadataSkipKeyboard(),
+      });
       break;
     }
 

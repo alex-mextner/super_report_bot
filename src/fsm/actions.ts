@@ -759,3 +759,205 @@ export const savePendingQuery = {
 export const clearPendingQuery = {
   pendingQuery: () => null as BotContext["pendingQuery"],
 };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//                    GROUP METADATA COLLECTION ACTIONS
+//
+//       Collecting marketplace/country/city/currency info after adding a group
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Initialize queue of groups for metadata collection.
+ *
+ * Used when multiple groups added via links. Sets up the queue,
+ * then START_METADATA_COLLECTION is called for each one.
+ */
+export const startMetadataQueue = {
+  metadataQueue: ({ event }: { event: BotEvent }) => {
+    if (event.type === "START_METADATA_QUEUE") {
+      return { groups: event.groups };
+    }
+    return null;
+  },
+};
+
+/**
+ * Start metadata collection for a single group.
+ *
+ * Initializes pendingGroupMetadata with group info and pre-filled values.
+ * First step is always "marketplace".
+ */
+export const startMetadataCollection = {
+  pendingGroupMetadata: ({ event }: { event: BotEvent }) => {
+    if (event.type === "START_METADATA_COLLECTION") {
+      return {
+        groupId: event.groupId,
+        groupTitle: event.groupTitle,
+        step: "marketplace" as const,
+        isMarketplace: null,
+        country: null,
+        city: null,
+        currency: null,
+        prefilled: event.prefilled ?? {},
+        awaitingTextInput: false,
+      };
+    }
+    return null;
+  },
+};
+
+/**
+ * User answered Yes/No to marketplace question.
+ *
+ * Store the answer and advance to "country" step.
+ */
+export const setMetadataMarketplace = {
+  pendingGroupMetadata: ({ context, event }: { context: BotContext; event: BotEvent }) => {
+    if (!context.pendingGroupMetadata || event.type !== "METADATA_MARKETPLACE") {
+      return context.pendingGroupMetadata;
+    }
+    return {
+      ...context.pendingGroupMetadata,
+      isMarketplace: event.isMarketplace,
+      step: "country" as const,
+      awaitingTextInput: false,
+    };
+  },
+};
+
+/**
+ * User entered text for current step (country/city/currency).
+ *
+ * Handler normalizes the text before sending this event.
+ * Store the value and advance to next step.
+ */
+export const setMetadataText = {
+  pendingGroupMetadata: ({ context, event }: { context: BotContext; event: BotEvent }) => {
+    if (!context.pendingGroupMetadata || event.type !== "METADATA_TEXT") {
+      return context.pendingGroupMetadata;
+    }
+
+    const meta = context.pendingGroupMetadata;
+    const text = event.text;
+
+    switch (meta.step) {
+      case "country":
+        return { ...meta, country: text, step: "city" as const, awaitingTextInput: false };
+      case "city":
+        return { ...meta, city: text, step: "currency" as const, awaitingTextInput: false };
+      case "currency":
+        // Stay on currency, METADATA_DONE will transition out
+        return { ...meta, currency: text, awaitingTextInput: false };
+      default:
+        return meta;
+    }
+  },
+};
+
+/**
+ * User confirmed pre-filled value.
+ *
+ * Take the pre-filled value for current step and advance.
+ */
+export const confirmPrefilledMetadata = {
+  pendingGroupMetadata: ({ context }: { context: BotContext }) => {
+    if (!context.pendingGroupMetadata) return null;
+
+    const meta = context.pendingGroupMetadata;
+
+    switch (meta.step) {
+      case "country":
+        return {
+          ...meta,
+          country: meta.prefilled.country ?? null,
+          step: "city" as const,
+          awaitingTextInput: false,
+        };
+      case "city":
+        return {
+          ...meta,
+          city: meta.prefilled.city ?? null,
+          step: "currency" as const,
+          awaitingTextInput: false,
+        };
+      case "currency":
+        // Currency prefill comes from country's default, stored separately
+        return meta;
+      default:
+        return meta;
+    }
+  },
+};
+
+/**
+ * User wants to change pre-filled value.
+ *
+ * Switch to text input mode for current step.
+ */
+export const changePrefilledMetadata = {
+  pendingGroupMetadata: ({ context }: { context: BotContext }) => {
+    if (!context.pendingGroupMetadata) return null;
+    return {
+      ...context.pendingGroupMetadata,
+      awaitingTextInput: true,
+    };
+  },
+};
+
+/**
+ * User skipped current metadata question.
+ *
+ * Advance to next step without storing a value.
+ */
+export const skipMetadataStep = {
+  pendingGroupMetadata: ({ context }: { context: BotContext }) => {
+    if (!context.pendingGroupMetadata) return null;
+
+    const meta = context.pendingGroupMetadata;
+
+    const nextStep: Record<string, "country" | "city" | "currency"> = {
+      marketplace: "country",
+      country: "city",
+      city: "currency",
+    };
+
+    const next = nextStep[meta.step];
+    if (next) {
+      return { ...meta, step: next, awaitingTextInput: false };
+    }
+    // currency is last step, stay there
+    return meta;
+  },
+};
+
+/**
+ * Clear metadata collection state.
+ *
+ * Called after all metadata questions answered or when cancelling.
+ */
+export const clearGroupMetadata = {
+  pendingGroupMetadata: () => null as BotContext["pendingGroupMetadata"],
+};
+
+/**
+ * Move to next group in metadata queue.
+ *
+ * Removes the first group from queue (it's been processed).
+ */
+export const advanceMetadataQueue = {
+  metadataQueue: ({ context }: { context: BotContext }) => {
+    if (!context.metadataQueue) return null;
+    const remaining = context.metadataQueue.groups.slice(1);
+    if (remaining.length === 0) return null;
+    return { groups: remaining };
+  },
+};
+
+/**
+ * Clear metadata queue.
+ *
+ * Called when all groups processed or when cancelling.
+ */
+export const clearMetadataQueue = {
+  metadataQueue: () => null as BotContext["metadataQueue"],
+};
