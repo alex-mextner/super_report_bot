@@ -143,6 +143,7 @@ CREATE INDEX IF NOT EXISTS idx_user_groups_user ON user_groups(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_group ON messages(group_id, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_topic ON messages(group_id, topic_id);
 CREATE INDEX IF NOT EXISTS idx_messages_deleted ON messages(is_deleted);
+CREATE INDEX IF NOT EXISTS idx_messages_text ON messages(text);
 CREATE INDEX IF NOT EXISTS idx_topics_group ON topics(group_id);
 
 -- ===========================================

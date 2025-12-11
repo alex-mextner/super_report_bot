@@ -284,6 +284,9 @@ const stmts = {
     `SELECT * FROM messages WHERE is_deleted = 0 AND text LIKE ?
      ORDER BY timestamp DESC LIMIT ?`
   ),
+  findMessageByExactText: db.prepare<StoredMessage, [string]>(
+    `SELECT * FROM messages WHERE is_deleted = 0 AND text = ? LIMIT 1`
+  ),
 
   // Topics
   upsertTopic: db.prepare<void, [number, number, string | null]>(
@@ -824,6 +827,10 @@ export const queries = {
 
   getMessage(messageId: number, groupId: number): StoredMessage | null {
     return stmts.getMessage.get(messageId, groupId) || null;
+  },
+
+  findMessageByExactText(text: string): StoredMessage | null {
+    return stmts.findMessageByExactText.get(text) || null;
   },
 
   getMessages(opts?: {

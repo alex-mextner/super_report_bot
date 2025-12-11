@@ -263,7 +263,7 @@ export interface FoundPostAnalysis {
 
 // Forward info extracted from forwarded message
 export interface ForwardInfo {
-  chatId: number;
+  chatId?: number; // optional - not available for user forwards from groups
   messageId: number | null;
   chatTitle?: string;
   date?: number; // unix timestamp from forward origin

@@ -59,7 +59,15 @@ import {
   joinGroupByUserbot,
   scanFromCache,
 } from "../listener/index.ts";
-import { handleForward, analyzeForwardedMessage } from "./forward.ts";
+import {
+  handleForward,
+  analyzeForwardedMessage,
+  formatAnalysisResult,
+  extractForwardInfo,
+  addGroupKeyboard,
+  analyzeForwardKeyboard,
+  forwardActionsKeyboard,
+} from "./forward.ts";
 import { botLog } from "../logger.ts";
 import type {
   UserMode,
@@ -379,6 +387,15 @@ async function generateKeywordsAndShowResult(
 }
 
 export const bot = new Bot(BOT_TOKEN);
+
+// Track album messages to collect all captions before processing
+interface AlbumData {
+  messages: Array<{ text?: string; caption?: string; message: unknown }>;
+  userId: number;
+  timeout: Timer;
+}
+const pendingAlbums = new Map<string, AlbumData>();
+const ALBUM_COLLECT_DELAY = 1500; // 1.5 sec to collect all album messages
 
 // EventEmitter for SSE notifications about user activity
 import { EventEmitter } from "events";
@@ -963,6 +980,97 @@ async function processSubscriptionQuery(context: any, userId: number, query: str
   }
 }
 
+// Format not_found reason for user
+function formatNotFoundReason(reason: import("./forward.ts").NotFoundReason, groupTitle?: string): string {
+  switch (reason) {
+    case "no_text":
+      return "Сообщение не содержит текста.";
+    case "text_not_in_db":
+      return "Бот не видел это сообщение в мониторируемых группах.";
+    case "no_analyses_for_user":
+      return groupTitle
+        ? `Сообщение из "${groupTitle}" ещё не было проанализировано.`
+        : "Сообщение ещё не было проанализировано.";
+    case "group_not_monitored_by_user":
+      return groupTitle
+        ? `Группа "${groupTitle}" не добавлена в твой мониторинг.`
+        : "Группа этого сообщения не добавлена в твой мониторинг.";
+  }
+}
+
+// Process forwarded message (extracted for reuse with albums)
+async function processForwardedMessage(
+  context: Parameters<Parameters<typeof bot.on<"message">>[1]>[0],
+  userId: number,
+  messageText: string
+) {
+  const result = handleForward(
+    {
+      message: context as unknown as import("gramio").Message,
+      from: context.from,
+    },
+    messageText
+  );
+
+  switch (result.type) {
+    case "not_forward":
+      // Should not happen
+      break;
+
+    case "error":
+      await context.send(result.message);
+      break;
+
+    case "not_monitored":
+      await context.send(
+        `Группа "${result.chatTitle || "Неизвестная"}" не добавлена в мониторинг.`,
+        { reply_markup: addGroupKeyboard(result.chatId, result.chatTitle) }
+      );
+      break;
+
+    case "not_found": {
+      const reasonText = formatNotFoundReason(result.reason, result.groupTitle);
+
+      // If no text or group not monitored - just show message, no analyze button
+      if (result.reason === "no_text" || result.reason === "group_not_monitored_by_user") {
+        await context.send(reasonText);
+        return;
+      }
+
+      // Offer to analyze
+      await context.send(
+        reasonText,
+        {
+          reply_markup: analyzeForwardKeyboard(),
+          reply_parameters: { message_id: context.id! },
+        }
+      );
+      break;
+    }
+
+    case "found":
+      // Show each analysis as separate message with actions
+      for (const analysis of result.analyses) {
+        const text = formatAnalysisResult(analysis);
+        const isRejected = analysis.result !== "matched";
+
+        if (isRejected && result.forwardInfo.chatId !== undefined) {
+          await context.send(text, {
+            reply_markup: forwardActionsKeyboard(
+              analysis.subscription_id,
+              result.forwardInfo.messageId ?? 0,
+              result.forwardInfo.chatId,
+              analysis.rejection_keyword
+            ),
+          });
+        } else {
+          await context.send(text);
+        }
+      }
+      break;
+  }
+}
+
 // Handle text messages (new subscription requests)
 bot.on("message", async (context) => {
   const userId = context.from?.id;
@@ -971,48 +1079,54 @@ bot.on("message", async (context) => {
   // Handle forwarded messages FIRST - before text check
   // (forwards can be media without text)
   if (context.forwardOrigin) {
-    const messageText = context.text || context.caption || "";
-    const result = await handleForward({
-      message: context as unknown as import("gramio").Message,
-      from: context.from,
-      send: (text: string, options?: unknown) => context.send(text, options as Parameters<typeof context.send>[1]),
-    });
+    // For albums - collect all messages then process
+    if (context.mediaGroupId) {
+      const albumKey = `${userId}:${context.mediaGroupId}`;
+      const existing = pendingAlbums.get(albumKey);
 
-    if (result.handled) {
-      if (result.response === "analyzing") {
-        // Need to analyze on demand
-        const forwardResult = result as { forwardInfo?: { chatId: number; messageId: number | null; chatTitle?: string }; messageText?: string };
-        if (forwardResult.forwardInfo) {
-          await context.send("Анализирую сообщение...");
-          const analysisResult = await analyzeForwardedMessage(
-            userId,
-            forwardResult.forwardInfo,
-            forwardResult.messageText || messageText
-          );
-          if (analysisResult.keyboard) {
-            await context.send(analysisResult.response, {
-              reply_markup: analysisResult.keyboard as import("gramio").InlineKeyboard,
-            });
-          } else {
-            await context.send(analysisResult.response);
-          }
-        } else {
-          await context.send("Не удалось определить источник сообщения.");
-        }
-      } else if (result.response) {
-        const keyboard = (result as { keyboard?: unknown }).keyboard;
-        if (keyboard) {
-          await context.send(result.response, {
-            reply_markup: keyboard as import("gramio").InlineKeyboard,
-          });
-        } else {
-          await context.send(result.response);
-        }
+      if (existing) {
+        // Add to existing album collection
+        existing.messages.push({
+          text: context.text,
+          caption: context.caption,
+          message: context,
+        });
+        return; // Wait for timeout to process
       }
-    } else {
-      // Forward not handled - inform user
-      await context.send("Не удалось обработать форвард. Убедись, что сообщение переслано из группы/канала.");
+
+      // First message of album - start collecting
+      const albumData: AlbumData = {
+        messages: [{
+          text: context.text,
+          caption: context.caption,
+          message: context,
+        }],
+        userId,
+        timeout: setTimeout(async () => {
+          pendingAlbums.delete(albumKey);
+
+          // Find text from any message in album
+          const albumText = albumData.messages
+            .map(m => m.text || m.caption || "")
+            .find(t => t.trim()) || "";
+
+          // Use first message for forward info
+          const firstMsg = albumData.messages[0]?.message;
+          if (!firstMsg) return;
+
+          await processForwardedMessage(
+            firstMsg as typeof context,
+            userId,
+            albumText
+          );
+        }, ALBUM_COLLECT_DELAY),
+      };
+      pendingAlbums.set(albumKey, albumData);
+      return; // Wait for timeout
     }
+
+    // Single message (not album) - process immediately
+    await processForwardedMessage(context, userId, context.text || context.caption || "");
     return;
   }
 
@@ -1613,9 +1727,19 @@ bot.on("callback_query", async (context) => {
   const userId = context.from?.id;
   if (!userId) return;
 
-  let data: { action: string; id?: string | number; type?: string; idx?: number; msgId?: number; grpId?: number };
+  let data: { action: string; id?: string | number; type?: string; idx?: number; msgId?: number; grpId?: number; kw?: string };
   try {
-    data = JSON.parse(context.data || "{}");
+    const raw = JSON.parse(context.data || "{}");
+    // Normalize short keys to long keys
+    data = {
+      action: raw.action || raw.a || "",
+      id: raw.id ?? raw.s,
+      type: raw.type,
+      idx: raw.idx,
+      msgId: raw.msgId ?? raw.m,
+      grpId: raw.grpId ?? raw.g,
+      kw: raw.kw,
+    };
   } catch {
     return;
   }
@@ -2811,6 +2935,68 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
     }
 
     // Forward analysis actions
+    case "analyze_forward": {
+      // Get forwarded message from reply_to_message
+      const replyMsg = context.message?.replyMessage;
+      if (!replyMsg) {
+        await context.answer({ text: "Не найдено исходное сообщение" });
+        return;
+      }
+
+      const messageText = replyMsg.text || replyMsg.caption || "";
+      if (!messageText) {
+        await context.answer({ text: "Сообщение не содержит текста" });
+        return;
+      }
+
+      // Extract forward info from the replied message
+      const forwardInfo = extractForwardInfo(replyMsg as import("gramio").Message);
+
+      await context.answer({ text: "Анализирую..." });
+
+      const userSubs = queries.getUserSubscriptions(userId);
+      if (userSubs.length === 0) {
+        await context.editText("У тебя нет активных подписок для анализа.");
+        return;
+      }
+
+      // Analyze against all subscriptions
+      const results = await analyzeForwardedMessage(
+        userId,
+        forwardInfo || { messageId: null },
+        messageText
+      );
+
+      if (results.length === 0) {
+        await context.editText("Нет подписок для анализа этого сообщения.");
+        return;
+      }
+
+      // Edit original message to remove button
+      await context.editText("Результаты анализа:");
+
+      // Send each result as separate message
+      for (const { analysis } of results) {
+        const text = formatAnalysisResult(analysis);
+        const isRejected = analysis.result !== "matched";
+
+        if (isRejected && forwardInfo?.chatId !== undefined) {
+          await context.send(text, {
+            reply_markup: forwardActionsKeyboard(
+              analysis.subscription_id,
+              forwardInfo.messageId ?? 0,
+              forwardInfo.chatId,
+              analysis.rejection_keyword
+            ),
+          });
+        } else {
+          await context.send(text);
+        }
+      }
+      break;
+    }
+
+    case "exp":
     case "expand_criteria": {
       const subscriptionId = data.id as number;
       const msgId = data.msgId as number;
@@ -2872,6 +3058,7 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
       break;
     }
 
+    case "ai_fwd":
     case "ai_correct_forward": {
       const subscriptionId = data.id as number;
 
@@ -2904,6 +3091,45 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
         `Опиши, как изменить критерии поиска для подписки "${subscription.original_query}".\n\n` +
           `Например: «добавь слова про скидки» или «убери слишком строгие фильтры»`,
         { reply_markup: aiEditKeyboard(subscriptionId) }
+      );
+      break;
+    }
+
+    case "rm_neg": {
+      const subscriptionId = data.id as number;
+      const keyword = data.kw;
+
+      if (!subscriptionId || !keyword) {
+        await context.answer({ text: "Ошибка: нет данных" });
+        return;
+      }
+
+      const subscription = queries.getSubscriptionById(subscriptionId, userId);
+      if (!subscription) {
+        await context.answer({ text: "Подписка не найдена" });
+        return;
+      }
+
+      // Remove keyword from negative_keywords
+      const currentNegative = subscription.negative_keywords;
+      const newNegative = currentNegative.filter(
+        (kw) => kw.toLowerCase() !== keyword.toLowerCase()
+      );
+
+      if (newNegative.length === currentNegative.length) {
+        await context.answer({ text: "Слово не найдено" });
+        return;
+      }
+
+      queries.updateNegativeKeywords(subscriptionId, userId, newNegative);
+      invalidateSubscriptionsCache();
+
+      await context.answer({ text: "Слово удалено" });
+      await editCallbackMessage(
+        context,
+        `✅ Слово "${keyword}" удалено из исключений.\n\n` +
+          `Подписка: "${subscription.original_query}"\n` +
+          `Исключающие слова: ${newNegative.length > 0 ? newNegative.join(", ") : "нет"}`
       );
       break;
     }

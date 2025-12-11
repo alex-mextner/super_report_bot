@@ -298,27 +298,44 @@ export function settingsKeyboard(currentMode: UserMode): InlineKeyboard {
 
 /**
  * Actions keyboard for forward analysis (when message was rejected)
+ * Used for each subscription analysis result
+ * Note: callback_data has 64 byte limit, so keys are shortened
  */
 export function forwardActionsKeyboard(
   subscriptionId: number,
   messageId: number,
-  groupId: number
+  groupId: number,
+  rejectionKeyword?: string | null
 ): InlineKeyboard {
+  // If rejected by negative keyword - show "remove keyword" button
+  if (rejectionKeyword) {
+    return new InlineKeyboard().text(
+      `🗑 Убрать "${rejectionKeyword}"`,
+      JSON.stringify({ a: "rm_neg", s: subscriptionId, kw: rejectionKeyword })
+    );
+  }
+
+  // Otherwise show expand + AI buttons
   return new InlineKeyboard()
     .text(
-      "🔧 Расширить критерии",
-      JSON.stringify({
-        action: "expand_criteria",
-        id: subscriptionId,
-        msgId: messageId,
-        grpId: groupId,
-      })
+      "🔧 Расширить",
+      JSON.stringify({ a: "exp", s: subscriptionId, m: messageId, g: groupId })
     )
-    .row()
     .text(
-      "✏️ Скорректировать с ИИ",
-      JSON.stringify({ action: "ai_correct_forward", id: subscriptionId })
+      "✏️ С ИИ",
+      JSON.stringify({ a: "ai_fwd", s: subscriptionId })
     );
+}
+
+/**
+ * Keyboard for "Analyze" button when message not found in DB
+ * Text will be extracted from reply_to_message in callback handler
+ */
+export function analyzeForwardKeyboard(): InlineKeyboard {
+  return new InlineKeyboard().text(
+    "🔍 Проанализировать",
+    JSON.stringify({ action: "analyze_forward" })
+  );
 }
 
 /**
