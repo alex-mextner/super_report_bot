@@ -3616,131 +3616,18 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
           return;
         }
 
-        // Get photo for visual analysis
-        let photoPath: string | null = null;
-        const mediaRows = queries.getMediaForMessage(msgId, grpId);
-        botLog.debug({ msgId, grpId, mediaRowsCount: mediaRows.length }, "Looking for photo in DB");
-        let firstPhoto = mediaRows.find((m) => m.media_type === "photo");
+        // Run deep analysis with automatic photo fetching
+        const { analyzeWithMedia } = await import("../llm/deep-analyze.ts");
+        const { formatDeepAnalysisHtml } = await import("./formatters.ts");
 
-        // If no photo in DB, try to fetch from Telegram
-        if (!firstPhoto) {
-          botLog.debug({ msgId, grpId }, "No photo in DB, fetching from Telegram");
-          try {
-            const { fetchMediaForMessage } = await import("../listener/index.ts");
-            const fetched = await fetchMediaForMessage(msgId, grpId);
-            botLog.debug({ msgId, grpId, fetched }, "Fetch result");
-            if (fetched) {
-              const updatedMedia = queries.getMediaForMessage(msgId, grpId);
-              firstPhoto = updatedMedia.find((m) => m.media_type === "photo");
-              botLog.debug({ msgId, grpId, foundPhoto: !!firstPhoto }, "After fetch lookup");
-            }
-          } catch (err) {
-            botLog.error({ err, msgId, grpId }, "Failed to fetch media");
-          }
-        }
+        const result = await analyzeWithMedia({
+          text: storedMsg.text,
+          messageId: msgId,
+          groupId: grpId,
+          groupTitle: storedMsg.group_title,
+        });
 
-        if (firstPhoto) {
-          photoPath = `data/media/${firstPhoto.file_path}`;
-          botLog.debug({ photoPath }, "Photo path resolved");
-        } else {
-          botLog.debug({ msgId, grpId }, "No photo available for analysis");
-        }
-
-        // Run deep analysis (pass group title, photo path, and group ID for metadata)
-        const { deepAnalyze } = await import("../llm/deep-analyze.ts");
-        const result = await deepAnalyze(storedMsg.text, storedMsg.group_title, photoPath, grpId);
-
-        // Format result
-        if (!result.isListing) {
-          const reason = result.notListingReason || "Не удалось определить тип";
-          await editCallbackMessage(context, `❌ Это не объявление\n\nПричина: ${reason}`);
-          break;
-        }
-
-        const listingTypeLabels: Record<string, string> = {
-          sale: "Продажа",
-          rent: "Аренда",
-          service: "Услуга",
-          other: "Другое",
-        };
-
-        let resultText = `📊 <b>Анализ объявления</b>\n`;
-        resultText += `Тип: ${listingTypeLabels[result.listingType || "other"] || "Неизвестно"}\n\n`;
-
-        // Image analysis section (if available)
-        if (result.imageAnalysis?.description) {
-          resultText += `📷 <b>Фото:</b> ${result.imageAnalysis.description}\n`;
-          if (result.imageAnalysis.condition !== "unknown") {
-            const conditionLabels: Record<string, string> = {
-              new: "новый",
-              used: "б/у",
-            };
-            resultText += `   Состояние: ${conditionLabels[result.imageAnalysis.condition] || "—"}\n`;
-          }
-          if (result.imageAnalysis.conditionDetails) {
-            resultText += `   Детали: ${result.imageAnalysis.conditionDetails}\n`;
-          }
-          resultText += `\n`;
-        }
-
-        // Scam risk section
-        const riskEmoji = result.scamRisk.level === "high" ? "🚨" : result.scamRisk.level === "medium" ? "⚠️" : "✅";
-        resultText += `${riskEmoji} <b>Риск мошенничества:</b> ${result.scamRisk.score}/100\n`;
-        if (result.scamRisk.flags.length > 0) {
-          resultText += `Флаги: ${result.scamRisk.flags.join(", ")}\n`;
-        }
-        resultText += `${result.scamRisk.recommendation}\n\n`;
-
-        // Items table (expandable blockquote for Telegram)
-        if (result.items.length > 0) {
-          const verdictEmoji: Record<string, string> = {
-            good_deal: "✅",
-            overpriced: "❌",
-            fair: "👍",
-            unknown: "❓",
-          };
-
-          resultText += `<b>📋 Товары/услуги:</b>\n`;
-          resultText += `<blockquote expandable>`;
-
-          for (const item of result.items) {
-            const verdict = verdictEmoji[item.priceVerdict] || "❓";
-            const marketPrice = item.marketPriceAvg
-              ? `~${item.marketPriceAvg.toLocaleString("ru-RU")}`
-              : "н/д";
-            resultText += `${verdict} <b>${item.name}</b>\n`;
-            resultText += `   Цена: ${item.extractedPrice || "—"}\n`;
-            resultText += `   Рынок: ${marketPrice}\n\n`;
-          }
-
-          resultText += `</blockquote>\n`;
-
-          // Worth buying warnings
-          const notWorth = result.items.filter((i) => !i.worthBuying);
-          if (notWorth.length > 0) {
-            resultText += `🚫 <b>Не рекомендуется:</b>\n`;
-            for (const item of notWorth) {
-              resultText += `• ${item.name}: ${item.worthBuyingReason}\n`;
-            }
-            resultText += `\n`;
-          }
-
-          // Sources
-          const allSources = result.items.flatMap((i) => i.sources).filter((s) => s.price);
-          if (allSources.length > 0) {
-            resultText += `<b>🔗 Источники цен:</b>\n`;
-            const uniqueSources = allSources.slice(0, 5);
-            for (const src of uniqueSources) {
-              const title = src.title.slice(0, 40);
-              resultText += `• <a href="${src.url}">${title}</a>: ${src.price || "—"}\n`;
-            }
-            resultText += `\n`;
-          }
-        }
-
-        // Overall verdict
-        resultText += `<b>📝 Итог:</b>\n${result.overallVerdict}`;
-
+        const resultText = formatDeepAnalysisHtml(result);
         await editCallbackMessage(context, resultText, { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
       } catch (error) {
         botLog.error({ err: error }, "Deep analysis failed");

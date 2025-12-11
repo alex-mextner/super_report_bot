@@ -6,7 +6,7 @@ import { validateInitData, parseInitDataUser } from "./auth.ts";
 import { apiLog } from "../logger.ts";
 import { getMessages, getAllCachedMessages, getCachedGroups, getCachedMessageById, getTopicsByGroup } from "../cache/messages.ts";
 import { analyzeMessage, analyzeMessagesBatch, type BatchItem } from "../llm/analyze.ts";
-import { deepAnalyze } from "../llm/deep-analyze.ts";
+import { analyzeWithMedia } from "../llm/deep-analyze.ts";
 import { generateNgrams, generateWordShingles } from "../matcher/normalize.ts";
 import { fetchMediaForMessage } from "../listener/index.ts";
 
@@ -615,28 +615,12 @@ api.post("/analyze-deep", async (c) => {
   }
 
   try {
-    // Try to get photo if messageId and groupId provided
-    let photoPath: string | null = null;
-    if (body.messageId && body.groupId) {
-      // Check existing media in DB
-      let mediaRows = queries.getMediaForMessage(body.messageId, body.groupId);
-      let firstPhoto = mediaRows.find((m) => m.media_type === "photo");
-
-      // If no photo in DB, try to fetch from Telegram
-      if (!firstPhoto) {
-        const fetched = await fetchMediaForMessage(body.messageId, body.groupId);
-        if (fetched) {
-          mediaRows = queries.getMediaForMessage(body.messageId, body.groupId);
-          firstPhoto = mediaRows.find((m) => m.media_type === "photo");
-        }
-      }
-
-      if (firstPhoto) {
-        photoPath = `data/media/${firstPhoto.file_path}`;
-      }
-    }
-
-    const result = await deepAnalyze(body.text, body.groupTitle, photoPath, body.groupId);
+    const result = await analyzeWithMedia({
+      text: body.text,
+      messageId: body.messageId,
+      groupId: body.groupId,
+      groupTitle: body.groupTitle,
+    });
     return c.json(result);
   } catch (error) {
     apiLog.error({ err: error }, "Deep analysis failed");

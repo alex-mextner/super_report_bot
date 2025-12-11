@@ -10,6 +10,7 @@
 
 import { queries } from "../db/index.ts";
 import { apiLog } from "../logger.ts";
+import { fetchMediaForMessage } from "../listener/index.ts";
 import { analyzeListingImage, type ListingImageAnalysis } from "./vision.ts";
 import { semanticSearch } from "../embeddings/search.ts";
 import type { GroupMetadata } from "../types.ts";
@@ -1189,4 +1190,51 @@ async function analyzeImage(
     apiLog.error({ error, photoPath }, "Failed to analyze image");
     return undefined;
   }
+}
+
+// ============= Unified Entry Point =============
+
+/**
+ * Get photo path for a message, fetching from Telegram if needed
+ */
+export async function getPhotoPath(messageId: number, groupId: number): Promise<string | null> {
+  // Check existing media in DB
+  let mediaRows = queries.getMediaForMessage(messageId, groupId);
+  let firstPhoto = mediaRows.find((m) => m.media_type === "photo");
+
+  // If no photo in DB, try to fetch from Telegram
+  if (!firstPhoto) {
+    try {
+      const fetched = await fetchMediaForMessage(messageId, groupId);
+      if (fetched) {
+        mediaRows = queries.getMediaForMessage(messageId, groupId);
+        firstPhoto = mediaRows.find((m) => m.media_type === "photo");
+      }
+    } catch (error) {
+      apiLog.error({ error, messageId, groupId }, "Failed to fetch media");
+    }
+  }
+
+  return firstPhoto ? `data/media/${firstPhoto.file_path}` : null;
+}
+
+export interface AnalyzeParams {
+  text: string;
+  messageId?: number;
+  groupId?: number;
+  groupTitle?: string | null;
+}
+
+/**
+ * Unified entry point for deep analysis with automatic photo fetching
+ */
+export async function analyzeWithMedia(params: AnalyzeParams): Promise<DeepAnalysisResult> {
+  const { text, messageId, groupId, groupTitle } = params;
+
+  // Get photo path if we have message coordinates
+  const photoPath = messageId && groupId
+    ? await getPhotoPath(messageId, groupId)
+    : null;
+
+  return deepAnalyze(text, groupTitle, photoPath, groupId);
 }
