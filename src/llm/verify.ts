@@ -1,7 +1,8 @@
 import { llmLog } from "../logger.ts";
 import { verifyWithDeepSeek, verifyBatchWithDeepSeek } from "./deepseek.ts";
-import { verifyWithVision } from "./vision.ts";
-import type { Subscription, IncomingMessage } from "../types.ts";
+import { verifyWithVision, matchPhotosToItems } from "./vision.ts";
+import { splitMessageToItems } from "./split.ts";
+import type { Subscription, IncomingMessage, ItemVerificationResult } from "../types.ts";
 
 export interface VerificationResult {
   isMatch: boolean;
@@ -274,4 +275,165 @@ export async function verifyMatchBatch(
   );
 
   return results;
+}
+
+/**
+ * Verify message with multi-item support
+ * Splits message into separate items if needed, verifies each, and returns only matched items
+ *
+ * @param message - Incoming message
+ * @param subscription - Subscription to verify against
+ * @returns Extended result with matched items and their photos
+ */
+export async function verifyMatchWithItems(
+  message: IncomingMessage,
+  subscription: Subscription
+): Promise<ItemVerificationResult> {
+  const description = subscription.llm_description;
+
+  // Step 1: Split message into items
+  const splitResult = await splitMessageToItems(message.text);
+
+  llmLog.debug(
+    {
+      subscriptionId: subscription.id,
+      itemCount: splitResult.items.length,
+      isSingleItem: splitResult.isSingleItem,
+    },
+    "Message split for verification"
+  );
+
+  // If single item, use existing verifyMatch for backward compatibility
+  if (splitResult.isSingleItem) {
+    const result = await verifyMatch(message, subscription);
+    return {
+      ...result,
+      matchedItems: result.isMatch ? [message.text] : [],
+      matchedPhotoIndices: result.isMatch
+        ? message.media?.map((_, i) => i).filter((i) => message.media?.[i]?.type === "photo") ?? []
+        : [],
+    };
+  }
+
+  // Step 2: Verify each item
+  const batchInput = splitResult.items.map((text, index) => ({
+    index,
+    text,
+  }));
+
+  const hasPhoto = message.media?.some((m) => m.type === "photo");
+
+  let batchResults;
+  try {
+    batchResults = await verifyBatchWithDeepSeek(batchInput, description);
+  } catch (error) {
+    llmLog.error({ error, subscriptionId: subscription.id }, "Batch item verification failed");
+    // Fallback to single-item logic
+    const result = await verifyMatch(message, subscription);
+    return {
+      ...result,
+      matchedItems: result.isMatch ? [message.text] : [],
+      matchedPhotoIndices: result.isMatch
+        ? message.media?.map((_, i) => i).filter((i) => message.media?.[i]?.type === "photo") ?? []
+        : [],
+    };
+  }
+
+  // Collect matched item indices and texts
+  const matchedItemIndices: number[] = [];
+  const matchedItems: string[] = [];
+  let maxConfidence = 0;
+  const reasonings: string[] = [];
+
+  for (const result of batchResults) {
+    const isMatch = result.isMatch && result.confidence >= DEEPSEEK_CONFIDENCE_THRESHOLD;
+    if (isMatch) {
+      matchedItemIndices.push(result.index);
+      matchedItems.push(splitResult.items[result.index]!);
+      if (result.reasoning) {
+        reasonings.push(result.reasoning);
+      }
+    }
+    if (result.confidence > maxConfidence) {
+      maxConfidence = result.confidence;
+    }
+  }
+
+  llmLog.debug(
+    {
+      subscriptionId: subscription.id,
+      totalItems: splitResult.items.length,
+      matchedItems: matchedItemIndices.length,
+    },
+    "Item verification results"
+  );
+
+  // No matches
+  if (matchedItems.length === 0) {
+    return {
+      isMatch: false,
+      confidence: maxConfidence,
+      label: "items_no_match",
+      reasoning: reasonings[0],
+      matchedItems: [],
+      matchedPhotoIndices: [],
+    };
+  }
+
+  // Step 3: Match photos to items (if there are photos)
+  let matchedPhotoIndices: number[] = [];
+
+  if (hasPhoto && message.media) {
+    const photos = message.media
+      .map((m, i) => ({ index: i, buffer: m.buffer, type: m.type }))
+      .filter((p) => p.type === "photo");
+
+    if (photos.length > 0) {
+      try {
+        const photoMappings = await matchPhotosToItems(
+          photos.map((p) => ({ index: p.index, buffer: p.buffer })),
+          splitResult.items
+        );
+
+        // Get photos that belong to matched items
+        matchedPhotoIndices = photoMappings
+          .filter(
+            (mapping) =>
+              mapping.itemIndex !== null && matchedItemIndices.includes(mapping.itemIndex)
+          )
+          .map((mapping) => mapping.photoIndex);
+
+        // If no photos matched to specific items, include all photos (fallback)
+        if (matchedPhotoIndices.length === 0 && photos.length > 0) {
+          llmLog.debug(
+            { subscriptionId: subscription.id },
+            "No photos mapped to matched items, including all photos"
+          );
+          matchedPhotoIndices = photos.map((p) => p.index);
+        }
+      } catch (error) {
+        llmLog.error({ error, subscriptionId: subscription.id }, "Photo mapping failed, including all photos");
+        matchedPhotoIndices = photos.map((p) => p.index);
+      }
+    }
+  }
+
+  llmLog.info(
+    {
+      subscriptionId: subscription.id,
+      matchedItems: matchedItems.length,
+      matchedPhotos: matchedPhotoIndices.length,
+      totalPhotos: message.media?.filter((m) => m.type === "photo").length ?? 0,
+    },
+    "Multi-item verification complete"
+  );
+
+  return {
+    isMatch: true,
+    confidence: maxConfidence,
+    label: "items_match",
+    reasoning: reasonings.length > 0 ? reasonings.join("; ") : undefined,
+    matchedItems,
+    matchedPhotoIndices,
+  };
 }

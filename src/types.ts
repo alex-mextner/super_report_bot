@@ -256,6 +256,17 @@ export interface MatchAnalysis {
   llmReasoning?: string;
 }
 
+// Extended verification result for multi-item messages
+export interface ItemVerificationResult {
+  isMatch: boolean;
+  confidence: number;
+  label: string;
+  reasoning?: string;
+  // For multi-item messages
+  matchedItems: string[]; // Texts of items that passed verification
+  matchedPhotoIndices: number[]; // Indices of photos belonging to matched items
+}
+
 // Found post analysis record from DB
 export interface FoundPostAnalysis {
   id: number;

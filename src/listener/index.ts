@@ -2,7 +2,7 @@ import { TelegramClient, Message, ForumTopic } from "@mtcute/bun";
 import { tl } from "@mtcute/bun";
 import { queries } from "../db/index.ts";
 import { matchMessageAgainstAll, getPassedMatches } from "../matcher/index.ts";
-import { verifyMatch, verifyMatchBatch } from "../llm/verify.ts";
+import { verifyMatch, verifyMatchBatch, verifyMatchWithItems } from "../llm/verify.ts";
 import { semanticSearch, isSemanticSearchAvailable } from "../embeddings/search.ts";
 import { notifyUser } from "../bot/index.ts";
 import { listenerLog } from "../logger.ts";
@@ -451,7 +451,8 @@ async function processMessage(msg: Message): Promise<void> {
     }
 
     try {
-      const verification = await verifyMatch(incomingMsg, subscription);
+      // Use multi-item verification - splits message and verifies each item
+      const verification = await verifyMatchWithItems(incomingMsg, subscription);
 
       if (verification.isMatch) {
         listenerLog.info(
@@ -460,6 +461,8 @@ async function processMessage(msg: Message): Promise<void> {
             subscriptionId: subscription.id,
             confidence: verification.confidence.toFixed(3),
             ngramScore: candidate.ngramScore?.toFixed(3),
+            matchedItems: verification.matchedItems.length,
+            matchedPhotos: verification.matchedPhotoIndices.length,
           },
           "Match verified"
         );
@@ -489,17 +492,33 @@ async function processMessage(msg: Message): Promise<void> {
         // Get user telegram_id from subscription
         const userTelegramId = await getUserTelegramId(subscription.user_id);
         if (userTelegramId) {
-          // Use originalText for notification (shows URL instead of fetched content)
+          // Build notification text from matched items only
+          const notificationText =
+            verification.matchedItems.length > 0
+              ? verification.matchedItems.join("\n\n---\n\n")
+              : originalText;
+
+          // Filter media to only include photos from matched items
+          let notificationMedia = incomingMsg.media;
+          if (
+            verification.matchedPhotoIndices.length > 0 &&
+            incomingMsg.media &&
+            incomingMsg.media.length > verification.matchedPhotoIndices.length
+          ) {
+            // Only filter if we actually have fewer matched photos than total
+            notificationMedia = verification.matchedPhotoIndices.map((i) => incomingMsg.media![i]!);
+          }
+
           await notifyUser(
             userTelegramId,
             incomingMsg.group_title,
-            originalText,
+            notificationText,
             subscription.original_query,
             incomingMsg.id,
             incomingMsg.group_id,
             incomingMsg.sender_name,
             incomingMsg.sender_username,
-            incomingMsg.media,
+            notificationMedia,
             verification.reasoning
           );
           listenerLog.info(
@@ -508,7 +527,8 @@ async function processMessage(msg: Message): Promise<void> {
               userId: userTelegramId,
               subscriptionId: subscription.id,
               groupTitle: incomingMsg.group_title,
-              hasMedia: !!incomingMsg.media?.length,
+              hasMedia: !!notificationMedia?.length,
+              filteredMedia: notificationMedia?.length !== incomingMsg.media?.length,
             },
             "User notified"
           );

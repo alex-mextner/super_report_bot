@@ -246,6 +246,155 @@ ${textContext}Проанализируй фото и определи:
   }
 }
 
+// ============= Photo-to-Item Matching =============
+
+export interface PhotoItemMapping {
+  photoIndex: number;
+  itemIndex: number | null; // null if could not determine
+  confidence: number;
+}
+
+/**
+ * Match a single photo to one of the item descriptions
+ * Returns which item (by index) the photo belongs to
+ *
+ * @param imageBuffer - Photo data
+ * @param itemDescriptions - Array of item texts to match against
+ * @returns Matching result with item index (or null if unknown)
+ */
+export async function matchPhotoToItem(
+  imageBuffer: Uint8Array,
+  itemDescriptions: string[]
+): Promise<{ itemIndex: number | null; confidence: number }> {
+  if (itemDescriptions.length === 0) {
+    return { itemIndex: null, confidence: 0 };
+  }
+
+  if (itemDescriptions.length === 1) {
+    // Only one item - photo must belong to it
+    return { itemIndex: 0, confidence: 1.0 };
+  }
+
+  const base64Image = Buffer.from(imageBuffer).toString("base64");
+  const imageDataUrl = `data:image/jpeg;base64,${base64Image}`;
+
+  // Build numbered list of items
+  const itemsList = itemDescriptions
+    .map((desc, i) => `${i + 1}. ${desc.slice(0, 300)}`)
+    .join("\n\n");
+
+  const prompt = `На этом фото товар из объявления. К какому из этих описаний он относится?
+
+${itemsList}
+
+ВАЖНО:
+- Если товар на фото явно соответствует одному из описаний, укажи его номер
+- Если не можешь определить точно, ответь 0
+
+Ответь ТОЛЬКО JSON: {"item": номер (1-${itemDescriptions.length}) или 0, "confidence": 0.0-1.0}`;
+
+  try {
+    const response = await withRetry(() =>
+      hf.chatCompletion({
+        model: QWEN_VL_MODEL,
+        provider: "novita",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "image_url", image_url: { url: imageDataUrl } },
+              { type: "text", text: prompt },
+            ],
+          },
+        ],
+        max_tokens: 100,
+        temperature: 0.1,
+      })
+    );
+
+    const content = response.choices[0]?.message?.content;
+
+    if (!content) {
+      return { itemIndex: null, confidence: 0 };
+    }
+
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return { itemIndex: null, confidence: 0 };
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    const itemNum = typeof parsed.item === "number" ? parsed.item : 0;
+    const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0.5;
+
+    // Convert 1-based to 0-based index, 0 means unknown
+    const itemIndex = itemNum > 0 && itemNum <= itemDescriptions.length ? itemNum - 1 : null;
+
+    llmLog.debug({ itemNum, itemIndex, confidence }, "Photo-to-item match result");
+
+    return { itemIndex, confidence };
+  } catch (error) {
+    llmLog.error({ error }, "Failed to match photo to item");
+    return { itemIndex: null, confidence: 0 };
+  }
+}
+
+/**
+ * Match multiple photos to items
+ * Processes photos in parallel for speed
+ *
+ * @param photos - Array of photo buffers with indices
+ * @param itemDescriptions - Array of item texts
+ * @returns Array of mappings from photo index to item index
+ */
+export async function matchPhotosToItems(
+  photos: Array<{ index: number; buffer: Uint8Array }>,
+  itemDescriptions: string[]
+): Promise<PhotoItemMapping[]> {
+  if (photos.length === 0 || itemDescriptions.length === 0) {
+    return [];
+  }
+
+  // If only one item, all photos belong to it
+  if (itemDescriptions.length === 1) {
+    return photos.map((p) => ({
+      photoIndex: p.index,
+      itemIndex: 0,
+      confidence: 1.0,
+    }));
+  }
+
+  // Process photos in parallel (limit concurrency to 3)
+  const results: PhotoItemMapping[] = [];
+  const CONCURRENCY = 3;
+
+  for (let i = 0; i < photos.length; i += CONCURRENCY) {
+    const batch = photos.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map(async (photo) => {
+        const match = await matchPhotoToItem(photo.buffer, itemDescriptions);
+        return {
+          photoIndex: photo.index,
+          itemIndex: match.itemIndex,
+          confidence: match.confidence,
+        };
+      })
+    );
+    results.push(...batchResults);
+  }
+
+  llmLog.debug(
+    {
+      totalPhotos: photos.length,
+      mapped: results.filter((r) => r.itemIndex !== null).length,
+      unmapped: results.filter((r) => r.itemIndex === null).length,
+    },
+    "Photos-to-items matching complete"
+  );
+
+  return results;
+}
+
 function parseListingImageResponse(content: string): ListingImageAnalysis {
   const defaultResult: ListingImageAnalysis = {
     description: content.slice(0, 200),
