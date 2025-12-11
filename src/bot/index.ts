@@ -39,9 +39,23 @@ import {
   metadataCurrencyKeyboard,
   feedbackOutcomeKeyboard,
   feedbackReviewKeyboard,
+  premiumKeyboard,
 } from "./keyboards.ts";
+import {
+  formatPlanInfo,
+  createSubscriptionLink,
+  handlePreCheckout,
+  handleSuccessfulPayment,
+  checkSubscriptionLimits,
+  PLAN_PRICES,
+  getAnalyzePrice,
+  canUseFreeAnalyze,
+  sendPaymentInvoice,
+  type PaymentPayload,
+} from "./payments.ts";
 import { runWithRecovery } from "./operations.ts";
 import { interpretEditCommand } from "../llm/edit.ts";
+import { analyzeMessage } from "../llm/analyze.ts";
 import { generateKeywordEmbeddings, checkBgeHealth } from "../llm/embeddings.ts";
 import { groups, messages } from "../utils/pluralize.ts";
 import {
@@ -663,6 +677,21 @@ ${modeDescription}`,
   );
 });
 
+// /premium command - show plan info and upgrade options
+bot.command("premium", async (context) => {
+  const userId = context.from?.id;
+  if (!userId) return;
+
+  queries.getOrCreateUser(userId, context.from?.firstName, context.from?.username);
+
+  const planInfo = formatPlanInfo(userId);
+  const { plan } = queries.getUserPlan(userId);
+
+  await context.send(planInfo, {
+    reply_markup: premiumKeyboard(plan),
+  });
+});
+
 // /catalog command - open webapp
 bot.command("catalog", async (context) => {
   const webappUrl = process.env.WEBAPP_URL;
@@ -1059,6 +1088,33 @@ async function finishMetadataCollection(
 // Helper: process new subscription query
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function processSubscriptionQuery(context: any, userId: number, query: string): Promise<void> {
+  // Check subscription limits before processing
+  const limits = checkSubscriptionLimits(userId);
+  if (!limits.canCreate) {
+    const planNames = { free: "Free", basic: "Basic", pro: "Pro", business: "Business" } as const;
+    const currentPlanName = planNames[limits.plan];
+    const nextPlan = limits.plan === "free" ? "basic" : limits.plan === "basic" ? "pro" : "business";
+    const nextPlanName = planNames[nextPlan];
+    const price = PLAN_PRICES[nextPlan];
+
+    await context.send(
+      format`⚠️ ${bold("Лимит подписок исчерпан")}
+
+Твой план: ${currentPlanName}
+Подписок: ${limits.current}/${limits.max}
+
+Чтобы создать больше подписок, перейди на следующий план.`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: `Upgrade to ${nextPlanName} — ${price}⭐/мес`, callback_data: JSON.stringify({ action: "upgrade", plan: nextPlan }) }],
+          ],
+        },
+      }
+    );
+    return;
+  }
+
   const mode = queries.getUserMode(userId);
 
   if (mode === "normal") {
@@ -3963,12 +4019,235 @@ ${bold("ИИ:")} ${result.summary}
       await context.editText("Спасибо за обратную связь!");
       break;
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    //                       PREMIUM UPGRADE ACTIONS
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    case "upgrade": {
+      const raw = JSON.parse(context.data || "{}");
+      const plan = raw.plan as "basic" | "pro" | "business";
+
+      if (!plan || !["basic", "pro", "business"].includes(plan)) {
+        await context.answer({ text: "Неверный план" });
+        return;
+      }
+
+      await context.answer({ text: "Создаю ссылку на оплату..." });
+
+      try {
+        const link = await createSubscriptionLink(bot, plan, userId);
+        const planNames = { basic: "Basic", pro: "Pro", business: "Business" };
+
+        await context.editText(
+          `💎 Оформление подписки ${planNames[plan]}\n\nНажми кнопку ниже для оплаты:`,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: `Оплатить ${planNames[plan]}`, url: link }],
+                [{ text: "← Назад", callback_data: JSON.stringify({ action: "back_to_premium" }) }],
+              ],
+            },
+          }
+        );
+      } catch (error) {
+        botLog.error({ error }, "Failed to create subscription link");
+        await context.editText("Ошибка создания ссылки на оплату. Попробуй позже.");
+      }
+      break;
+    }
+
+    case "back_to_premium": {
+      const planInfo = formatPlanInfo(userId);
+      const { plan } = queries.getUserPlan(userId);
+
+      await context.answer();
+      await context.editText(planInfo, {
+        reply_markup: premiumKeyboard(plan),
+      });
+      break;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    //                       PRODUCT ANALYSIS ACTION
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    case "analyze_product": {
+      const raw = JSON.parse(context.data || "{}");
+      const messageId = raw.m as number;
+      const groupId = raw.g as number;
+
+      if (!messageId || !groupId) {
+        await context.answer({ text: "Данные сообщения не найдены" });
+        return;
+      }
+
+      // Get the message text from DB
+      const msg = queries.getMessage(messageId, groupId);
+      if (!msg) {
+        await context.answer({ text: "Сообщение не найдено в базе" });
+        return;
+      }
+
+      // Check if free analyze is available
+      const isFree = canUseFreeAnalyze(userId);
+      const price = getAnalyzePrice(userId);
+
+      if (isFree || price === 0) {
+        // Free analysis (first free or Business plan)
+        await context.answer({ text: "Анализирую..." });
+
+        try {
+          const result = await analyzeMessage(msg.text);
+
+          // Mark free analyze as used
+          if (isFree && price > 0) {
+            queries.incrementFreeAnalyzes(userId);
+          }
+
+          const priceDisplay = result.price
+            ? `${result.price} ${result.currency || ""}`
+            : "не указана";
+
+          const contactsDisplay = result.contacts.length > 0
+            ? result.contacts.join(", ")
+            : "не найдены";
+
+          await context.editText(
+            format`🔍 ${bold("Анализ товара")}
+
+📦 Категория: ${result.category}
+💰 Цена: ${priceDisplay}
+📱 Контакты: ${contactsDisplay}
+
+---
+${msg.text.slice(0, 500)}${msg.text.length > 500 ? "..." : ""}`,
+            { parse_mode: "Markdown" }
+          );
+
+          botLog.info({ userId, messageId, groupId }, "Product analyzed (free)");
+        } catch (error) {
+          botLog.error({ error, userId }, "Analysis failed");
+          await context.editText("Ошибка анализа. Попробуй позже.");
+        }
+      } else {
+        // Paid analysis - send invoice
+        await context.answer({ text: "Открываю оплату..." });
+
+        await sendPaymentInvoice(bot, userId, {
+          type: "analyze",
+          title: "Анализ товара",
+          description: "AI-анализ: категория, цена, контакты продавца",
+          amount: price,
+          payload: {
+            type: "analyze",
+            messageId,
+            groupId,
+          },
+        });
+      }
+      break;
+    }
   }
 });
 
 // Error handler
 bot.onError(({ context, error }) => {
   botLog.error({ err: error }, "Bot error");
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+//                       PAYMENT HANDLERS (Telegram Stars)
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+// Pre-checkout validation - called before payment is processed
+bot.on("pre_checkout_query", async (context) => {
+  const userId = context.from?.id;
+  if (!userId) {
+    await context.answerPreCheckoutQuery({ ok: false, error_message: "Пользователь не найден" });
+    return;
+  }
+
+  try {
+    const payload = JSON.parse(context.invoicePayload || "{}") as PaymentPayload;
+
+    await handlePreCheckout(
+      bot,
+      context.id,
+      userId,
+      payload
+    );
+  } catch (error) {
+    botLog.error({ error, userId }, "Pre-checkout error");
+    await context.answerPreCheckoutQuery({ ok: false, error_message: "Ошибка проверки платежа" });
+  }
+});
+
+// Successful payment - called after payment is completed
+bot.on("successful_payment", async (context) => {
+  const userId = context.from?.id;
+  if (!userId) return;
+
+  const payment = context.successfulPayment;
+  if (!payment) return;
+
+  const result = await handleSuccessfulPayment(
+    bot,
+    userId,
+    payment.telegramPaymentChargeId,
+    payment.totalAmount,
+    payment.invoicePayload
+  );
+
+  // Send confirmation message
+  await context.send(result.message);
+
+  // Handle post-payment actions
+  try {
+    const payload = JSON.parse(payment.invoicePayload) as PaymentPayload;
+
+    if (payload.type === "analyze" && payload.messageId && payload.groupId) {
+      // Run the paid analysis
+      const msg = queries.getMessage(payload.messageId, payload.groupId);
+      if (msg) {
+        const analysisResult = await analyzeMessage(msg.text);
+
+        const priceDisplay = analysisResult.price
+          ? `${analysisResult.price} ${analysisResult.currency || ""}`
+          : "не указана";
+
+        const contactsDisplay = analysisResult.contacts.length > 0
+          ? analysisResult.contacts.join(", ")
+          : "не найдены";
+
+        await context.send(
+          `🔍 *Анализ товара*
+
+📦 Категория: ${analysisResult.category}
+💰 Цена: ${priceDisplay}
+📱 Контакты: ${contactsDisplay}
+
+---
+${msg.text.slice(0, 500)}${msg.text.length > 500 ? "..." : ""}`,
+          { parse_mode: "Markdown" }
+        );
+
+        botLog.info({ userId, messageId: payload.messageId, groupId: payload.groupId }, "Paid analysis completed");
+      }
+    }
+  } catch (error) {
+    botLog.error({ error, userId }, "Post-payment action failed");
+  }
+
+  botLog.info(
+    {
+      userId,
+      chargeId: payment.telegramPaymentChargeId,
+      amount: payment.totalAmount,
+      success: result.success,
+    },
+    "Payment processed"
+  );
 });
 
 /**
@@ -4027,16 +4306,32 @@ function buildNotificationCaption(
 function buildNotificationKeyboard(
   messageId?: number,
   groupId?: number,
-  subscriptionId?: number
+  subscriptionId?: number,
+  telegramId?: number
 ): { inline_keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> } | undefined {
   if (!messageId || !groupId) return undefined;
 
   const messageUrl = buildMessageLink(groupId, messageId);
+
+  // Get analyze price for user (if telegramId provided)
+  let analyzeLabel = "🔍 Анализ";
+  if (telegramId) {
+    const price = getAnalyzePrice(telegramId);
+    const isFree = canUseFreeAnalyze(telegramId);
+    if (price === 0) {
+      analyzeLabel = "🔍 Анализ";
+    } else if (isFree) {
+      analyzeLabel = "🔍 Анализ (1 бесплатный)";
+    } else {
+      analyzeLabel = `🔍 Анализ — ${price}⭐`;
+    }
+  }
+
   const keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> = [
     [{ text: "📎 Перейти к посту", url: messageUrl }],
     [{
-      text: "🔍 Анализ цены",
-      callback_data: JSON.stringify({ action: "analyze", msgId: messageId, grpId: groupId }),
+      text: analyzeLabel,
+      callback_data: JSON.stringify({ action: "analyze_product", m: messageId, g: groupId }),
     }],
   ];
 
@@ -4073,7 +4368,7 @@ export async function notifyUser(
   subscriptionId?: number
 ): Promise<void> {
   try {
-    const keyboard = buildNotificationKeyboard(messageId, groupId, subscriptionId);
+    const keyboard = buildNotificationKeyboard(messageId, groupId, subscriptionId, telegramId);
 
     // If we have media, send with photo/video
     if (media && media.length > 0) {

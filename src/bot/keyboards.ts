@@ -435,3 +435,71 @@ export function feedbackReviewKeyboard(subscriptionId: number): InlineKeyboard {
   return new InlineKeyboard()
     .text("Не в этот раз", JSON.stringify({ action: "skip_feedback", id: subscriptionId }));
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//                       PREMIUM / MONETIZATION KEYBOARDS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Main premium keyboard with upgrade options
+ */
+export function premiumKeyboard(currentPlan: string): InlineKeyboard {
+  const kb = new InlineKeyboard();
+
+  // Show upgrade options based on current plan
+  if (currentPlan === "free") {
+    kb.text("Basic — 50⭐/мес", JSON.stringify({ action: "upgrade", plan: "basic" }));
+    kb.row();
+    kb.text("Pro — 150⭐/мес", JSON.stringify({ action: "upgrade", plan: "pro" }));
+    kb.row();
+    kb.text("Business — 500⭐/мес", JSON.stringify({ action: "upgrade", plan: "business" }));
+  } else if (currentPlan === "basic") {
+    kb.text("Pro — 150⭐/мес", JSON.stringify({ action: "upgrade", plan: "pro" }));
+    kb.row();
+    kb.text("Business — 500⭐/мес", JSON.stringify({ action: "upgrade", plan: "business" }));
+  } else if (currentPlan === "pro") {
+    kb.text("Business — 500⭐/мес", JSON.stringify({ action: "upgrade", plan: "business" }));
+  }
+  // Business users don't see upgrade buttons
+
+  return kb;
+}
+
+/**
+ * Analyze button with price (shown in notifications)
+ */
+export function analyzeButtonKeyboard(
+  messageId: number,
+  groupId: number,
+  price: number,
+  subscriptionId?: number
+): InlineKeyboard {
+  const kb = new InlineKeyboard();
+
+  const priceLabel = price === 0 ? "🔍 Анализ" : `🔍 Анализ — ${price}⭐`;
+  kb.text(priceLabel, JSON.stringify({
+    action: "analyze_product",
+    m: messageId,
+    g: groupId,
+    s: subscriptionId
+  }));
+
+  return kb;
+}
+
+/**
+ * "Miss" feedback button for notifications
+ */
+export function notificationFeedbackKeyboard(
+  messageId: number,
+  groupId: number,
+  subscriptionId: number
+): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("👎 Мимо", JSON.stringify({
+      action: "miss_feedback",
+      m: messageId,
+      g: groupId,
+      s: subscriptionId
+    }));
+}

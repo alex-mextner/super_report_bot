@@ -6,6 +6,11 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT,
   mode TEXT DEFAULT 'normal' CHECK (mode IN ('normal', 'advanced')),
   last_active INTEGER,              -- unix timestamp of last activity
+  -- Monetization fields
+  plan TEXT DEFAULT 'free' CHECK (plan IN ('free', 'basic', 'pro', 'business')),
+  plan_expires_at TEXT,             -- ISO timestamp, NULL for free
+  telegram_subscription_id TEXT,    -- Telegram's subscription charge ID
+  region_code TEXT,                 -- 'belgrade', 'novi_sad', etc.
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -277,3 +282,92 @@ CREATE TABLE IF NOT EXISTS subscription_feedback (
 
 CREATE INDEX IF NOT EXISTS idx_subscription_feedback_user ON subscription_feedback(user_id);
 CREATE INDEX IF NOT EXISTS idx_subscription_feedback_sub ON subscription_feedback(subscription_id);
+
+-- ===========================================
+-- Monetization: Payments and Plans
+-- ===========================================
+
+-- Free usage tracking (analyzes)
+CREATE TABLE IF NOT EXISTS free_usage (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  free_analyzes_used INTEGER DEFAULT 0,
+  last_reset_at INTEGER DEFAULT (unixepoch())  -- reset every 6 months
+);
+
+-- Payments log
+CREATE TABLE IF NOT EXISTS payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  telegram_charge_id TEXT UNIQUE,
+  type TEXT NOT NULL CHECK (type IN ('analyze', 'subscription', 'preset', 'promotion_group', 'promotion_product', 'publication')),
+  amount INTEGER NOT NULL,            -- in Stars
+  payload TEXT,                       -- JSON with details
+  created_at INTEGER DEFAULT (unixepoch())
+);
+
+CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
+CREATE INDEX IF NOT EXISTS idx_payments_type ON payments(type);
+
+-- ===========================================
+-- Region Presets (flea markets by region)
+-- ===========================================
+
+-- Preset definitions
+CREATE TABLE IF NOT EXISTS region_presets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  region_code TEXT UNIQUE NOT NULL,   -- 'belgrade', 'novi_sad'
+  region_name TEXT NOT NULL,          -- 'Все барахолки Белграда'
+  country_code TEXT,                  -- 'RS'
+  currency TEXT,                      -- 'EUR'
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Groups in presets
+CREATE TABLE IF NOT EXISTS preset_groups (
+  preset_id INTEGER NOT NULL REFERENCES region_presets(id) ON DELETE CASCADE,
+  group_id INTEGER NOT NULL,
+  is_paid INTEGER DEFAULT 0,          -- paid placement by group admin
+  added_by INTEGER,                   -- user_id who added (NULL = admin)
+  paid_until TEXT,                    -- ISO timestamp
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (preset_id, group_id)
+);
+
+-- User access to presets (purchased monitoring)
+CREATE TABLE IF NOT EXISTS user_preset_access (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  preset_id INTEGER NOT NULL REFERENCES region_presets(id) ON DELETE CASCADE,
+  access_type TEXT NOT NULL CHECK (access_type IN ('lifetime', 'subscription')),
+  expires_at TEXT,                    -- NULL for lifetime
+  purchased_at INTEGER DEFAULT (unixepoch()),
+  PRIMARY KEY (user_id, preset_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_preset_groups_preset ON preset_groups(preset_id);
+CREATE INDEX IF NOT EXISTS idx_user_preset_access_user ON user_preset_access(user_id);
+
+-- ===========================================
+-- Promotions (paid ads for groups/products)
+-- ===========================================
+
+CREATE TABLE IF NOT EXISTS promotions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('group', 'product')),
+  -- For group promotion
+  group_id INTEGER,
+  -- For product promotion
+  message_id INTEGER,
+  product_group_id INTEGER,
+  -- Duration
+  starts_at INTEGER NOT NULL,         -- unix timestamp
+  ends_at INTEGER NOT NULL,           -- unix timestamp
+  -- Status
+  is_active INTEGER DEFAULT 1,
+  created_at INTEGER DEFAULT (unixepoch())
+);
+
+CREATE INDEX IF NOT EXISTS idx_promotions_active ON promotions(is_active, ends_at);
+CREATE INDEX IF NOT EXISTS idx_promotions_user ON promotions(user_id);
+CREATE INDEX IF NOT EXISTS idx_promotions_group ON promotions(group_id);
+CREATE INDEX IF NOT EXISTS idx_promotions_product ON promotions(message_id, product_group_id);

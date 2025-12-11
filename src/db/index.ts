@@ -1271,6 +1271,326 @@ export const queries = {
   }): void {
     stmts.insertFeedback.run(data.subscriptionId, data.telegramId, data.outcome, data.review);
   },
+
+  // ===========================================
+  // Monetization: Plans, Payments, Presets
+  // ===========================================
+
+  // --- User Plan ---
+  getUserPlan(telegramId: number): {
+    plan: "free" | "basic" | "pro" | "business";
+    plan_expires_at: string | null;
+    telegram_subscription_id: string | null;
+    region_code: string | null;
+  } {
+    const result = db
+      .prepare<
+        {
+          plan: string | null;
+          plan_expires_at: string | null;
+          telegram_subscription_id: string | null;
+          region_code: string | null;
+        },
+        [number]
+      >("SELECT plan, plan_expires_at, telegram_subscription_id, region_code FROM users WHERE telegram_id = ?")
+      .get(telegramId);
+    return {
+      plan: (result?.plan as "free" | "basic" | "pro" | "business") || "free",
+      plan_expires_at: result?.plan_expires_at ?? null,
+      telegram_subscription_id: result?.telegram_subscription_id ?? null,
+      region_code: result?.region_code ?? null,
+    };
+  },
+
+  updateUserPlan(
+    telegramId: number,
+    plan: "free" | "basic" | "pro" | "business",
+    expiresAt: string | null,
+    subscriptionId: string | null
+  ): void {
+    db.prepare(
+      "UPDATE users SET plan = ?, plan_expires_at = ?, telegram_subscription_id = ? WHERE telegram_id = ?"
+    ).run(plan, expiresAt, subscriptionId, telegramId);
+  },
+
+  setUserRegion(telegramId: number, regionCode: string): void {
+    db.prepare("UPDATE users SET region_code = ? WHERE telegram_id = ?").run(
+      regionCode,
+      telegramId
+    );
+  },
+
+  // --- Plan Limits ---
+  getPlanLimits(plan: "free" | "basic" | "pro" | "business"): {
+    maxSubscriptions: number;
+    maxGroupsPerSubscription: number;
+    hasPriority: boolean;
+    hasFora: boolean;
+    analyzePrice: number; // 0 = free
+  } {
+    const limits = {
+      free: { maxSubscriptions: 3, maxGroupsPerSubscription: 5, hasPriority: false, hasFora: false, analyzePrice: 20 },
+      basic: { maxSubscriptions: 10, maxGroupsPerSubscription: 20, hasPriority: true, hasFora: false, analyzePrice: 20 },
+      pro: { maxSubscriptions: 50, maxGroupsPerSubscription: Infinity, hasPriority: true, hasFora: true, analyzePrice: 10 },
+      business: { maxSubscriptions: Infinity, maxGroupsPerSubscription: Infinity, hasPriority: true, hasFora: true, analyzePrice: 0 },
+    };
+    return limits[plan];
+  },
+
+  getUserSubscriptionCount(telegramId: number): number {
+    const result = db
+      .prepare<{ count: number }, [number]>(
+        `SELECT COUNT(*) as count FROM subscriptions s
+         JOIN users u ON s.user_id = u.id
+         WHERE u.telegram_id = ? AND s.is_active = 1`
+      )
+      .get(telegramId);
+    return result?.count ?? 0;
+  },
+
+  getSubscriptionGroupCount(subscriptionId: number): number {
+    const result = db
+      .prepare<{ count: number }, [number]>(
+        "SELECT COUNT(*) as count FROM subscription_groups WHERE subscription_id = ?"
+      )
+      .get(subscriptionId);
+    return result?.count ?? 0;
+  },
+
+  // --- Free Usage (Analyzes) ---
+  getFreeAnalyzesUsed(telegramId: number): number {
+    const user = this.getUserByTelegramId(telegramId);
+    if (!user) return 0;
+
+    const result = db
+      .prepare<{ free_analyzes_used: number; last_reset_at: number }, [number]>(
+        "SELECT free_analyzes_used, last_reset_at FROM free_usage WHERE user_id = ?"
+      )
+      .get(user.id);
+
+    if (!result) return 0;
+
+    // Reset every 6 months
+    const sixMonthsAgo = Math.floor(Date.now() / 1000) - 6 * 30 * 24 * 60 * 60;
+    if (result.last_reset_at < sixMonthsAgo) {
+      db.prepare("UPDATE free_usage SET free_analyzes_used = 0, last_reset_at = ? WHERE user_id = ?").run(
+        Math.floor(Date.now() / 1000),
+        user.id
+      );
+      return 0;
+    }
+
+    return result.free_analyzes_used;
+  },
+
+  incrementFreeAnalyzes(telegramId: number): void {
+    const user = this.getUserByTelegramId(telegramId);
+    if (!user) return;
+
+    db.prepare(`
+      INSERT INTO free_usage (user_id, free_analyzes_used, last_reset_at)
+      VALUES (?, 1, unixepoch())
+      ON CONFLICT(user_id) DO UPDATE SET free_analyzes_used = free_analyzes_used + 1
+    `).run(user.id);
+  },
+
+  // --- Payments ---
+  logPayment(data: {
+    telegramId: number;
+    chargeId: string;
+    type: "analyze" | "subscription" | "preset" | "promotion_group" | "promotion_product" | "publication";
+    amount: number;
+    payload?: Record<string, unknown>;
+  }): void {
+    const user = this.getUserByTelegramId(data.telegramId);
+    if (!user) return;
+
+    db.prepare(`
+      INSERT INTO payments (user_id, telegram_charge_id, type, amount, payload)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(user.id, data.chargeId, data.type, data.amount, data.payload ? JSON.stringify(data.payload) : null);
+  },
+
+  getPaymentByChargeId(chargeId: string): { id: number; type: string; payload: string | null } | null {
+    return db
+      .prepare<{ id: number; type: string; payload: string | null }, [string]>(
+        "SELECT id, type, payload FROM payments WHERE telegram_charge_id = ?"
+      )
+      .get(chargeId) ?? null;
+  },
+
+  // --- Region Presets ---
+  getRegionPresets(): Array<{
+    id: number;
+    region_code: string;
+    region_name: string;
+    country_code: string | null;
+    currency: string | null;
+    group_count: number;
+  }> {
+    return db
+      .prepare<
+        {
+          id: number;
+          region_code: string;
+          region_name: string;
+          country_code: string | null;
+          currency: string | null;
+          group_count: number;
+        },
+        []
+      >(`
+        SELECT rp.*, COUNT(pg.group_id) as group_count
+        FROM region_presets rp
+        LEFT JOIN preset_groups pg ON rp.id = pg.preset_id
+        GROUP BY rp.id
+      `)
+      .all();
+  },
+
+  getPresetByCode(regionCode: string): {
+    id: number;
+    region_code: string;
+    region_name: string;
+    country_code: string | null;
+    currency: string | null;
+  } | null {
+    return db
+      .prepare<
+        {
+          id: number;
+          region_code: string;
+          region_name: string;
+          country_code: string | null;
+          currency: string | null;
+        },
+        [string]
+      >("SELECT * FROM region_presets WHERE region_code = ?")
+      .get(regionCode) ?? null;
+  },
+
+  getPresetGroups(presetId: number): Array<{ group_id: number; is_paid: number }> {
+    return db
+      .prepare<{ group_id: number; is_paid: number }, [number]>(
+        "SELECT group_id, is_paid FROM preset_groups WHERE preset_id = ?"
+      )
+      .all(presetId);
+  },
+
+  // --- User Preset Access ---
+  hasPresetAccess(telegramId: number, presetId: number): boolean {
+    const user = this.getUserByTelegramId(telegramId);
+    if (!user) return false;
+
+    const result = db
+      .prepare<{ expires_at: string | null; access_type: string }, [number, number]>(
+        "SELECT expires_at, access_type FROM user_preset_access WHERE user_id = ? AND preset_id = ?"
+      )
+      .get(user.id, presetId);
+
+    if (!result) return false;
+    if (result.access_type === "lifetime") return true;
+
+    // Check subscription expiry
+    if (result.expires_at) {
+      return new Date(result.expires_at) > new Date();
+    }
+    return false;
+  },
+
+  grantPresetAccess(
+    telegramId: number,
+    presetId: number,
+    accessType: "lifetime" | "subscription",
+    expiresAt: string | null
+  ): void {
+    const user = this.getUserByTelegramId(telegramId);
+    if (!user) return;
+
+    db.prepare(`
+      INSERT INTO user_preset_access (user_id, preset_id, access_type, expires_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(user_id, preset_id) DO UPDATE SET
+        access_type = excluded.access_type,
+        expires_at = excluded.expires_at,
+        purchased_at = unixepoch()
+    `).run(user.id, presetId, accessType, expiresAt);
+  },
+
+  // --- Promotions ---
+  getActivePromotions(type: "group" | "product"): Array<{
+    id: number;
+    user_id: number;
+    group_id: number | null;
+    message_id: number | null;
+    product_group_id: number | null;
+    ends_at: number;
+  }> {
+    const now = Math.floor(Date.now() / 1000);
+    return db
+      .prepare<
+        {
+          id: number;
+          user_id: number;
+          group_id: number | null;
+          message_id: number | null;
+          product_group_id: number | null;
+          ends_at: number;
+        },
+        [string, number]
+      >("SELECT * FROM promotions WHERE type = ? AND is_active = 1 AND ends_at > ?")
+      .all(type, now);
+  },
+
+  createPromotion(data: {
+    telegramId: number;
+    type: "group" | "product";
+    groupId?: number;
+    messageId?: number;
+    productGroupId?: number;
+    durationDays: number;
+  }): void {
+    const user = this.getUserByTelegramId(data.telegramId);
+    if (!user) return;
+
+    const now = Math.floor(Date.now() / 1000);
+    const endsAt = now + data.durationDays * 24 * 60 * 60;
+
+    db.prepare(`
+      INSERT INTO promotions (user_id, type, group_id, message_id, product_group_id, starts_at, ends_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      user.id,
+      data.type,
+      data.groupId ?? null,
+      data.messageId ?? null,
+      data.productGroupId ?? null,
+      now,
+      endsAt
+    );
+  },
+
+  // --- Premium Users for Priority Notifications ---
+  getPremiumUsersForMessage(
+    messageText: string,
+    groupId: number
+  ): number[] {
+    // Get all users with active subscriptions for this group who have premium plan
+    return db
+      .prepare<{ telegram_id: number }, [number]>(`
+        SELECT DISTINCT u.telegram_id
+        FROM users u
+        JOIN subscriptions s ON s.user_id = u.id
+        JOIN subscription_groups sg ON sg.subscription_id = s.id
+        WHERE sg.group_id = ?
+          AND s.is_active = 1
+          AND s.is_paused = 0
+          AND u.plan IN ('basic', 'pro', 'business')
+          AND (u.plan_expires_at IS NULL OR u.plan_expires_at > datetime('now'))
+      `)
+      .all(groupId)
+      .map((r) => r.telegram_id);
+  },
 };
 
 export { db };
