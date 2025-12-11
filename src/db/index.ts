@@ -13,6 +13,9 @@ import type {
   StoredMedia,
   FoundPostAnalysis,
   AnalysisResult,
+  BotMessage,
+  BotMessageDirection,
+  BotMessageType,
 } from "../types.ts";
 import { runMigrations } from "./migrations.ts";
 
@@ -353,6 +356,32 @@ const stmts = {
   ),
   updateGroupInsights: db.prepare<void, [string, number, number]>(
     `UPDATE group_analytics SET insights_text = ?, insights_generated_at = ?, updated_at = CURRENT_TIMESTAMP WHERE group_id = ?`
+  ),
+
+  // Bot messages (conversation history)
+  insertBotMessage: db.prepare<void, [number, number, string, string, string | null, string | null, string | null, string | null, number]>(
+    `INSERT INTO bot_messages (user_id, telegram_id, direction, message_type, text, command, callback_data, metadata, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ),
+  getBotMessages: db.prepare<BotMessage, [number, number, number]>(
+    `SELECT * FROM bot_messages WHERE telegram_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`
+  ),
+  getLatestBotMessages: db.prepare<BotMessage, [number, number]>(
+    `SELECT * FROM bot_messages WHERE telegram_id = ? AND created_at > ? ORDER BY created_at ASC`
+  ),
+  cleanupOldBotMessages: db.prepare<void, [number, number]>(
+    `DELETE FROM bot_messages WHERE telegram_id = ? AND id NOT IN (
+       SELECT id FROM bot_messages WHERE telegram_id = ? ORDER BY created_at DESC LIMIT 500
+     )`
+  ),
+  updateUserLastActive: db.prepare<void, [number, number]>(
+    `UPDATE users SET last_active = ? WHERE telegram_id = ?`
+  ),
+  getAllUsers: db.prepare<User, []>(
+    `SELECT * FROM users ORDER BY last_active DESC NULLS LAST`
+  ),
+  getActiveUsers: db.prepare<User, [number]>(
+    `SELECT * FROM users WHERE last_active IS NOT NULL AND last_active > ? ORDER BY last_active DESC`
   ),
 };
 
@@ -929,6 +958,77 @@ export const queries = {
   updateGroupInsights(groupId: number, insightsText: string): void {
     const generatedAt = Math.floor(Date.now() / 1000);
     stmts.updateGroupInsights.run(insightsText, generatedAt, groupId);
+  },
+
+  // === Bot Messages (conversation history) ===
+  logBotMessage(data: {
+    telegramId: number;
+    direction: BotMessageDirection;
+    messageType: BotMessageType;
+    text?: string;
+    command?: string;
+    callbackData?: string;
+    metadata?: Record<string, unknown>;
+  }): BotMessage | null {
+    const user = this.getOrCreateUser(data.telegramId);
+    const now = Math.floor(Date.now() / 1000);
+
+    stmts.insertBotMessage.run(
+      user.id,
+      data.telegramId,
+      data.direction,
+      data.messageType,
+      data.text ?? null,
+      data.command ?? null,
+      data.callbackData ?? null,
+      data.metadata ? JSON.stringify(data.metadata) : null,
+      now
+    );
+
+    // Update user last_active
+    stmts.updateUserLastActive.run(now, data.telegramId);
+
+    // Cleanup old messages (keep last 500)
+    stmts.cleanupOldBotMessages.run(data.telegramId, data.telegramId);
+
+    // Return the inserted message
+    const result = db.prepare<{ id: number }, []>("SELECT last_insert_rowid() as id").get();
+    if (!result) return null;
+
+    return {
+      id: result.id,
+      user_id: user.id,
+      telegram_id: data.telegramId,
+      direction: data.direction,
+      message_type: data.messageType,
+      text: data.text ?? null,
+      command: data.command ?? null,
+      callback_data: data.callbackData ?? null,
+      metadata: data.metadata ? JSON.stringify(data.metadata) : null,
+      created_at: now,
+    };
+  },
+
+  getBotMessages(telegramId: number, opts?: { offset?: number; limit?: number }): BotMessage[] {
+    const { offset = 0, limit = 100 } = opts || {};
+    return stmts.getBotMessages.all(telegramId, limit, offset);
+  },
+
+  getLatestBotMessages(telegramId: number, sinceTimestamp: number): BotMessage[] {
+    return stmts.getLatestBotMessages.all(telegramId, sinceTimestamp);
+  },
+
+  updateUserLastActive(telegramId: number): void {
+    const now = Math.floor(Date.now() / 1000);
+    stmts.updateUserLastActive.run(now, telegramId);
+  },
+
+  getAllUsers(): User[] {
+    return stmts.getAllUsers.all();
+  },
+
+  getRecentlyActiveUsers(sinceTimestamp: number): User[] {
+    return stmts.getActiveUsers.all(sinceTimestamp);
   },
 };
 

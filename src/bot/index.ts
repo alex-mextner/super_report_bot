@@ -380,6 +380,105 @@ async function generateKeywordsAndShowResult(
 
 export const bot = new Bot(BOT_TOKEN);
 
+// EventEmitter for SSE notifications about user activity
+import { EventEmitter } from "events";
+export const botActivityEmitter = new EventEmitter();
+
+// Middleware: log all incoming messages and update last_active
+bot.on("message", (context, next) => {
+  const userId = context.from?.id;
+  if (!userId) return next();
+
+  let messageType: "text" | "command" | "callback" | "forward" | "other" = "text";
+  let text: string | undefined;
+  let command: string | undefined;
+
+  if (context.text) {
+    text = context.text;
+    if (text.startsWith("/")) {
+      messageType = "command";
+      command = text.split(" ")[0];
+    }
+  }
+  if (context.forwardOrigin) {
+    messageType = "forward";
+  }
+
+  const msg = queries.logBotMessage({
+    telegramId: userId,
+    direction: "incoming",
+    messageType,
+    text,
+    command,
+  });
+
+  // Emit event for SSE
+  if (msg) {
+    botActivityEmitter.emit("user_activity", {
+      telegram_id: userId,
+      last_active: msg.created_at,
+      first_name: context.from?.firstName ?? null,
+      username: context.from?.username ?? null,
+    });
+    botActivityEmitter.emit("new_message", msg);
+  }
+
+  return next();
+});
+
+// Middleware: log all callback queries
+bot.on("callback_query", (context, next) => {
+  const userId = context.from?.id;
+  if (!userId) return next();
+
+  const msg = queries.logBotMessage({
+    telegramId: userId,
+    direction: "incoming",
+    messageType: "callback",
+    callbackData: context.data,
+    text: context.data,
+  });
+
+  // Emit event for SSE
+  if (msg) {
+    botActivityEmitter.emit("user_activity", {
+      telegram_id: userId,
+      last_active: msg.created_at,
+      first_name: context.from?.firstName ?? null,
+      username: context.from?.username ?? null,
+    });
+    botActivityEmitter.emit("new_message", msg);
+  }
+
+  return next();
+});
+
+// Wrap bot.api.sendMessage to log outgoing messages
+const originalSendMessage = bot.api.sendMessage.bind(bot.api);
+bot.api.sendMessage = async (params) => {
+  const result = await originalSendMessage(params);
+
+  // Log outgoing message
+  const chatId = typeof params.chat_id === "number" ? params.chat_id : parseInt(String(params.chat_id), 10);
+  if (!isNaN(chatId) && chatId > 0) {
+    // params.text can be string or FormattedString
+    const textValue = typeof params.text === "string" ? params.text : params.text?.toString();
+
+    const msg = queries.logBotMessage({
+      telegramId: chatId,
+      direction: "outgoing",
+      messageType: "text",
+      text: textValue,
+    });
+
+    if (msg) {
+      botActivityEmitter.emit("new_message", msg);
+    }
+  }
+
+  return result;
+};
+
 // /start command
 bot.command("start", async (context) => {
   const userId = context.from?.id;
@@ -866,13 +965,13 @@ async function processSubscriptionQuery(context: any, userId: number, query: str
 
 // Handle text messages (new subscription requests)
 bot.on("message", async (context) => {
-  if (!context.text || context.text.startsWith("/")) return;
-
   const userId = context.from?.id;
   if (!userId) return;
 
-  // Handle forwarded messages - show analysis results
+  // Handle forwarded messages FIRST - before text check
+  // (forwards can be media without text)
   if (context.forwardOrigin) {
+    const messageText = context.text || context.caption || "";
     const result = await handleForward({
       message: context as unknown as import("gramio").Message,
       from: context.from,
@@ -883,12 +982,12 @@ bot.on("message", async (context) => {
       if (result.response === "analyzing") {
         // Need to analyze on demand
         const forwardResult = result as { forwardInfo?: { chatId: number; messageId: number | null; chatTitle?: string }; messageText?: string };
-        if (forwardResult.forwardInfo && forwardResult.messageText) {
+        if (forwardResult.forwardInfo) {
           await context.send("Анализирую сообщение...");
           const analysisResult = await analyzeForwardedMessage(
             userId,
             forwardResult.forwardInfo,
-            forwardResult.messageText
+            forwardResult.messageText || messageText
           );
           if (analysisResult.keyboard) {
             await context.send(analysisResult.response, {
@@ -897,6 +996,8 @@ bot.on("message", async (context) => {
           } else {
             await context.send(analysisResult.response);
           }
+        } else {
+          await context.send("Не удалось определить источник сообщения.");
         }
       } else if (result.response) {
         const keyboard = (result as { keyboard?: unknown }).keyboard;
@@ -908,9 +1009,15 @@ bot.on("message", async (context) => {
           await context.send(result.response);
         }
       }
-      return;
+    } else {
+      // Forward not handled - inform user
+      await context.send("Не удалось обработать форвард. Убедись, что сообщение переслано из группы/канала.");
     }
+    return;
   }
+
+  // For non-forward messages, require text
+  if (!context.text || context.text.startsWith("/")) return;
 
   const currentState = fsmState(userId);
   const c = ctx(userId);

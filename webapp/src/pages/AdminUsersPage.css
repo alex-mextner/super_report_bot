@@ -1,0 +1,135 @@
+.admin-users-page {
+  min-height: 100vh;
+  background: var(--tg-theme-bg-color, #fff);
+}
+
+.admin-users-page .loading,
+.admin-users-page .error,
+.admin-users-page .empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: var(--tg-theme-hint-color, #999);
+}
+
+.admin-users-page .error {
+  color: var(--tg-theme-destructive-text-color, #ff3b30);
+}
+
+.admin-users-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+  border-bottom: 1px solid var(--tg-theme-hint-color, #ccc);
+}
+
+.admin-users-header h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--tg-theme-text-color, #000);
+}
+
+.users-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.total-count {
+  color: var(--tg-theme-hint-color, #999);
+}
+
+.online-count {
+  color: #34c759;
+  font-weight: 500;
+}
+
+.users-list {
+  padding: 8px 0;
+}
+
+.user-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.user-row:hover {
+  background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+}
+
+.user-row:active {
+  background: var(--tg-theme-hint-color, #e5e5e5);
+}
+
+.user-avatar {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.avatar-letter {
+  color: #fff;
+  font-size: 18px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.online-indicator {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #34c759;
+  border: 2px solid var(--tg-theme-bg-color, #fff);
+}
+
+.user-row.online .user-avatar {
+  box-shadow: 0 0 0 2px #34c759;
+}
+
+.user-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.user-name {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--tg-theme-text-color, #000);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-last-active {
+  font-size: 13px;
+  color: var(--tg-theme-hint-color, #999);
+  margin-top: 2px;
+}
+
+.user-row.online .user-last-active {
+  color: #34c759;
+  font-weight: 500;
+}
+
+.user-arrow {
+  font-size: 20px;
+  color: var(--tg-theme-hint-color, #ccc);
+  flex-shrink: 0;
+}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useAdminSubscriptions } from "../hooks/useAdminSubscriptions";
 import { useAdminGroups, type AvailableGroup } from "../hooks/useAdminGroups";
 import { useTelegram } from "../hooks/useTelegram";
@@ -219,7 +219,10 @@ export function AdminPage() {
   return (
     <div className="admin-page">
       <div className="admin-header">
-        <h1>Подписки</h1>
+        <div className="admin-title-row">
+          <h1>Подписки</h1>
+          <Link to="/admin/users" className="admin-nav-link">Users</Link>
+        </div>
         <div className="admin-stats">
           <span>{subscriptions.length} всего</span>
           <span>{activeCount} активных</span>

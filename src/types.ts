@@ -5,8 +5,31 @@ export type UserMode = "normal" | "advanced";
 export interface User {
   id: number;
   telegram_id: number;
+  first_name: string | null;
+  username: string | null;
   mode: UserMode;
+  last_active: number | null; // unix timestamp
   created_at: string;
+}
+
+// Bot message direction
+export type BotMessageDirection = "incoming" | "outgoing";
+
+// Bot message type
+export type BotMessageType = "text" | "command" | "callback" | "forward" | "other";
+
+// Bot conversation message (stored in bot_messages table)
+export interface BotMessage {
+  id: number;
+  user_id: number;
+  telegram_id: number;
+  direction: BotMessageDirection;
+  message_type: BotMessageType;
+  text: string | null;
+  command: string | null;
+  callback_data: string | null;
+  metadata: string | null; // JSON
+  created_at: number; // unix timestamp
 }
 
 // Keyword embedding for semantic matching

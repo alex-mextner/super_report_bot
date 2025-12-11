@@ -405,6 +405,208 @@ api.put("/admin/subscriptions/:id/groups", async (c) => {
   return c.json({ success: true });
 });
 
+// === Admin Users API ===
+
+// GET /api/admin/users - list all users (admin only)
+api.get("/admin/users", (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const users = queries.getAllUsers();
+
+  const items = users.map((u) => ({
+    id: u.telegram_id,
+    first_name: u.first_name,
+    username: u.username,
+    last_active: u.last_active,
+    created_at: u.created_at,
+  }));
+
+  apiLog.debug({ count: items.length }, "GET /api/admin/users");
+  return c.json({ items });
+});
+
+// GET /api/admin/users/stream - SSE stream for user activity (admin only)
+api.get("/admin/users/stream", async (c) => {
+  // Check admin via query param since EventSource doesn't support headers
+  const initData = c.req.query("initData");
+
+  if (!initData || !validateInitData(initData)) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const user = parseInitDataUser(initData);
+  if (user?.id !== ADMIN_ID) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  // Import emitter dynamically to avoid circular deps
+  const { botActivityEmitter } = await import("../bot/index.ts");
+
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+
+        const sendEvent = (event: string, data: unknown) => {
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        };
+
+        // Send initial heartbeat
+        sendEvent("heartbeat", { time: Date.now() });
+
+        // Listen for user activity
+        const onActivity = (data: { telegram_id: number; last_active: number; first_name: string | null; username: string | null }) => {
+          sendEvent("user_activity", data);
+        };
+
+        botActivityEmitter.on("user_activity", onActivity);
+
+        // Heartbeat every 30 seconds
+        const heartbeat = setInterval(() => {
+          try {
+            sendEvent("heartbeat", { time: Date.now() });
+          } catch {
+            clearInterval(heartbeat);
+          }
+        }, 30000);
+
+        // Cleanup on close
+        c.req.raw.signal.addEventListener("abort", () => {
+          botActivityEmitter.off("user_activity", onActivity);
+          clearInterval(heartbeat);
+        });
+      },
+    }),
+    {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    }
+  );
+});
+
+// GET /api/admin/users/:id/messages - get user chat history (admin only)
+api.get("/admin/users/:id/messages", (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const telegramId = Number(c.req.param("id"));
+  const offset = Number(c.req.query("offset")) || 0;
+  const limit = Math.min(Number(c.req.query("limit")) || 100, 200);
+
+  const messages = queries.getBotMessages(telegramId, { offset, limit });
+
+  const items = messages.map((m) => ({
+    id: m.id,
+    direction: m.direction,
+    message_type: m.message_type,
+    text: m.text,
+    command: m.command,
+    callback_data: m.callback_data,
+    created_at: m.created_at,
+  }));
+
+  apiLog.debug({ telegramId, count: items.length }, "GET /api/admin/users/:id/messages");
+  return c.json({ items });
+});
+
+// GET /api/admin/users/:id/messages/stream - SSE stream for new messages (admin only)
+api.get("/admin/users/:id/messages/stream", async (c) => {
+  const initData = c.req.query("initData");
+
+  if (!initData || !validateInitData(initData)) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const user = parseInitDataUser(initData);
+  if (user?.id !== ADMIN_ID) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const telegramId = Number(c.req.param("id"));
+  const { botActivityEmitter } = await import("../bot/index.ts");
+
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+
+        const sendEvent = (event: string, data: unknown) => {
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        };
+
+        sendEvent("heartbeat", { time: Date.now() });
+
+        const onMessage = (msg: { telegram_id: number; id: number; direction: string; message_type: string; text: string | null; command: string | null; callback_data: string | null; created_at: number }) => {
+          if (msg.telegram_id === telegramId) {
+            sendEvent("new_message", {
+              id: msg.id,
+              direction: msg.direction,
+              message_type: msg.message_type,
+              text: msg.text,
+              command: msg.command,
+              callback_data: msg.callback_data,
+              created_at: msg.created_at,
+            });
+          }
+        };
+
+        botActivityEmitter.on("new_message", onMessage);
+
+        const heartbeat = setInterval(() => {
+          try {
+            sendEvent("heartbeat", { time: Date.now() });
+          } catch {
+            clearInterval(heartbeat);
+          }
+        }, 30000);
+
+        c.req.raw.signal.addEventListener("abort", () => {
+          botActivityEmitter.off("new_message", onMessage);
+          clearInterval(heartbeat);
+        });
+      },
+    }),
+    {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    }
+  );
+});
+
+// POST /api/admin/users/:id/send - send message to user (admin only)
+api.post("/admin/users/:id/send", async (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const telegramId = Number(c.req.param("id"));
+  const body = await c.req.json<{ text: string }>();
+
+  if (!body.text?.trim()) {
+    return c.json({ error: "Text required" }, 400);
+  }
+
+  try {
+    const { bot } = await import("../bot/index.ts");
+    await bot.api.sendMessage({ chat_id: telegramId, text: body.text });
+
+    apiLog.info({ telegramId, admin: c.get("userId") }, "Admin sent message to user");
+    return c.json({ success: true });
+  } catch (error) {
+    apiLog.error({ err: error, telegramId }, "Failed to send message to user");
+    return c.json({ error: "Failed to send message" }, 500);
+  }
+});
+
 // POST /api/analyze-deep - deep product analysis with market prices
 api.post("/analyze-deep", async (c) => {
   const body = await c.req.json<{ text: string; groupTitle?: string }>();

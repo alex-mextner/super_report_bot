@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS users (
   first_name TEXT,
   username TEXT,
   mode TEXT DEFAULT 'normal' CHECK (mode IN ('normal', 'advanced')),
+  last_active INTEGER,              -- unix timestamp of last activity
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -232,3 +233,24 @@ CREATE TABLE IF NOT EXISTS group_analytics (
 );
 
 CREATE INDEX IF NOT EXISTS idx_group_analytics_group ON group_analytics(group_id);
+
+-- ===========================================
+-- Bot Messages (conversation history with users)
+-- ===========================================
+
+CREATE TABLE IF NOT EXISTS bot_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  telegram_id INTEGER NOT NULL,
+  direction TEXT NOT NULL CHECK (direction IN ('incoming', 'outgoing')),
+  message_type TEXT NOT NULL CHECK (message_type IN ('text', 'command', 'callback', 'forward', 'other')),
+  text TEXT,
+  command TEXT,
+  callback_data TEXT,
+  metadata TEXT,                        -- JSON with extra data
+  created_at INTEGER NOT NULL,          -- unix timestamp
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_messages_telegram ON bot_messages(telegram_id, created_at DESC);
+-- idx_users_last_active created in migration 010
