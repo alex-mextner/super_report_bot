@@ -33,7 +33,9 @@ Analyze the image carefully and respond ONLY with a JSON object in this exact fo
 Be strict but reasonable:
 - Match if the product/item in the image clearly matches the search criteria
 - Don't match if the image shows something different or unrelated
-- Consider visual characteristics, brand, type, condition visible in image`;
+- Consider visual characteristics, brand, type, condition visible in image
+- DON'T match if the searched item is just a visible COMPONENT of a larger product (e.g. "keyboard" should NOT match laptop photo - buying laptop for keyboard is impractical; "wheels" should NOT match a car photo)
+- The item must be the MAIN product for sale, not just visible in the image`;
 
   try {
     const response = await withRetry(() =>

@@ -68,7 +68,8 @@ Be strict but reasonable:
 - Match if the message is clearly relevant to the search criteria
 - Don't match if the message is only tangentially related
 - Consider synonyms and related concepts
-- Ignore formatting, emoji, typos${photoWarning}`;
+- Ignore formatting, emoji, typos
+- Don't match if item is sold as part of something larger (e.g. "keyboard" in laptop listing, "wheels" in car listing - impractical to buy whole thing for a component)${photoWarning}`;
 
   const userPrompt = `Search criteria: "${subscriptionDescription}"
 
@@ -207,7 +208,8 @@ Be strict but reasonable:
 - Match if the message is clearly relevant to the search criteria
 - Don't match if the message is only tangentially related
 - Consider synonyms and related concepts
-- Ignore formatting, emoji, typos`;
+- Ignore formatting, emoji, typos
+- Don't match if item is sold as part of something larger (e.g. "keyboard" in laptop listing - impractical to buy whole thing for a component)`;
 
   const messagesJson = messages
     .map((m) => `[${m.index}]: ${m.text.slice(0, 500)}`)
