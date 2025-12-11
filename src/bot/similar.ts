@@ -67,7 +67,7 @@ export async function findSimilarMessages(
         return !Array.from(negativeSet).some((neg) => textLower.includes(neg));
       })
       .map((msg) => ({
-        id: msg.id,
+        id: msg.messageId, // Use Telegram message_id, not DB rowid
         text: msg.text,
         groupId: msg.groupId,
         groupTitle: msg.groupTitle ?? "",
