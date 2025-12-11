@@ -102,11 +102,13 @@ describe("Message Processing Pipeline", () => {
         negative_keywords: ["запчасти", "разбит"],
       });
 
-      // matchMessageAgainstAll should filter this out
+      // matchMessageAgainstAll returns all analyses (for DB logging)
       const candidates = await matchMessageAgainstAll(message, [subscription]);
 
-      // Message should be filtered out due to negative keywords
-      expect(candidates.length).toBe(0);
+      // Message should be rejected due to negative keywords
+      expect(candidates.length).toBe(1);
+      expect(candidates[0]!.passed).toBe(false);
+      expect(candidates[0]!.result).toBe("rejected_negative");
     });
 
     test("matchMessageAgainstAll returns scored candidates", async () => {
@@ -246,8 +248,10 @@ describe("Message Processing Pipeline", () => {
 
       const candidates = await matchMessageAgainstAll(message, [subscription]);
 
-      // No keywords and no query = no match
-      expect(candidates.length).toBe(0);
+      // matchMessageAgainstAll returns all analyses (for DB logging)
+      // No keywords and no query = rejected (not passed)
+      expect(candidates.length).toBe(1);
+      expect(candidates[0]!.passed).toBe(false);
     });
 
     test("pipeline should handle unicode in message", () => {

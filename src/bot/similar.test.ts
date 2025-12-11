@@ -22,6 +22,7 @@ const mockMessages: CachedMessage[] = [];
 mock.module("../cache/messages.ts", () => ({
   getMessages: (groupId: number) => mockMessages.filter((m) => m.groupId === groupId),
   getAllCachedMessages: () => mockMessages,
+  getMessagesIncludingDeleted: (groupId: number) => mockMessages.filter((m) => m.groupId === groupId),
 }));
 
 // Mock semantic search to always fail — forces N-gram fallback for testing

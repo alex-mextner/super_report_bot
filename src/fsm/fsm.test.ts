@@ -528,9 +528,10 @@ describe("State Machine", () => {
       expect(getState(actor)).toBe("awaitingConfirmation");
     });
 
-    test("SKIP_RATING goes to awaitingConfirmation", () => {
+    test("SKIP_RATING stays in ratingExamples (waits for KEYWORDS_GENERATED)", () => {
       actor.send({ type: "SKIP_RATING" });
-      expect(getState(actor)).toBe("awaitingConfirmation");
+      // Stays in ratingExamples to prevent race condition - KEYWORDS_GENERATED will transition out
+      expect(getState(actor)).toBe("ratingExamples");
     });
 
     test("KEYWORDS_GENERATED goes to awaitingConfirmation and stores pendingSub", () => {
@@ -893,27 +894,25 @@ describe("State Machine", () => {
       actor.send({ type: "START_GROUP_SELECTION", available: groups });
     });
 
-    // По умолчанию все группы выбраны — так удобнее пользователю,
-    // обычно хочется мониторить всё.
-    test("initializes with all groups selected", () => {
+    // По умолчанию никакие группы не выбраны — пользователь выбирает сам.
+    test("initializes with no groups selected", () => {
       expect(getContext(actor).availableGroups).toEqual(groups);
-      expect(getContext(actor).selectedGroups).toEqual(groups);
+      expect(getContext(actor).selectedGroups).toEqual([]);
     });
 
-    // Toggle = checkbox в inline keyboard. Кнопка "✓ Group 1" → "Group 1".
-    test("TOGGLE_GROUP deselects selected group", () => {
+    // Toggle = checkbox в inline keyboard. Кнопка "Group 1" → "✓ Group 1".
+    test("TOGGLE_GROUP selects a group", () => {
       actor.send({ type: "TOGGLE_GROUP", groupId: 2 });
       expect(getContext(actor).selectedGroups).toEqual([
-        { id: 1, title: "Group 1" },
-        { id: 3, title: "Group 3" },
+        { id: 2, title: "Group 2" },
       ]);
     });
 
-    // Повторный toggle возвращает группу обратно.
-    test("TOGGLE_GROUP selects deselected group", () => {
+    // Повторный toggle убирает группу.
+    test("TOGGLE_GROUP deselects selected group", () => {
+      actor.send({ type: "TOGGLE_GROUP", groupId: 2 }); // Select
       actor.send({ type: "TOGGLE_GROUP", groupId: 2 }); // Deselect
-      actor.send({ type: "TOGGLE_GROUP", groupId: 2 }); // Reselect
-      expect(getContext(actor).selectedGroups).toHaveLength(3);
+      expect(getContext(actor).selectedGroups).toHaveLength(0);
     });
 
     test("SELECT_ALL selects all groups", () => {
@@ -1150,8 +1149,8 @@ describe("Edge Cases", () => {
       available: [{ id: 1, title: "Group 1" }],
     });
     actor.send({ type: "TOGGLE_GROUP", groupId: 999 }); // Non-existent
-    // Should still have 1 selected (the original)
-    expect(getContext(actor).selectedGroups).toHaveLength(1);
+    // Should still have 0 selected (nothing was selected initially)
+    expect(getContext(actor).selectedGroups).toHaveLength(0);
   });
 
   // Защита от out-of-bounds: inline keyboard может быть устаревшей.
