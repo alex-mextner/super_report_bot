@@ -96,10 +96,6 @@ export const subscriptionKeyboard = (
         "✏️ Описание",
         JSON.stringify({ action: "edit_description", id: subscriptionId })
       )
-      .text(
-        "🤖 Скорректировать с ИИ",
-        JSON.stringify({ action: "regenerate_sub", id: subscriptionId })
-      )
       .row();
 
     // Toggle button only if there are negative keywords (active or disabled)
@@ -108,13 +104,19 @@ export const subscriptionKeyboard = (
         hasNegativeKeywords ? "🚫 Откл. искл." : "✅ Вкл. искл.",
         JSON.stringify({ action: "toggle_negative", id: subscriptionId })
       );
+      kb.row();
     }
   }
 
+  // AI edit button available in all modes
   kb.text(
-    "❌ Удалить",
-    JSON.stringify({ action: "disable", id: subscriptionId })
-  );
+    "🤖 Скорректировать с ИИ",
+    JSON.stringify({ action: "regenerate_sub", id: subscriptionId })
+  )
+    .text(
+      "❌ Удалить",
+      JSON.stringify({ action: "disable", id: subscriptionId })
+    );
 
   return kb;
 };
