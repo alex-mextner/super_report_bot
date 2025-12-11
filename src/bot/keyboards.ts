@@ -503,3 +503,214 @@ export function notificationFeedbackKeyboard(
       s: subscriptionId
     }));
 }
+
+// =====================================================
+// Promotion keyboards
+// =====================================================
+
+/**
+ * Promote product button (shown to message author or admin)
+ */
+export function promoteProductKeyboard(
+  messageId: number,
+  groupId: number,
+  isAdmin: boolean = false
+): InlineKeyboard {
+  const kb = new InlineKeyboard();
+
+  if (isAdmin) {
+    // Admin can promote for free
+    kb.text("🚀 Продвинуть (админ)", JSON.stringify({
+      action: "promote_product_admin",
+      m: messageId,
+      g: groupId
+    }));
+  } else {
+    // Regular user pays 100⭐ for 3 days
+    kb.text("🚀 Продвинуть — 100⭐", JSON.stringify({
+      action: "promote_product",
+      m: messageId,
+      g: groupId
+    }));
+  }
+
+  return kb;
+}
+
+/**
+ * Promote group button (for group admins or bot admin)
+ */
+export function promoteGroupKeyboard(
+  groupId: number,
+  isAdmin: boolean = false
+): InlineKeyboard {
+  const kb = new InlineKeyboard();
+
+  if (isAdmin) {
+    kb.text("🚀 Продвинуть группу (админ)", JSON.stringify({
+      action: "promote_group_admin",
+      g: groupId
+    }));
+  } else {
+    // 300⭐ for 3 days
+    kb.text("🚀 Продвинуть группу — 300⭐", JSON.stringify({
+      action: "promote_group",
+      g: groupId
+    }));
+  }
+
+  return kb;
+}
+
+/**
+ * Promotion duration selection
+ */
+export function promotionDurationKeyboard(
+  type: "product" | "group",
+  targetId: number,
+  groupId?: number,
+  isAdmin: boolean = false
+): InlineKeyboard {
+  const kb = new InlineKeyboard();
+
+  const prices = type === "product"
+    ? { d3: 100, d7: 200, d30: 500 }
+    : { d3: 300, d7: 600, d30: 1500 };
+
+  if (isAdmin) {
+    // Admin gets free promotions with duration selection
+    kb.text("3 дня", JSON.stringify({
+      action: `buy_promo_${type}`,
+      id: targetId,
+      g: groupId,
+      days: 3,
+      admin: true
+    }));
+    kb.text("7 дней", JSON.stringify({
+      action: `buy_promo_${type}`,
+      id: targetId,
+      g: groupId,
+      days: 7,
+      admin: true
+    }));
+    kb.text("30 дней", JSON.stringify({
+      action: `buy_promo_${type}`,
+      id: targetId,
+      g: groupId,
+      days: 30,
+      admin: true
+    }));
+  } else {
+    kb.text(`3 дня — ${prices.d3}⭐`, JSON.stringify({
+      action: `buy_promo_${type}`,
+      id: targetId,
+      g: groupId,
+      days: 3
+    }));
+    kb.text(`7 дней — ${prices.d7}⭐`, JSON.stringify({
+      action: `buy_promo_${type}`,
+      id: targetId,
+      g: groupId,
+      days: 7
+    }));
+    kb.row();
+    kb.text(`30 дней — ${prices.d30}⭐`, JSON.stringify({
+      action: `buy_promo_${type}`,
+      id: targetId,
+      g: groupId,
+      days: 30
+    }));
+  }
+
+  kb.row();
+  kb.text("❌ Отмена", JSON.stringify({ action: "cancel_promo" }));
+
+  return kb;
+}
+
+// =====================================================
+// Region Presets keyboards
+// =====================================================
+
+/**
+ * Keyboard for /presets command — list of available presets
+ */
+export function presetsListKeyboard(
+  presets: Array<{
+    id: number;
+    region_code: string;
+    region_name: string;
+    group_count: number;
+    hasAccess: boolean;
+  }>
+): InlineKeyboard {
+  const kb = new InlineKeyboard();
+
+  for (const preset of presets) {
+    const icon = preset.hasAccess ? "✅" : "🔒";
+    const label = `${icon} ${preset.region_name} (${preset.group_count} групп)`;
+    kb.text(label, JSON.stringify({ action: "preset_info", id: preset.id }));
+    kb.row();
+  }
+
+  return kb;
+}
+
+/**
+ * Keyboard for preset details — buy options
+ */
+export function presetBuyKeyboard(
+  presetId: number,
+  hasAccess: boolean
+): InlineKeyboard {
+  const kb = new InlineKeyboard();
+
+  if (hasAccess) {
+    kb.text("✅ Доступ активен", JSON.stringify({ action: "noop" }));
+  } else {
+    kb.text("🔓 Навсегда — 1000⭐", JSON.stringify({
+      action: "buy_preset",
+      id: presetId,
+      type: "lifetime"
+    }));
+    kb.row();
+    kb.text("📅 На месяц — 300⭐", JSON.stringify({
+      action: "buy_preset",
+      id: presetId,
+      type: "subscription"
+    }));
+  }
+
+  kb.row();
+  kb.text("« Назад", JSON.stringify({ action: "presets_list" }));
+
+  return kb;
+}
+
+/**
+ * Keyboard for selecting preset as group source when creating subscription
+ */
+export function presetSelectionKeyboard(
+  presets: Array<{
+    id: number;
+    region_name: string;
+    group_count: number;
+    hasAccess: boolean;
+  }>
+): InlineKeyboard {
+  const kb = new InlineKeyboard();
+
+  for (const preset of presets) {
+    if (preset.hasAccess) {
+      kb.text(
+        `📦 ${preset.region_name} (${preset.group_count})`,
+        JSON.stringify({ action: "use_preset", id: preset.id })
+      );
+      kb.row();
+    }
+  }
+
+  kb.text("Выбрать группы вручную", JSON.stringify({ action: "select_groups_manual" }));
+
+  return kb;
+}

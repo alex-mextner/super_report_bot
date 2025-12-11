@@ -1578,6 +1578,84 @@ export const queries = {
     );
   },
 
+  isProductPromoted(messageId: number, groupId: number): boolean {
+    const now = Math.floor(Date.now() / 1000);
+    const result = db
+      .prepare<{ count: number }, [number, number, number]>(
+        `SELECT COUNT(*) as count FROM promotions
+         WHERE type = 'product'
+           AND message_id = ?
+           AND product_group_id = ?
+           AND is_active = 1
+           AND ends_at > ?`
+      )
+      .get(messageId, groupId, now);
+    return (result?.count ?? 0) > 0;
+  },
+
+  isGroupPromoted(groupId: number): boolean {
+    const now = Math.floor(Date.now() / 1000);
+    const result = db
+      .prepare<{ count: number }, [number, number]>(
+        `SELECT COUNT(*) as count FROM promotions
+         WHERE type = 'group'
+           AND group_id = ?
+           AND is_active = 1
+           AND ends_at > ?`
+      )
+      .get(groupId, now);
+    return (result?.count ?? 0) > 0;
+  },
+
+  getProductPromotion(messageId: number, groupId: number): {
+    id: number;
+    ends_at: number;
+  } | null {
+    const now = Math.floor(Date.now() / 1000);
+    return db
+      .prepare<{ id: number; ends_at: number }, [number, number, number]>(
+        `SELECT id, ends_at FROM promotions
+         WHERE type = 'product'
+           AND message_id = ?
+           AND product_group_id = ?
+           AND is_active = 1
+           AND ends_at > ?
+         LIMIT 1`
+      )
+      .get(messageId, groupId, now) ?? null;
+  },
+
+  getUserPromotions(telegramId: number): Array<{
+    id: number;
+    type: "group" | "product";
+    group_id: number | null;
+    message_id: number | null;
+    product_group_id: number | null;
+    ends_at: number;
+  }> {
+    const user = this.getUserByTelegramId(telegramId);
+    if (!user) return [];
+
+    const now = Math.floor(Date.now() / 1000);
+    return db
+      .prepare<
+        {
+          id: number;
+          type: "group" | "product";
+          group_id: number | null;
+          message_id: number | null;
+          product_group_id: number | null;
+          ends_at: number;
+        },
+        [number, number]
+      >(
+        `SELECT id, type, group_id, message_id, product_group_id, ends_at
+         FROM promotions
+         WHERE user_id = ? AND is_active = 1 AND ends_at > ?`
+      )
+      .all(user.id, now);
+  },
+
   // --- Premium Users for Priority Notifications ---
   getPremiumUsersForMessage(
     messageText: string,

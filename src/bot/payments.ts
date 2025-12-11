@@ -45,6 +45,7 @@ export interface PaymentPayload {
   groupId?: number;
   presetId?: number;
   accessType?: "lifetime" | "subscription";
+  days?: number; // for promotions duration
 }
 
 /**
@@ -300,16 +301,17 @@ export async function handleSuccessfulPayment(
           return { success: false, message: "Группа не указана" };
         }
 
+        const groupDays = payload.days || 3;
         queries.createPromotion({
           telegramId,
           type: "group",
           groupId: payload.groupId,
-          durationDays: 3,
+          durationDays: groupDays,
         });
 
         return {
           success: true,
-          message: "✅ Продвижение группы активировано на 3 дня",
+          message: `✅ Продвижение группы активировано на ${groupDays} дней`,
         };
       }
 
@@ -318,17 +320,18 @@ export async function handleSuccessfulPayment(
           return { success: false, message: "Товар не указан" };
         }
 
+        const productDays = payload.days || 3;
         queries.createPromotion({
           telegramId,
           type: "product",
           messageId: payload.messageId,
           productGroupId: payload.groupId,
-          durationDays: 3,
+          durationDays: productDays,
         });
 
         return {
           success: true,
-          message: "✅ Продвижение товара активировано на 3 дня",
+          message: `✅ Продвижение товара активировано на ${productDays} дней`,
         };
       }
 

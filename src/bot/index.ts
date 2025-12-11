@@ -40,6 +40,10 @@ import {
   feedbackOutcomeKeyboard,
   feedbackReviewKeyboard,
   premiumKeyboard,
+  presetsListKeyboard,
+  presetBuyKeyboard,
+  presetSelectionKeyboard,
+  promotionDurationKeyboard,
 } from "./keyboards.ts";
 import {
   formatPlanInfo,
@@ -651,6 +655,7 @@ ${bold("Команды:")}
 /settings - настройки режима
 /catalog - каталог товаров
 /premium - 💎 план и лимиты
+/presets - 🗺️ пресеты регионов
   `);
 });
 
@@ -692,6 +697,36 @@ bot.command("premium", async (context) => {
   await context.send(planInfo, {
     reply_markup: premiumKeyboard(plan),
   });
+});
+
+// /presets command - region presets
+bot.command("presets", async (context) => {
+  const userId = context.from?.id;
+  if (!userId) return;
+
+  queries.getOrCreateUser(userId, context.from?.firstName, context.from?.username);
+
+  const presets = queries.getRegionPresets();
+  const presetsWithAccess = presets.map((p) => ({
+    ...p,
+    hasAccess: queries.hasPresetAccess(userId, p.id),
+  }));
+
+  if (presets.length === 0) {
+    await context.send("Пресеты регионов пока не настроены.");
+    return;
+  }
+
+  await context.send(
+    "🗺️ **Пресеты регионов**\n\n" +
+    "Пресет — это набор всех барахолок региона.\n" +
+    "Купи пресет и добавляй все группы региона в подписку одним кликом.\n\n" +
+    "Выбери регион:",
+    {
+      parse_mode: "Markdown",
+      reply_markup: presetsListKeyboard(presetsWithAccess),
+    }
+  );
 });
 
 // /catalog command - open webapp
@@ -2159,17 +2194,44 @@ bot.on("callback_query", async (context) => {
       const groups = userGroups.map((g) => ({ id: g.id, title: g.title }));
       send(userId, { type: "START_GROUP_SELECTION", available: groups });
 
-      await context.answer({ text: "Выбери группы" });
-      await context.editText(
-        format`
+      // Check if user has access to any presets with groups
+      const allPresets = queries.getRegionPresets();
+      const accessiblePresets = allPresets
+        .filter((p) => p.group_count > 0 && queries.hasPresetAccess(userId, p.id))
+        .map((p) => ({
+          id: p.id,
+          region_name: p.region_name,
+          group_count: p.group_count,
+          hasAccess: true,
+        }));
+
+      if (accessiblePresets.length > 0) {
+        // Show preset selection first
+        await context.answer({ text: "Выбери источник" });
+        await context.editText(
+          format`
+${bold("Откуда мониторить?")}
+
+У тебя есть доступ к пресетам — можно добавить все группы региона одним кликом.
+          `,
+          {
+            reply_markup: presetSelectionKeyboard(accessiblePresets),
+          }
+        );
+      } else {
+        // No presets — show regular group selection
+        await context.answer({ text: "Выбери группы" });
+        await context.editText(
+          format`
 ${bold("Выбери группы для мониторинга:")}
 
 Выбрано: 0 из ${groups.length}
-        `,
-        {
-          reply_markup: groupsKeyboard(groups, new Set()),
-        }
-      );
+          `,
+          {
+            reply_markup: groupsKeyboard(groups, new Set()),
+          }
+        );
+      }
       break;
     }
 
@@ -4071,6 +4133,197 @@ ${bold("ИИ:")} ${result.summary}
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
+    //                       REGION PRESETS ACTIONS
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    case "presets_list": {
+      const presets = queries.getRegionPresets();
+      const presetsWithAccess = presets.map((p) => ({
+        ...p,
+        hasAccess: queries.hasPresetAccess(userId, p.id),
+      }));
+
+      await context.answer();
+      await context.editText(
+        "🗺️ **Пресеты регионов**\n\n" +
+        "Пресет — это набор всех барахолок региона.\n" +
+        "Купи пресет и добавляй все группы региона в подписку одним кликом.\n\n" +
+        "Выбери регион:",
+        {
+          parse_mode: "Markdown",
+          reply_markup: presetsListKeyboard(presetsWithAccess),
+        }
+      );
+      break;
+    }
+
+    case "preset_info": {
+      const raw = JSON.parse(context.data || "{}");
+      const presetId = raw.id as number;
+
+      if (!presetId) {
+        await context.answer({ text: "Ошибка" });
+        return;
+      }
+
+      const presets = queries.getRegionPresets();
+      const preset = presets.find((p) => p.id === presetId);
+
+      if (!preset) {
+        await context.answer({ text: "Пресет не найден" });
+        return;
+      }
+
+      const hasAccess = queries.hasPresetAccess(userId, presetId);
+      const groups = queries.getPresetGroups(presetId);
+
+      let text = `🗺️ **${preset.region_name}**\n\n`;
+      text += `📍 Страна: ${preset.country_code || "—"}\n`;
+      text += `💱 Валюта: ${preset.currency || "—"}\n`;
+      text += `👥 Групп в пресете: ${groups.length}\n\n`;
+
+      if (hasAccess) {
+        text += "✅ У тебя есть доступ к этому пресету";
+      } else {
+        text += "🔒 Для доступа нужно купить пресет";
+      }
+
+      await context.answer();
+      await context.editText(text, {
+        parse_mode: "Markdown",
+        reply_markup: presetBuyKeyboard(presetId, hasAccess),
+      });
+      break;
+    }
+
+    case "buy_preset": {
+      const raw = JSON.parse(context.data || "{}");
+      const presetId = raw.id as number;
+      const accessType = raw.type as "lifetime" | "subscription";
+
+      if (!presetId || !accessType) {
+        await context.answer({ text: "Ошибка" });
+        return;
+      }
+
+      const presets = queries.getRegionPresets();
+      const preset = presets.find((p) => p.id === presetId);
+
+      if (!preset) {
+        await context.answer({ text: "Пресет не найден" });
+        return;
+      }
+
+      const price = accessType === "lifetime" ? 1000 : 300;
+
+      await context.answer({ text: "Создаю счёт..." });
+
+      try {
+        await sendPaymentInvoice(bot, userId, {
+          type: "preset",
+          title: `Пресет: ${preset.region_name}`,
+          description: accessType === "lifetime"
+            ? `Доступ навсегда к ${preset.group_count} группам`
+            : `Доступ на 30 дней к ${preset.group_count} группам`,
+          amount: price,
+          payload: {
+            type: "preset",
+            presetId,
+            accessType,
+          },
+        });
+      } catch (error) {
+        botLog.error({ error }, "Failed to send preset invoice");
+        await context.editText("Ошибка создания счёта. Попробуй позже.");
+      }
+      break;
+    }
+
+    case "use_preset": {
+      // User selected a preset — add all groups from preset to subscription
+      const raw = JSON.parse(context.data || "{}");
+      const presetId = raw.id as number;
+
+      if (!presetId) {
+        await context.answer({ text: "Ошибка" });
+        return;
+      }
+
+      if (currentState !== "selectingGroups" || !c.pendingSub) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      // Get groups from preset
+      const presetGroups = queries.getPresetGroups(presetId);
+      const availableGroupIds = new Set(c.availableGroups?.map((g) => g.id) || []);
+
+      // Filter to only groups user has added
+      const groupsToSelect = presetGroups
+        .map((pg) => pg.group_id)
+        .filter((gid) => availableGroupIds.has(gid));
+
+      if (groupsToSelect.length === 0) {
+        await context.answer({
+          text: "Нет общих групп с пресетом. Добавь группы через /addgroup",
+          show_alert: true,
+        });
+        return;
+      }
+
+      // Select all preset groups
+      for (const gid of groupsToSelect) {
+        send(userId, { type: "TOGGLE_GROUP", groupId: gid });
+      }
+
+      // Get updated state
+      const updated = ctx(userId);
+      const selectedIds = new Set(updated.selectedGroups?.map((g) => g.id) || []);
+
+      await context.answer({ text: `Выбрано ${groupsToSelect.length} групп` });
+      await context.editText(
+        format`
+${bold("Выбери группы для мониторинга:")}
+
+Выбрано: ${selectedIds.size} из ${updated.availableGroups?.length || 0}
+
+✅ Добавлены группы из пресета
+        `,
+        {
+          reply_markup: groupsKeyboard(
+            updated.availableGroups || [],
+            selectedIds
+          ),
+        }
+      );
+      break;
+    }
+
+    case "select_groups_manual": {
+      // User wants manual group selection instead of preset
+      if (currentState !== "selectingGroups") {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      const groups = c.availableGroups || [];
+      const selectedIds = new Set(c.selectedGroups?.map((g) => g.id) || []);
+
+      await context.answer();
+      await context.editText(
+        format`
+${bold("Выбери группы для мониторинга:")}
+
+Выбрано: ${selectedIds.size} из ${groups.length}
+        `,
+        {
+          reply_markup: groupsKeyboard(groups, selectedIds),
+        }
+      );
+      break;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
     //                       PRODUCT ANALYSIS ACTION
     // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -4148,6 +4401,196 @@ ${msg.text.slice(0, 500)}${msg.text.length > 500 ? "..." : ""}`,
           },
         });
       }
+      break;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    //                       PROMOTION ACTIONS (Admin)
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    case "promote_admin": {
+      // Admin wants to promote a product — show duration selection
+      if (!isAdmin(userId)) {
+        await context.answer({ text: "Нет доступа" });
+        return;
+      }
+
+      const raw = JSON.parse(context.data || "{}");
+      const messageId = raw.m as number;
+      const groupId = raw.g as number;
+
+      if (!messageId || !groupId) {
+        await context.answer({ text: "Данные не найдены" });
+        return;
+      }
+
+      // Check if already promoted
+      const existingPromo = queries.getProductPromotion(messageId, groupId);
+      if (existingPromo) {
+        const endsAt = new Date(existingPromo.ends_at * 1000);
+        await context.answer({
+          text: `Уже продвигается до ${endsAt.toLocaleDateString("ru")}`,
+          show_alert: true,
+        });
+        return;
+      }
+
+      await context.answer();
+      await context.editText(
+        format`🚀 ${bold("Продвижение товара (админ)")}
+
+Выбери длительность продвижения:
+• Товар будет выше в WebApp поиске
+• Показывается при ожидании анализа`,
+        {
+          reply_markup: promotionDurationKeyboard("product", messageId, groupId, true),
+        }
+      );
+      break;
+    }
+
+    case "promo_info": {
+      // Show info about existing promotion
+      const raw = JSON.parse(context.data || "{}");
+      const messageId = raw.m as number;
+      const groupId = raw.g as number;
+
+      const promo = queries.getProductPromotion(messageId, groupId);
+      if (!promo) {
+        await context.answer({ text: "Продвижение не найдено" });
+        return;
+      }
+
+      const endsAt = new Date(promo.ends_at * 1000);
+      const daysLeft = Math.ceil((promo.ends_at - Date.now() / 1000) / 86400);
+
+      await context.answer({
+        text: `Продвижение до ${endsAt.toLocaleDateString("ru")} (${daysLeft} дн.)`,
+        show_alert: true,
+      });
+      break;
+    }
+
+    case "buy_promo_product": {
+      const raw = JSON.parse(context.data || "{}");
+      const messageId = raw.id as number;
+      const groupId = raw.g as number;
+      const days = raw.days as number;
+      const isAdminPromo = raw.admin === true;
+
+      if (!messageId || !groupId || !days) {
+        await context.answer({ text: "Ошибка данных" });
+        return;
+      }
+
+      if (isAdminPromo) {
+        // Admin gets free promotion
+        if (!isAdmin(userId)) {
+          await context.answer({ text: "Нет доступа" });
+          return;
+        }
+
+        queries.createPromotion({
+          telegramId: userId,
+          type: "product",
+          messageId,
+          productGroupId: groupId,
+          durationDays: days,
+        });
+
+        await context.answer({ text: `Продвижение активировано на ${days} дней!` });
+        await context.editText(
+          format`✅ ${bold("Товар продвинут!")}
+
+Длительность: ${days} дней
+Статус: активно
+
+Товар будет выше в WebApp поиске.`
+        );
+
+        botLog.info({ userId, messageId, groupId, days }, "Admin promoted product");
+      } else {
+        // Regular user — send payment invoice
+        const prices = { 3: 100, 7: 200, 30: 500 };
+        const price = prices[days as keyof typeof prices] || 100;
+
+        await context.answer({ text: "Открываю оплату..." });
+
+        await sendPaymentInvoice(bot, userId, {
+          type: "promotion_product",
+          title: `Продвижение товара (${days} дн.)`,
+          description: "Товар будет выше в WebApp поиске",
+          amount: price,
+          payload: {
+            type: "promotion_product",
+            messageId,
+            groupId,
+            days,
+          },
+        });
+      }
+      break;
+    }
+
+    case "buy_promo_group": {
+      const raw = JSON.parse(context.data || "{}");
+      const groupId = raw.id as number;
+      const days = raw.days as number;
+      const isAdminPromo = raw.admin === true;
+
+      if (!groupId || !days) {
+        await context.answer({ text: "Ошибка данных" });
+        return;
+      }
+
+      if (isAdminPromo) {
+        if (!isAdmin(userId)) {
+          await context.answer({ text: "Нет доступа" });
+          return;
+        }
+
+        queries.createPromotion({
+          telegramId: userId,
+          type: "group",
+          groupId,
+          durationDays: days,
+        });
+
+        await context.answer({ text: `Группа продвинута на ${days} дней!` });
+        await context.editText(
+          format`✅ ${bold("Группа продвинута!")}
+
+Длительность: ${days} дней
+Статус: активно
+
+Группа будет рекомендоваться пользователям.`
+        );
+
+        botLog.info({ userId, groupId, days }, "Admin promoted group");
+      } else {
+        const prices = { 3: 300, 7: 600, 30: 1500 };
+        const price = prices[days as keyof typeof prices] || 300;
+
+        await context.answer({ text: "Открываю оплату..." });
+
+        await sendPaymentInvoice(bot, userId, {
+          type: "promotion_group",
+          title: `Продвижение группы (${days} дн.)`,
+          description: "Группа будет рекомендоваться пользователям",
+          amount: price,
+          payload: {
+            type: "promotion_group",
+            groupId,
+            days,
+          },
+        });
+      }
+      break;
+    }
+
+    case "cancel_promo": {
+      await context.answer({ text: "Отменено" });
+      await context.editText("Продвижение отменено.");
       break;
     }
   }
@@ -4309,6 +4752,14 @@ function buildNotificationCaption(
 }
 
 /**
+ * Check if user is admin
+ */
+function isAdmin(telegramId: number): boolean {
+  const adminId = process.env.ADMIN_ID;
+  return adminId ? Number(adminId) === telegramId : false;
+}
+
+/**
  * Build inline keyboard for notification
  */
 function buildNotificationKeyboard(
@@ -4320,6 +4771,7 @@ function buildNotificationKeyboard(
   if (!messageId || !groupId) return undefined;
 
   const messageUrl = buildMessageLink(groupId, messageId);
+  const userIsAdmin = telegramId ? isAdmin(telegramId) : false;
 
   // Get analyze price for user (if telegramId provided)
   let analyzeLabel = "🔍 Анализ";
@@ -4353,6 +4805,22 @@ function buildNotificationKeyboard(
       text: "⏸️ Остановить подписку",
       callback_data: JSON.stringify({ action: "pause_from_notification", id: subscriptionId }),
     }]);
+  }
+
+  // Admin gets promote button on every notification
+  if (userIsAdmin) {
+    const isPromoted = queries.isProductPromoted(messageId, groupId);
+    if (!isPromoted) {
+      keyboard.push([{
+        text: "🚀 Продвинуть (админ)",
+        callback_data: JSON.stringify({ action: "promote_admin", m: messageId, g: groupId }),
+      }]);
+    } else {
+      keyboard.push([{
+        text: "✅ Уже продвигается",
+        callback_data: JSON.stringify({ action: "promo_info", m: messageId, g: groupId }),
+      }]);
+    }
   }
 
   return { inline_keyboard: keyboard };
