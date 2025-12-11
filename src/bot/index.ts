@@ -3670,6 +3670,9 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
             };
             resultText += `   Состояние: ${conditionLabels[result.imageAnalysis.condition] || "—"}\n`;
           }
+          if (result.imageAnalysis.conditionDetails) {
+            resultText += `   Детали: ${result.imageAnalysis.conditionDetails}\n`;
+          }
           resultText += `\n`;
         }
 
