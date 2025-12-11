@@ -64,6 +64,16 @@ export interface MonitoredGroup {
   added_at: string;
 }
 
+export interface GroupMetadata {
+  telegram_id: number;
+  title: string | null;
+  country: string | null; // ISO 3166-1 alpha-2: 'RS', 'RU', 'AM', etc.
+  city: string | null;
+  currency: string | null; // ISO 4217: 'RSD', 'RUB', 'EUR', 'USD', etc.
+  is_marketplace: number; // SQLite boolean
+  created_at: string;
+}
+
 export interface MatchedMessage {
   id: number;
   subscription_id: number;

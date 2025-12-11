@@ -5,6 +5,7 @@ import type {
   Subscription,
   KeywordEmbeddings,
   MonitoredGroup,
+  GroupMetadata,
   Category,
   Product,
   SellerContact,
@@ -90,6 +91,24 @@ const stmts = {
   // All unique groups from user_groups
   getAllGroups: db.prepare<{ group_id: number; group_title: string }, []>(
     `SELECT DISTINCT group_id, group_title FROM user_groups ORDER BY group_title`
+  ),
+
+  // Groups metadata (country, currency, etc.)
+  getGroupMetadata: db.prepare<GroupMetadata, [number]>(
+    "SELECT * FROM groups WHERE telegram_id = ?"
+  ),
+  upsertGroupMetadata: db.prepare<void, [number, string | null, string | null, string | null, string | null, number]>(
+    `INSERT INTO groups (telegram_id, title, country, city, currency, is_marketplace)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(telegram_id) DO UPDATE SET
+       title = COALESCE(excluded.title, title),
+       country = COALESCE(excluded.country, country),
+       city = COALESCE(excluded.city, city),
+       currency = COALESCE(excluded.currency, currency),
+       is_marketplace = COALESCE(excluded.is_marketplace, is_marketplace)`
+  ),
+  getAllGroupsMetadata: db.prepare<GroupMetadata, []>(
+    "SELECT * FROM groups ORDER BY title"
   ),
 
   // Matched messages (deduplication) - DEPRECATED, use found_posts_analyzes
@@ -487,6 +506,33 @@ export const queries = {
 
   removeGroup(telegramId: number): void {
     stmts.removeGroup.run(telegramId);
+  },
+
+  // Groups metadata
+  getGroupMetadata(telegramId: number): GroupMetadata | null {
+    return stmts.getGroupMetadata.get(telegramId) ?? null;
+  },
+
+  upsertGroupMetadata(data: {
+    telegramId: number;
+    title?: string | null;
+    country?: string | null;
+    city?: string | null;
+    currency?: string | null;
+    isMarketplace?: boolean;
+  }): void {
+    stmts.upsertGroupMetadata.run(
+      data.telegramId,
+      data.title ?? null,
+      data.country ?? null,
+      data.city ?? null,
+      data.currency ?? null,
+      data.isMarketplace ? 1 : 0
+    );
+  },
+
+  getAllGroupsMetadata(): GroupMetadata[] {
+    return stmts.getAllGroupsMetadata.all();
   },
 
   // Deduplication (DEPRECATED - use analysis methods)

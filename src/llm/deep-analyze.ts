@@ -5,11 +5,13 @@
  * 3. Deterministic scam risk assessment (not LLM-based where possible)
  * 4. Currency conversion via open.er-api.com
  * 5. Multi-item support with separate searches
+ * 6. Group metadata (country/currency) for localized search and display
  */
 
 import { queries } from "../db/index.ts";
 import { apiLog } from "../logger.ts";
 import { analyzeListingImage, type ListingImageAnalysis } from "./vision.ts";
+import type { GroupMetadata } from "../types.ts";
 
 const BRAVE_API = "https://api.search.brave.com/res/v1/web/search";
 const BRAVE_KEY = process.env.BRAVE_API_KEY;
@@ -21,26 +23,81 @@ const EXCHANGE_API = "https://open.er-api.com/v6/latest/EUR";
 
 // ============= Search Region =============
 
-type SearchRegion = "serbia" | "general";
+// ISO 3166-1 alpha-2 country codes to search region mapping
+type SearchRegion = "RS" | "RU" | "AM" | "GE" | "ME" | "general";
 
+// Fallback detection from group title (for groups without metadata)
 const SERBIA_PATTERNS = /серб|сербия|белград|нов[ыи]й\s*сад|serbian|belgrade|novi\s*sad/i;
+const RUSSIA_PATTERNS = /росси|москв|питер|спб|russian|moscow|piter/i;
+const ARMENIA_PATTERNS = /армен|ереван|armenian|yerevan/i;
+const GEORGIA_PATTERNS = /груз|тбилиси|батуми|georgian|tbilisi|batumi/i;
 
-function detectSearchRegion(groupTitle: string | null | undefined): SearchRegion {
-  if (!groupTitle) return "general";
-  if (SERBIA_PATTERNS.test(groupTitle)) return "serbia";
+function detectSearchRegion(groupMetadata: GroupMetadata | null, groupTitle?: string | null): SearchRegion {
+  // First, use country from metadata if available
+  if (groupMetadata?.country) {
+    const country = groupMetadata.country.toUpperCase();
+    if (["RS", "RU", "AM", "GE", "ME"].includes(country)) {
+      return country as SearchRegion;
+    }
+  }
+
+  // Fallback: detect from group title
+  if (groupTitle) {
+    if (SERBIA_PATTERNS.test(groupTitle)) return "RS";
+    if (RUSSIA_PATTERNS.test(groupTitle)) return "RU";
+    if (ARMENIA_PATTERNS.test(groupTitle)) return "AM";
+    if (GEORGIA_PATTERNS.test(groupTitle)) return "GE";
+  }
+
   return "general";
 }
 
-// Search queries with fallback chain for Serbia: KupujemProdajem → Belgrade → Russia
+// Country to default currency mapping
+const COUNTRY_CURRENCY: Record<string, string> = {
+  RS: "RSD",
+  RU: "RUB",
+  AM: "AMD",
+  GE: "GEL",
+  ME: "EUR",
+  BA: "BAM",
+};
+
+// Search queries with fallback chain per region
 function getSearchQueries(baseQuery: string, region: SearchRegion): string[] {
-  if (region === "serbia") {
-    return [
-      `site:kupujemprodajem.com ${baseQuery} cena`,
-      `${baseQuery} cena beograd`,
-      `${baseQuery} цена купить`,
-    ];
+  switch (region) {
+    case "RS":
+      return [
+        `site:kupujemprodajem.com ${baseQuery} cena`,
+        `${baseQuery} cena beograd`,
+        `${baseQuery} цена купить`, // fallback to Russian
+      ];
+    case "RU":
+      return [
+        `site:avito.ru ${baseQuery} цена`,
+        `${baseQuery} цена купить москва`,
+        `${baseQuery} цена купить`,
+      ];
+    case "AM":
+      return [
+        `site:list.am ${baseQuery} price`,
+        `${baseQuery} цена ереван`,
+        `${baseQuery} цена купить`,
+      ];
+    case "GE":
+      return [
+        `site:mymarket.ge ${baseQuery} price`,
+        `${baseQuery} цена тбилиси`,
+        `${baseQuery} цена купить`,
+      ];
+    case "ME":
+      return [
+        `${baseQuery} cena crna gora`,
+        `${baseQuery} цена черногория`,
+        `${baseQuery} цена купить`,
+      ];
+    default:
+      return [`${baseQuery} цена купить`];
   }
-  return [`${baseQuery} цена купить`];
 }
 
 // ============= Types =============
@@ -69,6 +126,10 @@ interface ItemAnalysis {
   // Converted to same currency for comparison
   priceInEur: number | null;
   marketAvgInEur: number | null;
+  // Converted to group's display currency
+  priceInDisplayCurrency: number | null;
+  marketAvgInDisplayCurrency: number | null;
+  displayCurrency: string | null;
   priceVerdict: "good_deal" | "overpriced" | "fair" | "unknown";
   priceDataFound: boolean; // true if market prices were found in search results
   worthBuying: boolean; // false ONLY if negative reviews found
@@ -103,6 +164,9 @@ export interface DeepAnalysisResult {
   overallVerdict: string;
   similarItems: SimilarProduct[];
   imageAnalysis?: ListingImageAnalysis;
+  // Group metadata used for analysis
+  groupCountry: string | null;
+  displayCurrency: string | null;
 }
 
 // ============= Currency Conversion =============
@@ -138,13 +202,16 @@ async function getExchangeRates(): Promise<Record<string, number>> {
     return data.rates;
   } catch (error) {
     apiLog.error({ err: error }, "Failed to fetch exchange rates");
-    // Fallback rates
+    // Fallback rates (approximate)
     return {
       EUR: 1,
       USD: 1.05,
       RUB: 105,
       RSD: 117,
       GBP: 0.85,
+      AMD: 430,
+      GEL: 2.9,
+      BAM: 1.96,
     };
   }
 }
@@ -153,6 +220,12 @@ function convertToEur(amount: number, currency: string, rates: Record<string, nu
   const rate = rates[currency.toUpperCase()];
   if (!rate) return null;
   return amount / rate;
+}
+
+function convertFromEur(amountInEur: number, targetCurrency: string, rates: Record<string, number>): number | null {
+  const rate = rates[targetCurrency.toUpperCase()];
+  if (!rate) return null;
+  return amountInEur * rate;
 }
 
 // Normalize currency code from LLM response (may return "рубли", "rubles", etc.)
@@ -319,7 +392,8 @@ async function analyzeItemPrice(
   extractedPrice: NormalizedPrice | null,
   searchQuery: string,
   rates: Record<string, number>,
-  region: SearchRegion
+  region: SearchRegion,
+  displayCurrency: string | null
 ): Promise<ItemAnalysis> {
   // Convert extracted price to EUR
   const extractedCurrency = extractedPrice?.currency ? normalizeCurrency(extractedPrice.currency) : null;
@@ -328,13 +402,17 @@ async function analyzeItemPrice(
       ? convertToEur(extractedPrice.value, extractedCurrency, rates)
       : null;
 
+  // Convert to display currency (for user-facing output)
+  const priceInDisplayCurrency =
+    priceInEur && displayCurrency ? convertFromEur(priceInEur, displayCurrency, rates) : null;
+
   // Format for display
   const extractedPriceDisplay = extractedPrice
     ? `${extractedPrice.value.toLocaleString("ru-RU")} ${extractedPrice.currency}`
     : null;
 
   apiLog.debug(
-    { itemName, extractedPrice, extractedCurrency, priceInEur, region },
+    { itemName, extractedPrice, extractedCurrency, priceInEur, displayCurrency, priceInDisplayCurrency, region },
     "Extracted price from LLM"
   );
 
@@ -363,6 +441,9 @@ async function analyzeItemPrice(
       marketCurrency: null,
       priceInEur,
       marketAvgInEur: null,
+      priceInDisplayCurrency,
+      marketAvgInDisplayCurrency: null,
+      displayCurrency,
       priceVerdict: "unknown",
       priceDataFound: false, // no search results
       worthBuying: true,
@@ -436,8 +517,12 @@ ${context}
           ? convertToEur(marketAvg.value, normalizedMarketCurrency, rates)
           : null;
 
+      // Convert market price to display currency
+      const marketAvgInDisplayCurrency =
+        marketAvgInEur && displayCurrency ? convertFromEur(marketAvgInEur, displayCurrency, rates) : null;
+
       apiLog.debug(
-        { itemName, marketAvg, normalizedMarketCurrency, marketAvgInEur, priceInEur },
+        { itemName, marketAvg, normalizedMarketCurrency, marketAvgInEur, priceInEur, marketAvgInDisplayCurrency },
         "Market price converted"
       );
 
@@ -459,6 +544,9 @@ ${context}
         marketCurrency: normalizedMarketCurrency,
         priceInEur,
         marketAvgInEur,
+        priceInDisplayCurrency,
+        marketAvgInDisplayCurrency,
+        displayCurrency,
         priceVerdict,
         priceDataFound,
         worthBuying: parsed.worthBuying ?? true,
@@ -481,6 +569,9 @@ ${context}
     marketCurrency: null,
     priceInEur,
     marketAvgInEur: null,
+    priceInDisplayCurrency,
+    marketAvgInDisplayCurrency: null,
+    displayCurrency,
     priceVerdict: "unknown",
     priceDataFound: false, // LLM call failed
     worthBuying: true,
@@ -787,10 +878,31 @@ function generateOverallVerdict(
 export async function deepAnalyze(
   text: string,
   groupTitle?: string | null,
-  firstPhotoPath?: string | null
+  firstPhotoPath?: string | null,
+  groupId?: number | null
 ): Promise<DeepAnalysisResult> {
-  const region = detectSearchRegion(groupTitle);
-  apiLog.info({ textLength: text.length, groupTitle, region, hasPhoto: !!firstPhotoPath }, "Starting deep analysis");
+  // Get group metadata if groupId provided
+  const groupMetadata = groupId ? queries.getGroupMetadata(groupId) : null;
+
+  // Determine display currency: from metadata, or from country, or null
+  const displayCurrency =
+    groupMetadata?.currency ||
+    (groupMetadata?.country ? COUNTRY_CURRENCY[groupMetadata.country.toUpperCase()] : null) ||
+    null;
+
+  const region = detectSearchRegion(groupMetadata, groupTitle);
+  apiLog.info(
+    {
+      textLength: text.length,
+      groupTitle,
+      groupId,
+      country: groupMetadata?.country,
+      displayCurrency,
+      region,
+      hasPhoto: !!firstPhotoPath,
+    },
+    "Starting deep analysis"
+  );
 
   // Step 1: Get exchange rates + analyze image (in parallel)
   const ratesPromise = getExchangeRates();
@@ -825,12 +937,14 @@ export async function deepAnalyze(
       overallVerdict: `Это не объявление: ${reason}`,
       similarItems: [],
       imageAnalysis,
+      groupCountry: groupMetadata?.country ?? null,
+      displayCurrency,
     };
   }
 
   // Step 3: Analyze each item's price (parallel, region-specific search)
   const itemPromises = listingInfo.items.map((item) =>
-    analyzeItemPrice(item.name, item.price, item.searchQuery, rates, region)
+    analyzeItemPrice(item.name, item.price, item.searchQuery, rates, region, displayCurrency)
   );
   const items = await Promise.all(itemPromises);
 
@@ -873,6 +987,8 @@ export async function deepAnalyze(
     overallVerdict,
     similarItems,
     imageAnalysis,
+    groupCountry: groupMetadata?.country ?? null,
+    displayCurrency,
   };
 }
 

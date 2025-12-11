@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS groups (
   title TEXT,
   country TEXT,              -- ISO 3166-1 alpha-2: 'RS', 'RU', 'AM', etc.
   city TEXT,                 -- 'Belgrade', 'Moscow', 'Yerevan'
+  currency TEXT,             -- ISO 4217: 'RSD', 'RUB', 'EUR', 'USD', etc.
   is_marketplace INTEGER DEFAULT 0,  -- 1 = marketplace/flea market
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );

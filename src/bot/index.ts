@@ -3206,9 +3206,9 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
           photoPath = `data/${firstPhoto.file_path}`;
         }
 
-        // Run deep analysis (pass group title and photo path)
+        // Run deep analysis (pass group title, photo path, and group ID for metadata)
         const { deepAnalyze } = await import("../llm/deep-analyze.ts");
-        const result = await deepAnalyze(storedMsg.text, storedMsg.group_title, photoPath);
+        const result = await deepAnalyze(storedMsg.text, storedMsg.group_title, photoPath, grpId);
 
         // Format result
         if (!result.isListing) {
