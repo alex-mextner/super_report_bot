@@ -66,7 +66,7 @@ function regenerateEmbeddings(subscriptionId: number): void {
     .catch((e) => botLog.error({ err: e, subscriptionId }, "Failed to regenerate embeddings"));
 }
 import { getExamplesForSubscription } from "./examples.ts";
-import { findSimilarWithFallback, toRatingExamples } from "./similar.ts";
+import { findSimilarWithFallback, toRatingExamples, filterExamplesWithAI } from "./similar.ts";
 import {
   invalidateSubscriptionsCache,
   isUserbotMember,
@@ -234,46 +234,54 @@ async function startRatingFlow(
   const userGroups = queries.getUserGroups(userId);
   const groupIds = userGroups.map((g) => g.id);
 
-  // Search for similar messages in cache using query directly (semantic search)
+  // Search for similar messages in cache (fetch more candidates for AI filtering)
   let examples: RatingExample[] = [];
 
   if (groupIds.length > 0) {
-    const similar = await findSimilarWithFallback(query, groupIds, 3);
-    examples = toRatingExamples(similar);
-    botLog.debug({ userId, found: examples.length }, "Found similar messages for rating");
+    const similar = await findSimilarWithFallback(query, groupIds, 10);
+    const candidates = toRatingExamples(similar);
+    botLog.debug({ userId, candidates: candidates.length }, "Found candidates for AI filtering");
+
+    // AI filter candidates from cache
+    if (candidates.length > 0) {
+      const filtered = await filterExamplesWithAI(candidates, query);
+      examples.push(...filtered.slice(0, 3));
+      botLog.debug({ userId, afterFilter: examples.length }, "After AI filtering");
+    }
   }
 
-  // If not enough examples, try Brave search first, then LLM
+  // If not enough examples after filtering, try Brave search
   if (examples.length < 3) {
     botLog.debug({ userId, existing: examples.length }, "Not enough examples, trying Brave search");
 
-    // Try Brave search for real-world context
     const braveResults = await searchBrave(query);
     if (braveResults.length > 0) {
       try {
         const braveExamples = await generateExamplesFromBrave(query, braveResults);
-        examples = [...examples, ...braveExamples].slice(0, 3);
-        botLog.debug({ userId, afterBrave: examples.length }, "Added Brave-based examples");
+        // AI filter Brave examples too
+        const filteredBrave = await filterExamplesWithAI(braveExamples, query);
+        examples = [...examples, ...filteredBrave].slice(0, 3);
+        botLog.debug({ userId, afterBrave: examples.length }, "Added AI-filtered Brave examples");
       } catch (error) {
         botLog.warn({ err: error, userId }, "Failed to generate Brave examples");
       }
     }
+  }
 
-    // Still not enough? Fall back to pure LLM generation
-    if (examples.length < 3) {
-      botLog.debug({ userId, existing: examples.length }, "Still not enough, generating via LLM");
-      try {
-        const generated = await runWithRecovery(
-          userId,
-          "GENERATE_EXAMPLES",
-          undefined,
-          () => generateExampleMessages(query)
-        );
-        const synthetic = generatedToRatingExamples(generated);
-        examples = [...examples, ...synthetic].slice(0, 3);
-      } catch (error) {
-        botLog.error({ err: error, userId }, "Failed to generate examples");
-      }
+  // Still not enough? Fall back to pure LLM generation (no AI filter needed)
+  if (examples.length < 3) {
+    botLog.debug({ userId, existing: examples.length }, "Still not enough, generating via LLM");
+    try {
+      const generated = await runWithRecovery(
+        userId,
+        "GENERATE_EXAMPLES",
+        undefined,
+        () => generateExampleMessages(query)
+      );
+      const synthetic = generatedToRatingExamples(generated);
+      examples = [...examples, ...synthetic].slice(0, 3);
+    } catch (error) {
+      botLog.error({ err: error, userId }, "Failed to generate examples");
     }
   }
 

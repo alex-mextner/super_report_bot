@@ -2,6 +2,7 @@ import { getMessagesIncludingDeleted, getAllCachedMessages } from "../cache/mess
 import { calculateKeywordNgramSimilarity, phraseMatches } from "../matcher/ngram.ts";
 import { generateNgrams } from "../matcher/normalize.ts";
 import { semanticSearch } from "../embeddings/search.ts";
+import { verifyBatchWithDeepSeek } from "../llm/deepseek.ts";
 import type { RatingExample } from "../types.ts";
 import { botLog } from "../logger.ts";
 
@@ -232,4 +233,44 @@ export function toRatingExamples(messages: SimilarMessage[]): RatingExample[] {
     isGenerated: false,
     isDeleted: msg.isDeleted,
   }));
+}
+
+/**
+ * Filter examples using DeepSeek AI verification
+ * Returns only examples that match the query with confidence >= threshold
+ *
+ * @param examples - candidate examples to filter
+ * @param query - user's search query (used as subscription description for verification)
+ * @param threshold - minimum confidence to keep example (default 0.6)
+ */
+export async function filterExamplesWithAI(
+  examples: RatingExample[],
+  query: string,
+  threshold: number = 0.6
+): Promise<RatingExample[]> {
+  // Skip filtering if no real examples (only generated)
+  const realExamples = examples.filter((e) => !e.isGenerated);
+  if (realExamples.length === 0) return examples;
+
+  try {
+    const input = realExamples.map((e, i) => ({ index: i, text: e.text }));
+    const results = await verifyBatchWithDeepSeek(input, query);
+
+    const filtered = realExamples.filter((_, i) => {
+      const result = results.find((r) => r.index === i);
+      return result?.isMatch && result.confidence >= threshold;
+    });
+
+    botLog.debug(
+      { input: realExamples.length, output: filtered.length, threshold },
+      "AI filtered examples"
+    );
+
+    // Keep generated examples as fallback
+    const generated = examples.filter((e) => e.isGenerated);
+    return [...filtered, ...generated];
+  } catch (error) {
+    botLog.warn({ err: error }, "AI filtering failed, returning unfiltered");
+    return examples;
+  }
 }
