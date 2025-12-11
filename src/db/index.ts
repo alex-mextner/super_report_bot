@@ -1485,6 +1485,46 @@ export const queries = {
       .all(presetId);
   },
 
+  /**
+   * Get unique countries that have presets
+   */
+  getUniqueCountries(): Array<{ country_code: string }> {
+    return db
+      .prepare<{ country_code: string }, []>(
+        "SELECT DISTINCT country_code FROM region_presets WHERE country_code IS NOT NULL"
+      )
+      .all();
+  },
+
+  /**
+   * Get all presets for a country with their group IDs
+   */
+  getPresetsByCountry(countryCode: string): Array<{
+    id: number;
+    region_name: string;
+    groupIds: number[];
+  }> {
+    const presets = db
+      .prepare<{ id: number; region_name: string }, [string]>(
+        "SELECT id, region_name FROM region_presets WHERE country_code = ?"
+      )
+      .all(countryCode);
+
+    return presets.map((preset) => {
+      const groups = db
+        .prepare<{ group_id: number }, [number]>(
+          "SELECT group_id FROM preset_groups WHERE preset_id = ?"
+        )
+        .all(preset.id);
+
+      return {
+        id: preset.id,
+        region_name: preset.region_name,
+        groupIds: groups.map((g) => g.group_id),
+      };
+    });
+  },
+
   // --- User Preset Access ---
   hasPresetAccess(telegramId: number, presetId: number): boolean {
     const user = this.getUserByTelegramId(telegramId);

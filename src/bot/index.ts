@@ -43,6 +43,7 @@ import {
   presetsListKeyboard,
   presetBuyKeyboard,
   presetSelectionKeyboard,
+  regionSelectionKeyboard,
   promotionDurationKeyboard,
 } from "./keyboards.ts";
 import {
@@ -72,6 +73,19 @@ import {
   getCountryName,
   getCurrencyName,
 } from "../utils/geo.ts";
+
+/**
+ * Get region presets for user's country (for groupsKeyboard)
+ */
+function getUserRegionPresets(userId: number): Array<{
+  id: number;
+  region_name: string;
+  groupIds: number[];
+}> {
+  const userPlan = queries.getUserPlan(userId);
+  if (!userPlan.region_code) return [];
+  return queries.getPresetsByCountry(userPlan.region_code);
+}
 
 /**
  * Regenerate BGE-M3 embeddings for a subscription (background, non-blocking)
@@ -1174,6 +1188,30 @@ async function processSubscriptionQuery(context: any, userId: number, query: str
     return;
   }
 
+  // Check if user has region selected
+  const userPlan = queries.getUserPlan(userId);
+  if (!userPlan.region_code) {
+    // Get unique countries from presets
+    const countries = queries.getUniqueCountries();
+    if (countries.length > 0) {
+      // Save query to continue after region selection
+      send(userId, { type: "SAVE_PENDING_QUERY", query });
+
+      const countryOptions = countries.map((c) => ({
+        country_code: c.country_code,
+        country_name: getCountryName(c.country_code),
+      }));
+
+      await context.send(
+        format`${bold("Выбери регион")}
+
+Это нужно для показа пресетов групп при создании подписки.`,
+        { reply_markup: regionSelectionKeyboard(countryOptions) }
+      );
+      return;
+    }
+  }
+
   const mode = queries.getUserMode(userId);
 
   if (mode === "normal") {
@@ -2222,44 +2260,20 @@ bot.on("callback_query", async (context) => {
       const groups = userGroups.map((g) => ({ id: g.id, title: g.title }));
       send(userId, { type: "START_GROUP_SELECTION", available: groups });
 
-      // Check if user has access to any presets with groups
-      const allPresets = queries.getRegionPresets();
-      const accessiblePresets = allPresets
-        .filter((p) => p.group_count > 0 && queries.hasPresetAccess(userId, p.id))
-        .map((p) => ({
-          id: p.id,
-          region_name: p.region_name,
-          group_count: p.group_count,
-          hasAccess: true,
-        }));
+      // Get region presets for user's country
+      const regionPresets = getUserRegionPresets(userId);
 
-      if (accessiblePresets.length > 0) {
-        // Show preset selection first
-        await context.answer({ text: "Выбери источник" });
-        await context.editText(
-          format`
-${bold("Откуда мониторить?")}
-
-У тебя есть доступ к пресетам — можно добавить все группы региона одним кликом.
-          `,
-          {
-            reply_markup: presetSelectionKeyboard(accessiblePresets),
-          }
-        );
-      } else {
-        // No presets — show regular group selection
-        await context.answer({ text: "Выбери группы" });
-        await context.editText(
-          format`
+      await context.answer({ text: "Выбери группы" });
+      await context.editText(
+        format`
 ${bold("Выбери группы для мониторинга:")}
 
 Выбрано: 0 из ${groups.length}
-          `,
-          {
-            reply_markup: groupsKeyboard(groups, new Set()),
-          }
-        );
-      }
+        `,
+        {
+          reply_markup: groupsKeyboard(groups, new Set(), regionPresets),
+        }
+      );
       break;
     }
 
@@ -3230,6 +3244,7 @@ ${bold("Исключения:")} ${code(exclusionsText)}
 
       const selectedIds = new Set(updatedC.selectedGroups.map((g) => g.id));
       await context.answer({ text: isSelected ? "Выбрано" : "Снято" });
+      const regionPresets = getUserRegionPresets(userId);
       await context.editText(
         format`
 ${bold("Выбери группы для мониторинга:")}
@@ -3237,7 +3252,70 @@ ${bold("Выбери группы для мониторинга:")}
 Выбрано: ${updatedC.selectedGroups.length} из ${updatedC.availableGroups.length}
         `,
         {
-          reply_markup: groupsKeyboard(updatedC.availableGroups, selectedIds),
+          reply_markup: groupsKeyboard(updatedC.availableGroups, selectedIds, regionPresets),
+        }
+      );
+      break;
+    }
+
+    case "toggle_preset": {
+      // Toggle all groups in a preset (select/deselect)
+      if (currentState !== "selectingGroups" || c.availableGroups.length === 0) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      const presetId = Number(data.id);
+      const presetGroups = queries.getPresetGroups(presetId);
+      const presetGroupIds = presetGroups.map((pg) => pg.group_id);
+
+      // Filter to only groups available to user
+      const availableGroupIds = new Set(c.availableGroups.map((g) => g.id));
+      const availablePresetGroupIds = presetGroupIds.filter((id) =>
+        availableGroupIds.has(id)
+      );
+
+      if (availablePresetGroupIds.length === 0) {
+        await context.answer({ text: "Нет групп из этого пресета" });
+        return;
+      }
+
+      // Check if all preset groups are already selected
+      const allSelected = availablePresetGroupIds.every((id) =>
+        c.selectedGroups.some((g) => g.id === id)
+      );
+
+      if (allSelected) {
+        // Deselect all preset groups
+        for (const gid of availablePresetGroupIds) {
+          if (c.selectedGroups.some((g) => g.id === gid)) {
+            send(userId, { type: "TOGGLE_GROUP", groupId: gid });
+          }
+        }
+        await context.answer({ text: "Пресет снят" });
+      } else {
+        // Select all preset groups that are not yet selected
+        for (const gid of availablePresetGroupIds) {
+          if (!c.selectedGroups.some((g) => g.id === gid)) {
+            send(userId, { type: "TOGGLE_GROUP", groupId: gid });
+          }
+        }
+        await context.answer({ text: "Пресет выбран" });
+      }
+
+      // Re-read context and update keyboard
+      const updatedCtx = ctx(userId);
+      const selectedIdsSet = new Set(updatedCtx.selectedGroups.map((g) => g.id));
+      const regionPresets2 = getUserRegionPresets(userId);
+
+      await context.editText(
+        format`
+${bold("Выбери группы для мониторинга:")}
+
+Выбрано: ${updatedCtx.selectedGroups.length} из ${updatedCtx.availableGroups.length}
+        `,
+        {
+          reply_markup: groupsKeyboard(updatedCtx.availableGroups, selectedIdsSet, regionPresets2),
         }
       );
       break;
@@ -3253,6 +3331,7 @@ ${bold("Выбери группы для мониторинга:")}
 
       const updatedC = ctx(userId);
       const selectedIds = new Set(updatedC.availableGroups.map((g) => g.id));
+      const regionPresets = getUserRegionPresets(userId);
       await context.answer({ text: "Выбраны все" });
       await context.editText(
         format`
@@ -3261,7 +3340,7 @@ ${bold("Выбери группы для мониторинга:")}
 Выбрано: ${updatedC.availableGroups.length} из ${updatedC.availableGroups.length}
         `,
         {
-          reply_markup: groupsKeyboard(updatedC.availableGroups, selectedIds),
+          reply_markup: groupsKeyboard(updatedC.availableGroups, selectedIds, regionPresets),
         }
       );
       break;
@@ -3275,6 +3354,7 @@ ${bold("Выбери группы для мониторинга:")}
 
       send(userId, { type: "DESELECT_ALL" });
 
+      const regionPresets = getUserRegionPresets(userId);
       await context.answer({ text: "Сняты все" });
       await context.editText(
         format`
@@ -3283,7 +3363,7 @@ ${bold("Выбери группы для мониторинга:")}
 Выбрано: 0 из ${c.availableGroups.length}
         `,
         {
-          reply_markup: groupsKeyboard(c.availableGroups, new Set()),
+          reply_markup: groupsKeyboard(c.availableGroups, new Set(), regionPresets),
         }
       );
       break;
@@ -4267,87 +4347,40 @@ ${bold("ИИ:")} ${result.summary}
       break;
     }
 
-    case "use_preset": {
-      // User selected a preset — add all groups from preset to subscription
+    case "select_region": {
+      // User selected region (country) for presets
       const raw = JSON.parse(context.data || "{}");
-      const presetId = raw.id as number;
+      const regionCode = raw.code as string;
 
-      if (!presetId) {
+      if (!regionCode) {
         await context.answer({ text: "Ошибка" });
         return;
       }
 
-      if (currentState !== "selectingGroups" || !c.pendingSub) {
-        await context.answer({ text: "Сессия истекла" });
-        return;
-      }
+      // Save region to user profile
+      queries.setUserRegion(userId, regionCode);
 
-      // Get groups from preset
-      const presetGroups = queries.getPresetGroups(presetId);
-      const availableGroupIds = new Set(c.availableGroups?.map((g) => g.id) || []);
-
-      // Filter to only groups user has added
-      const groupsToSelect = presetGroups
-        .map((pg) => pg.group_id)
-        .filter((gid) => availableGroupIds.has(gid));
-
-      if (groupsToSelect.length === 0) {
-        await context.answer({
-          text: "Нет общих групп с пресетом. Добавь группы через /addgroup",
-          show_alert: true,
-        });
-        return;
-      }
-
-      // Select all preset groups
-      for (const gid of groupsToSelect) {
-        send(userId, { type: "TOGGLE_GROUP", groupId: gid });
-      }
-
-      // Get updated state
-      const updated = ctx(userId);
-      const selectedIds = new Set(updated.selectedGroups?.map((g) => g.id) || []);
-
-      await context.answer({ text: `Выбрано ${groupsToSelect.length} групп` });
-      await context.editText(
-        format`
-${bold("Выбери группы для мониторинга:")}
-
-Выбрано: ${selectedIds.size} из ${updated.availableGroups?.length || 0}
-
-✅ Добавлены группы из пресета
-        `,
-        {
-          reply_markup: groupsKeyboard(
-            updated.availableGroups || [],
-            selectedIds
-          ),
+      // Get pending query and continue subscription creation
+      const pendingQuery = c.pendingQuery;
+      if (pendingQuery) {
+        send(userId, { type: "CLEAR_PENDING_QUERY" });
+        await context.answer({ text: `Регион: ${getCountryName(regionCode)}` });
+        // Delete the region selection message
+        if (context.message?.id) {
+          await bot.api.deleteMessage({ chat_id: userId, message_id: context.message.id });
         }
-      );
-      break;
-    }
-
-    case "select_groups_manual": {
-      // User wants manual group selection instead of preset
-      if (currentState !== "selectingGroups") {
-        await context.answer({ text: "Сессия истекла" });
-        return;
-      }
-
-      const groups = c.availableGroups || [];
-      const selectedIds = new Set(c.selectedGroups?.map((g) => g.id) || []);
-
-      await context.answer();
-      await context.editText(
-        format`
-${bold("Выбери группы для мониторинга:")}
-
-Выбрано: ${selectedIds.size} из ${groups.length}
-        `,
-        {
-          reply_markup: groupsKeyboard(groups, selectedIds),
+        await processSubscriptionQuery(
+          { send: (text: string, opts?: object) => bot.api.sendMessage({ chat_id: userId, text, ...opts }) },
+          userId,
+          pendingQuery
+        );
+      } else {
+        await context.answer({ text: `Регион сохранён: ${getCountryName(regionCode)}` });
+        // Delete the region selection message
+        if (context.message?.id) {
+          await bot.api.deleteMessage({ chat_id: userId, message_id: context.message.id });
         }
-      );
+      }
       break;
     }
 

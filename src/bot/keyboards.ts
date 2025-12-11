@@ -134,20 +134,43 @@ export const backKeyboard = () =>
 // Groups selection keyboard (for subscription creation)
 export function groupsKeyboard(
   groups: { id: number; title: string }[],
-  selectedIds: Set<number>
+  selectedIds: Set<number>,
+  regionPresets?: Array<{
+    id: number;
+    region_name: string;
+    groupIds: number[];
+  }>
 ): InlineKeyboard {
   const kb = new InlineKeyboard();
 
-  // DEBUG: Log keyboard generation
-  console.log("[groupsKeyboard] Generating keyboard for groups:", groups.map(g => ({ id: g.id, title: g.title })));
+  // Region presets at the top (if available)
+  if (regionPresets && regionPresets.length > 0) {
+    for (const preset of regionPresets) {
+      // Check how many preset groups are available to user and selected
+      const availablePresetGroups = preset.groupIds.filter((id) =>
+        groups.some((g) => g.id === id)
+      );
+      const selectedPresetGroups = availablePresetGroups.filter((id) =>
+        selectedIds.has(id)
+      );
+      const allSelected =
+        availablePresetGroups.length > 0 &&
+        selectedPresetGroups.length === availablePresetGroups.length;
 
+      const icon = allSelected ? "✅" : "📂";
+      kb.text(
+        `${icon} ${preset.region_name} (${availablePresetGroups.length})`,
+        JSON.stringify({ action: "toggle_preset", id: preset.id })
+      );
+      kb.row();
+    }
+  }
+
+  // Individual groups
   for (const group of groups) {
     const isSelected = selectedIds.has(group.id);
     const label = isSelected ? `✅ ${group.title}` : group.title;
-    const callbackData = JSON.stringify({ action: "toggle_group", id: group.id });
-    // DEBUG: Log each button
-    console.log(`[groupsKeyboard] Button: "${label}" -> callback_data: ${callbackData}`);
-    kb.text(label, callbackData);
+    kb.text(label, JSON.stringify({ action: "toggle_group", id: group.id }));
     kb.row();
   }
 
@@ -683,6 +706,22 @@ export function presetBuyKeyboard(
 
   kb.row();
   kb.text("« Назад", JSON.stringify({ action: "presets_list" }));
+
+  return kb;
+}
+
+/**
+ * Keyboard for selecting region (country) before creating subscription
+ */
+export function regionSelectionKeyboard(
+  countries: Array<{ country_code: string; country_name: string }>
+): InlineKeyboard {
+  const kb = new InlineKeyboard();
+
+  for (const country of countries) {
+    kb.text(country.country_name, JSON.stringify({ action: "select_region", code: country.country_code }));
+    kb.row();
+  }
 
   return kb;
 }
