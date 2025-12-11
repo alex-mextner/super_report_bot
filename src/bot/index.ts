@@ -40,6 +40,7 @@ import {
 import { runWithRecovery } from "./operations.ts";
 import { interpretEditCommand } from "../llm/edit.ts";
 import { generateKeywordEmbeddings, checkBgeHealth } from "../llm/embeddings.ts";
+import { groups, messages } from "../utils/pluralize.ts";
 import {
   parseGroupTitle,
   matchCountry,
@@ -694,7 +695,7 @@ bot.command("addgroup", async (context) => {
   }
 
   // Process links
-  await context.send(`Добавляю ${links.length} группу(ы)...`);
+  await context.send(`Добавляю ${groups(links.length)}...`);
 
   const results: string[] = [];
   const addedGroups: Array<{ groupId: number; groupTitle: string }> = [];
@@ -3077,7 +3078,7 @@ ${bold("Выбери группы для мониторинга:")}
             botLog.info({ total: result.total, subscriptionId }, "Cache scan complete");
             let resultText: string;
             if (result.total > 0) {
-              resultText = `✅ Подписка создана! Мониторинг групп: ${groupNames}\n\n📬 Найдено ${result.total} сообщений в истории.`;
+              resultText = `✅ Подписка создана! Мониторинг групп: ${groupNames}\n\n📬 Найдено ${messages(result.total)} в истории.`;
               if (result.total > 5) {
                 resultText += `\n\n📤 Отправлено первые 5 из ${result.total}. Остальные появятся в ленте при новых совпадениях.`;
               }

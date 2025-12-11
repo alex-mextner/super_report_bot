@@ -13,6 +13,7 @@ import { apiLog } from "../logger.ts";
 import { analyzeListingImage, type ListingImageAnalysis } from "./vision.ts";
 import { semanticSearch } from "../embeddings/search.ts";
 import type { GroupMetadata } from "../types.ts";
+import { items as pluralItems } from "../utils/pluralize.ts";
 
 const BRAVE_API = "https://api.search.brave.com/res/v1/web/search";
 const BRAVE_KEY = process.env.BRAVE_API_KEY;
@@ -676,7 +677,7 @@ function detectScamFlags(
     if (veryLowItems.length === 1) {
       flags.push(`Подозрительно низкая цена: ${worst.name} (на ${worst.percent}% ниже рынка)`);
     } else {
-      flags.push(`Подозрительно низкие цены на ${veryLowItems.length} товара (до ${worst.percent}% ниже рынка)`);
+      flags.push(`Подозрительно низкие цены на ${pluralItems(veryLowItems.length)} (до ${worst.percent}% ниже рынка)`);
     }
     score += 35;
   } else if (lowItems.length > 0) {
@@ -685,7 +686,7 @@ function detectScamFlags(
     if (lowItems.length === 1) {
       flags.push(`Цена ниже рынка: ${worst.name} (на ${worst.percent}% дешевле)`);
     } else {
-      flags.push(`Цены ниже рынка на ${lowItems.length} товара (до ${worst.percent}% дешевле)`);
+      flags.push(`Цены ниже рынка на ${pluralItems(lowItems.length)} (до ${worst.percent}% дешевле)`);
     }
     score += 15;
   }
