@@ -432,11 +432,20 @@ async function processMessage(msg: Message): Promise<void> {
   for (const candidate of candidates) {
     const { subscription } = candidate;
 
-    // Check deduplication
+    // Check deduplication (same subscription already processed this message)
     if (queries.isAnalysisMatched(subscription.id, incomingMsg.id, incomingMsg.group_id)) {
       listenerLog.debug(
         { subscriptionId: subscription.id, messageId: incomingMsg.id },
         "Duplicate skipped"
+      );
+      continue;
+    }
+
+    // Check if user was already notified about this message via another subscription
+    if (queries.isMessageNotifiedToUser(subscription.user_id, incomingMsg.id, incomingMsg.group_id)) {
+      listenerLog.debug(
+        { userId: subscription.user_id, messageId: incomingMsg.id, subscriptionId: subscription.id },
+        "User already notified via another subscription, skipping"
       );
       continue;
     }

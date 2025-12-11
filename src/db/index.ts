@@ -189,6 +189,13 @@ const stmts = {
     `SELECT 1 as found FROM found_posts_analyzes
      WHERE subscription_id = ? AND message_id = ? AND group_id = ? AND result = 'matched' LIMIT 1`
   ),
+  isMessageNotifiedToUser: db.prepare<{ found: number }, [number, number, number]>(
+    `SELECT 1 as found FROM found_posts_analyzes fpa
+     JOIN subscriptions s ON fpa.subscription_id = s.id
+     WHERE s.user_id = ? AND fpa.message_id = ? AND fpa.group_id = ?
+       AND fpa.result = 'matched' AND fpa.notified_at IS NOT NULL
+     LIMIT 1`
+  ),
 
   // Subscription groups
   addSubscriptionGroup: db.prepare<void, [number, number, string]>(
@@ -642,6 +649,11 @@ export const queries = {
 
   isAnalysisMatched(subscriptionId: number, messageId: number, groupId: number): boolean {
     return stmts.isAnalysisMatched.get(subscriptionId, messageId, groupId) !== null;
+  },
+
+  /** Check if user was already notified about this message via any subscription */
+  isMessageNotifiedToUser(userId: number, messageId: number, groupId: number): boolean {
+    return stmts.isMessageNotifiedToUser.get(userId, messageId, groupId) !== null;
   },
 
   // Subscription groups
