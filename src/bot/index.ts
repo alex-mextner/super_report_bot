@@ -61,7 +61,6 @@ import {
 } from "./payments.ts";
 import { runWithRecovery } from "./operations.ts";
 import { interpretEditCommand } from "../llm/edit.ts";
-import { analyzeMessage } from "../llm/analyze.ts";
 import { generateKeywordEmbeddings, checkBgeHealth } from "../llm/embeddings.ts";
 import { groups, messages } from "../utils/pluralize.ts";
 import {
@@ -4078,47 +4077,6 @@ ${bold("ИИ:")} ${result.summary}
       break;
     }
 
-    case "analyze": {
-      // Deep analysis of matched message
-      const msgId = data.msgId as number;
-      const grpId = data.grpId as number;
-
-      if (!msgId || !grpId) {
-        await context.answer({ text: "Данные не найдены" });
-        return;
-      }
-
-      await context.answer({ text: "Анализирую..." });
-      await editCallbackMessage(context, "⏳ Анализирую объявление...\nЭто может занять 10-30 секунд.");
-
-      try {
-        // Get message text from DB
-        const storedMsg = queries.getMessage(msgId, grpId);
-        if (!storedMsg) {
-          await editCallbackMessage(context, "Сообщение не найдено в базе данных.");
-          return;
-        }
-
-        // Run deep analysis with automatic photo fetching
-        const { analyzeWithMedia } = await import("../llm/deep-analyze.ts");
-        const { formatDeepAnalysisHtml } = await import("./formatters.ts");
-
-        const result = await analyzeWithMedia({
-          text: storedMsg.text,
-          messageId: msgId,
-          groupId: grpId,
-          groupTitle: storedMsg.group_title,
-        });
-
-        const resultText = formatDeepAnalysisHtml(result);
-        await editCallbackMessage(context, resultText, { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
-      } catch (error) {
-        botLog.error({ err: error }, "Deep analysis failed");
-        await editCallbackMessage(context, "Ошибка анализа. Попробуйте позже.");
-      }
-      break;
-    }
-
     // =====================================================
     // Subscription deletion feedback handlers
     // =====================================================
@@ -4410,41 +4368,33 @@ ${bold("ИИ:")} ${result.summary}
       const price = getAnalyzePrice(userId);
 
       if (isFree || price === 0) {
-        // Free analysis (first free or Business plan)
+        // Free analysis (first free or Business plan) — full deep analysis
         await context.answer({ text: "Анализирую..." });
+        await editCallbackMessage(context, "⏳ Анализирую объявление...\nЭто может занять 10-30 секунд.");
 
         try {
-          const result = await analyzeMessage(msg.text);
+          const { analyzeWithMedia } = await import("../llm/deep-analyze.ts");
+          const { formatDeepAnalysisHtml } = await import("./formatters.ts");
+
+          const result = await analyzeWithMedia({
+            text: msg.text,
+            messageId,
+            groupId,
+            groupTitle: msg.group_title,
+          });
 
           // Mark free analyze as used
           if (isFree && price > 0) {
             queries.incrementFreeAnalyzes(userId);
           }
 
-          const priceDisplay = result.price
-            ? `${result.price} ${result.currency || ""}`
-            : "не указана";
+          const resultText = formatDeepAnalysisHtml(result);
+          await editCallbackMessage(context, resultText, { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
 
-          const contactsDisplay = result.contacts.length > 0
-            ? result.contacts.join(", ")
-            : "не найдены";
-
-          await context.editText(
-            format`🔍 ${bold("Анализ товара")}
-
-📦 Категория: ${result.category}
-💰 Цена: ${priceDisplay}
-📱 Контакты: ${contactsDisplay}
-
----
-${msg.text.slice(0, 500)}${msg.text.length > 500 ? "..." : ""}`,
-            { parse_mode: "Markdown" }
-          );
-
-          botLog.info({ userId, messageId, groupId }, "Product analyzed (free)");
+          botLog.info({ userId, messageId, groupId }, "Product analyzed (free, deep)");
         } catch (error) {
-          botLog.error({ error, userId }, "Analysis failed");
-          await context.editText("Ошибка анализа. Попробуй позже.");
+          botLog.error({ error, userId }, "Deep analysis failed");
+          await editCallbackMessage(context, "Ошибка анализа. Попробуй позже.");
         }
       } else {
         // Paid analysis - send invoice
@@ -4452,8 +4402,8 @@ ${msg.text.slice(0, 500)}${msg.text.length > 500 ? "..." : ""}`,
 
         await sendPaymentInvoice(bot, userId, {
           type: "analyze",
-          title: "Анализ товара",
-          description: "AI-анализ: категория, цена, контакты продавца",
+          title: "Анализ объявления",
+          description: "Полный анализ: рыночные цены, проверка на скам, похожие товары",
           amount: price,
           payload: {
             type: "analyze",
@@ -4810,32 +4760,25 @@ bot.on("successful_payment", async (context) => {
     const payload = JSON.parse(payment.invoicePayload) as PaymentPayload;
 
     if (payload.type === "analyze" && payload.messageId && payload.groupId) {
-      // Run the paid analysis
+      // Run the paid deep analysis
       const msg = queries.getMessage(payload.messageId, payload.groupId);
       if (msg) {
-        const analysisResult = await analyzeMessage(msg.text);
+        await context.send("⏳ Анализирую объявление...\nЭто может занять 10-30 секунд.");
 
-        const priceDisplay = analysisResult.price
-          ? `${analysisResult.price} ${analysisResult.currency || ""}`
-          : "не указана";
+        const { analyzeWithMedia } = await import("../llm/deep-analyze.ts");
+        const { formatDeepAnalysisHtml } = await import("./formatters.ts");
 
-        const contactsDisplay = analysisResult.contacts.length > 0
-          ? analysisResult.contacts.join(", ")
-          : "не найдены";
+        const analysisResult = await analyzeWithMedia({
+          text: msg.text,
+          messageId: payload.messageId,
+          groupId: payload.groupId,
+          groupTitle: msg.group_title,
+        });
 
-        await context.send(
-          `🔍 *Анализ товара*
+        const resultText = formatDeepAnalysisHtml(analysisResult);
+        await context.send(resultText, { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
 
-📦 Категория: ${analysisResult.category}
-💰 Цена: ${priceDisplay}
-📱 Контакты: ${contactsDisplay}
-
----
-${msg.text.slice(0, 500)}${msg.text.length > 500 ? "..." : ""}`,
-          { parse_mode: "Markdown" }
-        );
-
-        botLog.info({ userId, messageId: payload.messageId, groupId: payload.groupId }, "Paid analysis completed");
+        botLog.info({ userId, messageId: payload.messageId, groupId: payload.groupId }, "Paid deep analysis completed");
       }
     }
   } catch (error) {
