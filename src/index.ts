@@ -11,12 +11,17 @@
  * - Hono: API server for WebApp
  */
 
-import { bot } from "./bot/index.ts";
+import { bot, notifyUser } from "./bot/index.ts";
 import { recoverPendingOperations } from "./bot/recovery.ts";
 import { startListener, stopListener, invalidateSubscriptionsCache } from "./listener/index.ts";
 import { startApiServer } from "./api/index.ts";
 import { logger } from "./logger.ts";
 import { scheduleNightlyAnalytics, stopAnalyticsScheduler } from "./analytics/scheduler.ts";
+import {
+  startDelayedQueueProcessor,
+  stopDelayedQueueProcessor,
+  setNotifyUserFn,
+} from "./bot/notifications.ts";
 
 // Re-export for external use
 export { invalidateSubscriptionsCache };
@@ -56,6 +61,10 @@ async function main() {
   bot.start();
   logger.info({ component: "bot" }, "Bot started");
 
+  // Setup delayed notifications processor
+  setNotifyUserFn(notifyUser);
+  startDelayedQueueProcessor();
+
   // Recover any interrupted operations from previous run (non-blocking)
   recoverPendingOperations(bot);
 
@@ -82,6 +91,7 @@ async function main() {
     logger.info("Shutting down...");
 
     stopAnalyticsScheduler();
+    stopDelayedQueueProcessor();
 
     try {
       await stopListener();

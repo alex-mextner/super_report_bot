@@ -145,6 +145,9 @@ const stmts = {
   getAllGroups: db.prepare<{ group_id: number; group_title: string }, []>(
     `SELECT DISTINCT group_id, group_title FROM user_groups ORDER BY group_title`
   ),
+  getGroupTitleById: db.prepare<{ group_title: string } | null, [number]>(
+    `SELECT group_title FROM user_groups WHERE group_id = ? LIMIT 1`
+  ),
 
   // Groups metadata (country, currency, etc.)
   getGroupMetadata: db.prepare<GroupMetadata, [number]>(
@@ -580,6 +583,11 @@ export const queries = {
       id: g.group_id,
       title: g.group_title,
     }));
+  },
+
+  getGroupTitleById(groupId: number): string | null {
+    const row = stmts.getGroupTitleById.get(groupId);
+    return row?.group_title ?? null;
   },
 
   addGroup(telegramId: number, title: string): void {
@@ -1589,6 +1597,32 @@ export const queries = {
           AND (u.plan_expires_at IS NULL OR u.plan_expires_at > datetime('now'))
       `)
       .all(groupId)
+      .map((r) => r.telegram_id);
+  },
+
+  /**
+   * Get Premium users who were already notified about this specific message
+   * Used for priority notification system - if a Premium user was notified,
+   * Free users should have their notification delayed
+   */
+  getPremiumUsersNotifiedForMessage(
+    messageId: number,
+    groupId: number
+  ): number[] {
+    return db
+      .prepare<{ telegram_id: number }, [number, number]>(`
+        SELECT DISTINCT u.telegram_id
+        FROM users u
+        JOIN subscriptions s ON s.user_id = u.id
+        JOIN found_posts_analyzes fpa ON fpa.subscription_id = s.id
+        WHERE fpa.message_id = ?
+          AND fpa.group_id = ?
+          AND fpa.result = 'matched'
+          AND fpa.notified_at IS NOT NULL
+          AND u.plan IN ('basic', 'pro', 'business')
+          AND (u.plan_expires_at IS NULL OR u.plan_expires_at > datetime('now'))
+      `)
+      .all(messageId, groupId)
       .map((r) => r.telegram_id);
   },
 };

@@ -5,6 +5,10 @@ import { matchMessageAgainstAll, getPassedMatches } from "../matcher/index.ts";
 import { verifyMatch, verifyMatchBatch, verifyMatchWithItems } from "../llm/verify.ts";
 import { semanticSearch, isSemanticSearchAvailable } from "../embeddings/search.ts";
 import { notifyUser } from "../bot/index.ts";
+import {
+  shouldDelayNotification,
+  queueDelayedNotification,
+} from "../bot/notifications.ts";
 import { listenerLog } from "../logger.ts";
 import type { IncomingMessage, Subscription, MediaItem } from "../types.ts";
 import {
@@ -95,6 +99,24 @@ export let mtClient = new TelegramClient({
   apiHash: API_HASH,
   storage: "userbot.session",
 });
+
+// Enrich mtcute logs with group names
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const logMgr = mtClient.log as any;
+const originalLogHandler = logMgr.handler;
+logMgr.handler = (color: number, level: number, tag: string, fmt: string, args: unknown[]) => {
+  const enrichedArgs = args.map((arg) => {
+    // If arg looks like a channel ID (large number), try to find group name
+    if (typeof arg === "number" && arg > 1000000) {
+      const title = queries.getGroupTitleById(arg);
+      if (title) {
+        return `${arg} (${title})`;
+      }
+    }
+    return arg;
+  });
+  originalLogHandler(color, level, tag, fmt, enrichedArgs);
+};
 
 // Cache subscriptions per group to avoid DB queries on every message
 const subscriptionsByGroup = new Map<number, { subscriptions: Subscription[]; updatedAt: number }>();
@@ -510,31 +532,66 @@ async function processMessage(msg: Message): Promise<void> {
             notificationMedia = verification.matchedPhotoIndices.map((i) => incomingMsg.media![i]!);
           }
 
-          await notifyUser(
+          // Check if notification should be delayed (priority system)
+          const { shouldDelay, hasPremiumCompetition } = shouldDelayNotification(
             userTelegramId,
-            incomingMsg.group_title,
-            incomingMsg.group_username,
-            notificationText,
-            subscription.original_query,
             incomingMsg.id,
-            incomingMsg.group_id,
-            incomingMsg.sender_name,
-            incomingMsg.sender_username,
-            notificationMedia,
-            verification.reasoning,
-            subscription.id
+            incomingMsg.group_id
           );
-          listenerLog.info(
-            {
-              event: "notification_sent",
-              userId: userTelegramId,
-              subscriptionId: subscription.id,
+
+          if (shouldDelay) {
+            // Queue for delayed delivery
+            queueDelayedNotification({
+              telegramId: userTelegramId,
               groupTitle: incomingMsg.group_title,
-              hasMedia: !!notificationMedia?.length,
-              filteredMedia: notificationMedia?.length !== incomingMsg.media?.length,
-            },
-            "User notified"
-          );
+              groupUsername: incomingMsg.group_username,
+              messageText: notificationText,
+              subscriptionQuery: subscription.original_query,
+              messageId: incomingMsg.id,
+              groupId: incomingMsg.group_id,
+              senderName: incomingMsg.sender_name,
+              senderUsername: incomingMsg.sender_username,
+              media: notificationMedia,
+              reasoning: verification.reasoning,
+              subscriptionId: subscription.id,
+            });
+            listenerLog.info(
+              {
+                event: "notification_delayed",
+                userId: userTelegramId,
+                subscriptionId: subscription.id,
+                hasPremiumCompetition,
+              },
+              "Notification delayed for Free user"
+            );
+          } else {
+            // Send immediately (Premium user OR no Premium competition)
+            await notifyUser(
+              userTelegramId,
+              incomingMsg.group_title,
+              incomingMsg.group_username,
+              notificationText,
+              subscription.original_query,
+              incomingMsg.id,
+              incomingMsg.group_id,
+              incomingMsg.sender_name,
+              incomingMsg.sender_username,
+              notificationMedia,
+              verification.reasoning,
+              subscription.id
+            );
+            listenerLog.info(
+              {
+                event: "notification_sent",
+                userId: userTelegramId,
+                subscriptionId: subscription.id,
+                groupTitle: incomingMsg.group_title,
+                hasMedia: !!notificationMedia?.length,
+                filteredMedia: notificationMedia?.length !== incomingMsg.media?.length,
+              },
+              "User notified"
+            );
+          }
         }
       } else {
         // Save analysis as LLM rejected
