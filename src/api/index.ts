@@ -9,6 +9,7 @@ import { analyzeMessage, analyzeMessagesBatch, type BatchItem } from "../llm/ana
 import { analyzeWithMedia } from "../llm/deep-analyze.ts";
 import { generateNgrams, generateWordShingles } from "../matcher/normalize.ts";
 import { fetchMediaForMessage } from "../listener/index.ts";
+import { bot } from "../bot/index.ts";
 
 const ADMIN_ID = Number(process.env.ADMIN_ID) || 0;
 
@@ -625,6 +626,100 @@ api.post("/analyze-deep", async (c) => {
   } catch (error) {
     apiLog.error({ err: error }, "Deep analysis failed");
     return c.json({ error: "Analysis failed" }, 500);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//                          PROMOTION ENDPOINTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/promotion/check/:messageId/:groupId - check promotion status and permissions
+api.get("/promotion/check/:messageId/:groupId", (c) => {
+  const userId = c.get("userId");
+  if (!userId) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const messageId = Number(c.req.param("messageId"));
+  const groupId = Number(c.req.param("groupId"));
+
+  // Check if already promoted
+  const isPromoted = queries.isProductPromoted(messageId, groupId);
+  const existingPromo = queries.getProductPromotion(messageId, groupId);
+
+  // Check permission: admin can promote anything, others only own posts
+  const userIsAdmin = userId === ADMIN_ID;
+  const senderId = queries.getMessageSenderId(messageId, groupId);
+  const isOwner = senderId !== null && senderId === userId;
+  const canPromote = userIsAdmin || isOwner;
+
+  return c.json({
+    canPromote,
+    isAdmin: userIsAdmin,
+    isOwner,
+    isPromoted,
+    endsAt: existingPromo?.ends_at ?? null,
+  });
+});
+
+// POST /api/promotion/invoice - create invoice link for promotion payment
+api.post("/promotion/invoice", async (c) => {
+  const userId = c.get("userId");
+  if (!userId) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const body = await c.req.json<{
+    messageId: number;
+    groupId: number;
+    days: 3 | 7 | 30;
+  }>();
+
+  const { messageId, groupId, days } = body;
+
+  if (!messageId || !groupId || !days) {
+    return c.json({ error: "Missing required fields" }, 400);
+  }
+
+  // Permission check: admin can promote anything, others only own posts
+  const userIsAdmin = userId === ADMIN_ID;
+  const senderId = queries.getMessageSenderId(messageId, groupId);
+  const isOwner = senderId !== null && senderId === userId;
+
+  if (!userIsAdmin && !isOwner) {
+    return c.json({ error: "Вы можете продвигать только свои посты" }, 403);
+  }
+
+  // Check if already promoted
+  if (queries.isProductPromoted(messageId, groupId)) {
+    return c.json({ error: "Товар уже продвигается" }, 400);
+  }
+
+  // Everyone pays — create invoice link
+  const prices = { 3: 100, 7: 200, 30: 500 };
+  const price = prices[days];
+
+  try {
+    const invoiceLink = await bot.api.createInvoiceLink({
+      title: `Продвижение товара (${days} дн.)`,
+      description: "Товар будет выше в WebApp поиске",
+      payload: JSON.stringify({
+        type: "promotion_product",
+        messageId,
+        groupId,
+        days,
+        userId,
+      }),
+      provider_token: "", // Empty for Telegram Stars
+      currency: "XTR",
+      prices: [{ label: "Продвижение", amount: price }],
+    });
+
+    apiLog.info({ userId, messageId, groupId, days, price }, "Created promotion invoice");
+    return c.json({ invoiceLink });
+  } catch (error) {
+    apiLog.error({ err: error, userId, messageId, groupId }, "Failed to create promotion invoice");
+    return c.json({ error: "Failed to create invoice" }, 500);
   }
 });
 

@@ -145,6 +145,28 @@ export function invalidateSubscriptionsCache(): void {
   subscriptionsByGroup.clear();
 }
 
+/**
+ * Check if a Telegram user is admin/creator of a group/channel via MTProto
+ * Used for promotion permission checks
+ */
+export async function isUserGroupAdmin(
+  userTelegramId: number,
+  groupId: number
+): Promise<boolean> {
+  try {
+    const member = await mtClient.getChatMember({
+      chatId: groupId,
+      userId: userTelegramId,
+    });
+    if (!member) return false;
+    // ChatMemberStatus: 'creator' | 'admin' | 'member' | 'restricted' | 'banned' | 'left'
+    return member.status === "creator" || member.status === "admin";
+  } catch (error) {
+    listenerLog.warn({ userTelegramId, groupId, error }, "Failed to check group admin status");
+    return false;
+  }
+}
+
 // Download single media from message
 async function downloadSingleMedia(msg: Message): Promise<MediaItem[] | undefined> {
   if (!msg.media) return undefined;

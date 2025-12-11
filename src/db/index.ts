@@ -1665,6 +1665,18 @@ export const queries = {
       .get(messageId, groupId, now) ?? null;
   },
 
+  /**
+   * Get sender_id of a message (for promotion permission checks)
+   */
+  getMessageSenderId(messageId: number, groupId: number): number | null {
+    const result = db
+      .prepare<{ sender_id: number | null }, [number, number]>(
+        "SELECT sender_id FROM messages WHERE message_id = ? AND group_id = ?"
+      )
+      .get(messageId, groupId);
+    return result?.sender_id ?? null;
+  },
+
   getUserPromotions(telegramId: number): Array<{
     id: number;
     type: "group" | "product";

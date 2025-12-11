@@ -13,7 +13,8 @@
       "Bash(git show:*)",
       "Bash(/Users/ultra/.bun/bin/bun:*)",
       "Bash(cat:*)",
-      "Bash(/Users/ultra/.bun/bin/bunx tsc:*)"
+      "Bash(/Users/ultra/.bun/bin/bunx tsc:*)",
+      "Bash(bun x tsc:*)"
     ],
     "deny": [],
     "ask": []

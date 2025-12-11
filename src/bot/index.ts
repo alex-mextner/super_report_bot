@@ -108,6 +108,7 @@ import {
   ensureUserbotInGroup,
   joinGroupByUserbot,
   scanFromCache,
+  isUserGroupAdmin,
 } from "../listener/index.ts";
 import {
   handleForward,
@@ -4416,22 +4417,35 @@ ${bold("ИИ:")} ${result.summary}
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════
-    //                       PROMOTION ACTIONS (Admin)
+    //                       PROMOTION ACTIONS
     // ═══════════════════════════════════════════════════════════════════════════════
 
-    case "promote_admin": {
-      // Admin wants to promote a product — show duration selection
-      if (!isAdmin(userId)) {
-        await context.answer({ text: "Нет доступа" });
-        return;
-      }
-
+    case "promote_product": {
+      // User wants to promote a product — check permission first
       const raw = JSON.parse(context.data || "{}");
       const messageId = raw.m as number;
       const groupId = raw.g as number;
 
       if (!messageId || !groupId) {
         await context.answer({ text: "Данные не найдены" });
+        return;
+      }
+
+      // Permission check: admin can promote anything, others only own posts
+      const userIsAdmin = isAdmin(userId);
+      let canPromote = userIsAdmin;
+
+      if (!canPromote) {
+        // Check if user is the post author
+        const senderId = queries.getMessageSenderId(messageId, groupId);
+        canPromote = senderId !== null && senderId === userId;
+      }
+
+      if (!canPromote) {
+        await context.answer({
+          text: "Вы можете продвигать только свои посты",
+          show_alert: true,
+        });
         return;
       }
 
@@ -4448,13 +4462,59 @@ ${bold("ИИ:")} ${result.summary}
 
       await context.answer();
       await context.editText(
-        format`🚀 ${bold("Продвижение товара (админ)")}
+        format`🚀 ${bold("Продвижение товара")}
 
 Выбери длительность продвижения:
 • Товар будет выше в WebApp поиске
 • Показывается при ожидании анализа`,
         {
-          reply_markup: promotionDurationKeyboard("product", messageId, groupId, true),
+          reply_markup: promotionDurationKeyboard("product", messageId, groupId, false),
+        }
+      );
+      break;
+    }
+
+    case "promote_group": {
+      // User wants to promote a group — check permission first
+      const raw = JSON.parse(context.data || "{}");
+      const groupId = raw.g as number;
+
+      if (!groupId) {
+        await context.answer({ text: "Данные не найдены" });
+        return;
+      }
+
+      // Permission check: admin can promote anything, others only own groups
+      const userIsAdmin = isAdmin(userId);
+      let canPromote = userIsAdmin;
+
+      if (!canPromote) {
+        // Check if user is group admin via MTProto
+        canPromote = await isUserGroupAdmin(userId, groupId);
+      }
+
+      if (!canPromote) {
+        await context.answer({
+          text: "Вы можете продвигать только группы, где вы администратор",
+          show_alert: true,
+        });
+        return;
+      }
+
+      // Check if already promoted
+      if (queries.isGroupPromoted(groupId)) {
+        await context.answer({ text: "Группа уже продвигается", show_alert: true });
+        return;
+      }
+
+      await context.answer();
+      await context.editText(
+        format`🚀 ${bold("Продвижение группы")}
+
+Выбери длительность продвижения:
+• Группа будет рекомендоваться пользователям`,
+        {
+          reply_markup: promotionDurationKeyboard("group", groupId, undefined, false),
         }
       );
       break;
@@ -4487,59 +4547,40 @@ ${bold("ИИ:")} ${result.summary}
       const messageId = raw.id as number;
       const groupId = raw.g as number;
       const days = raw.days as number;
-      const isAdminPromo = raw.admin === true;
 
       if (!messageId || !groupId || !days) {
         await context.answer({ text: "Ошибка данных" });
         return;
       }
 
-      if (isAdminPromo) {
-        // Admin gets free promotion
-        if (!isAdmin(userId)) {
-          await context.answer({ text: "Нет доступа" });
+      // Permission check: admin can promote anything, others only own posts
+      const userIsAdmin = isAdmin(userId);
+      if (!userIsAdmin) {
+        const senderId = queries.getMessageSenderId(messageId, groupId);
+        if (senderId === null || senderId !== userId) {
+          await context.answer({ text: "Вы можете продвигать только свои посты", show_alert: true });
           return;
         }
-
-        queries.createPromotion({
-          telegramId: userId,
-          type: "product",
-          messageId,
-          productGroupId: groupId,
-          durationDays: days,
-        });
-
-        await context.answer({ text: `Продвижение активировано на ${days} дней!` });
-        await context.editText(
-          format`✅ ${bold("Товар продвинут!")}
-
-Длительность: ${days} дней
-Статус: активно
-
-Товар будет выше в WebApp поиске.`
-        );
-
-        botLog.info({ userId, messageId, groupId, days }, "Admin promoted product");
-      } else {
-        // Regular user — send payment invoice
-        const prices = { 3: 100, 7: 200, 30: 500 };
-        const price = prices[days as keyof typeof prices] || 100;
-
-        await context.answer({ text: "Открываю оплату..." });
-
-        await sendPaymentInvoice(bot, userId, {
-          type: "promotion_product",
-          title: `Продвижение товара (${days} дн.)`,
-          description: "Товар будет выше в WebApp поиске",
-          amount: price,
-          payload: {
-            type: "promotion_product",
-            messageId,
-            groupId,
-            days,
-          },
-        });
       }
+
+      // Everyone pays — send invoice
+      const prices = { 3: 100, 7: 200, 30: 500 };
+      const price = prices[days as keyof typeof prices] || 100;
+
+      await context.answer({ text: "Открываю оплату..." });
+
+      await sendPaymentInvoice(bot, userId, {
+        type: "promotion_product",
+        title: `Продвижение товара (${days} дн.)`,
+        description: "Товар будет выше в WebApp поиске",
+        amount: price,
+        payload: {
+          type: "promotion_product",
+          messageId,
+          groupId,
+          days,
+        },
+      });
       break;
     }
 
@@ -4547,55 +4588,39 @@ ${bold("ИИ:")} ${result.summary}
       const raw = JSON.parse(context.data || "{}");
       const groupId = raw.id as number;
       const days = raw.days as number;
-      const isAdminPromo = raw.admin === true;
 
       if (!groupId || !days) {
         await context.answer({ text: "Ошибка данных" });
         return;
       }
 
-      if (isAdminPromo) {
-        if (!isAdmin(userId)) {
-          await context.answer({ text: "Нет доступа" });
+      // Permission check: admin can promote anything, others only own groups
+      const userIsAdmin = isAdmin(userId);
+      if (!userIsAdmin) {
+        const isGroupAdmin = await isUserGroupAdmin(userId, groupId);
+        if (!isGroupAdmin) {
+          await context.answer({ text: "Вы можете продвигать только свои группы", show_alert: true });
           return;
         }
-
-        queries.createPromotion({
-          telegramId: userId,
-          type: "group",
-          groupId,
-          durationDays: days,
-        });
-
-        await context.answer({ text: `Группа продвинута на ${days} дней!` });
-        await context.editText(
-          format`✅ ${bold("Группа продвинута!")}
-
-Длительность: ${days} дней
-Статус: активно
-
-Группа будет рекомендоваться пользователям.`
-        );
-
-        botLog.info({ userId, groupId, days }, "Admin promoted group");
-      } else {
-        const prices = { 3: 300, 7: 600, 30: 1500 };
-        const price = prices[days as keyof typeof prices] || 300;
-
-        await context.answer({ text: "Открываю оплату..." });
-
-        await sendPaymentInvoice(bot, userId, {
-          type: "promotion_group",
-          title: `Продвижение группы (${days} дн.)`,
-          description: "Группа будет рекомендоваться пользователям",
-          amount: price,
-          payload: {
-            type: "promotion_group",
-            groupId,
-            days,
-          },
-        });
       }
+
+      // Everyone pays — send invoice
+      const prices = { 3: 300, 7: 600, 30: 1500 };
+      const price = prices[days as keyof typeof prices] || 300;
+
+      await context.answer({ text: "Открываю оплату..." });
+
+      await sendPaymentInvoice(bot, userId, {
+        type: "promotion_group",
+        title: `Продвижение группы (${days} дн.)`,
+        description: "Группа будет рекомендоваться пользователям",
+        amount: price,
+        payload: {
+          type: "promotion_group",
+          groupId,
+          days,
+        },
+      });
       break;
     }
 
@@ -4908,20 +4933,18 @@ function buildNotificationKeyboard(
     }]);
   }
 
-  // Admin gets promote button on every notification
-  if (userIsAdmin) {
-    const isPromoted = queries.isProductPromoted(messageId, groupId);
-    if (!isPromoted) {
-      keyboard.push([{
-        text: "🚀 Продвинуть (админ)",
-        callback_data: JSON.stringify({ action: "promote_admin", m: messageId, g: groupId }),
-      }]);
-    } else {
-      keyboard.push([{
-        text: "✅ Уже продвигается",
-        callback_data: JSON.stringify({ action: "promo_info", m: messageId, g: groupId }),
-      }]);
-    }
+  // Show promote button to everyone - permission checked on callback
+  const isPromoted = queries.isProductPromoted(messageId, groupId);
+  if (!isPromoted) {
+    keyboard.push([{
+      text: "🚀 Продвинуть",
+      callback_data: JSON.stringify({ action: "promote_product", m: messageId, g: groupId }),
+    }]);
+  } else {
+    keyboard.push([{
+      text: "✅ Уже продвигается",
+      callback_data: JSON.stringify({ action: "promo_info", m: messageId, g: groupId }),
+    }]);
   }
 
   return { inline_keyboard: keyboard };

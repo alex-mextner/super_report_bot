@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useTelegram } from "../hooks/useTelegram";
 import { useProduct, useSimilarProducts } from "../hooks/useProducts";
 import { useDeepAnalyze } from "../hooks/useDeepAnalyze";
+import { usePromotion } from "../hooks/usePromotion";
 import { SellerContacts } from "../components/SellerContacts";
 import { SimilarProducts } from "../components/SimilarProducts";
 import { DeepAnalysis } from "../components/DeepAnalysis";
@@ -35,6 +36,12 @@ export function ProductPage() {
   const { product, loading, error } = useProduct(productId);
   const { similar, loading: similarLoading } = useSimilarProducts(productId);
   const { analyze, loading: analyzing, result: analysisResult, error: analysisError } = useDeepAnalyze();
+
+  // Promotion hook - only init after product is loaded
+  const { status: promoStatus, loading: promoLoading, promoting, promote } = usePromotion(
+    product?.message_id ?? 0,
+    product?.group_id ?? 0
+  );
 
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [activeImage, setActiveImage] = useState(0);
@@ -145,6 +152,35 @@ export function ProductPage() {
             {analyzing ? "Анализирую..." : "Анализ цены"}
           </button>
         </div>
+
+        {!promoLoading && promoStatus && (
+          <div className="promotion-section">
+            {promoStatus.isPromoted ? (
+              <div className="promotion-active">
+                ✅ Продвигается до {new Date(promoStatus.endsAt! * 1000).toLocaleDateString("ru")}
+              </div>
+            ) : promoStatus.canPromote ? (
+              <div className="promotion-buttons">
+                <span className="promotion-label">🚀 Продвинуть</span>
+                <div className="promotion-options">
+                  <button onClick={() => promote(3)} disabled={promoting}>
+                    3 дня — 100⭐
+                  </button>
+                  <button onClick={() => promote(7)} disabled={promoting}>
+                    7 дней — 200⭐
+                  </button>
+                  <button onClick={() => promote(30)} disabled={promoting}>
+                    30 дней — 500⭐
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="promotion-unavailable">
+                Продвижение доступно только автору поста
+              </div>
+            )}
+          </div>
+        )}
 
         {analysisError && (
           <div className="analysis-error">{analysisError}</div>

@@ -35,6 +35,7 @@ interface TelegramWebApp {
   };
   colorScheme: "light" | "dark";
   openTelegramLink: (url: string) => void;
+  openInvoice: (url: string, callback?: (status: string) => void) => void;
 }
 
 declare global {
