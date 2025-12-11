@@ -139,7 +139,7 @@ export function ProductPage() {
 
           <button
             className="analyze-btn"
-            onClick={() => analyze(product.text)}
+            onClick={() => analyze(product.text, product.message_id, product.group_id)}
             disabled={analyzing}
           >
             {analyzing ? "Анализирую..." : "Анализ цены"}

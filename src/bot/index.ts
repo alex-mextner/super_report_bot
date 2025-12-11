@@ -3619,24 +3619,31 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
         // Get photo for visual analysis
         let photoPath: string | null = null;
         const mediaRows = queries.getMediaForMessage(msgId, grpId);
+        botLog.debug({ msgId, grpId, mediaRowsCount: mediaRows.length }, "Looking for photo in DB");
         let firstPhoto = mediaRows.find((m) => m.media_type === "photo");
 
         // If no photo in DB, try to fetch from Telegram
         if (!firstPhoto) {
+          botLog.debug({ msgId, grpId }, "No photo in DB, fetching from Telegram");
           try {
             const { fetchMediaForMessage } = await import("../listener/index.ts");
             const fetched = await fetchMediaForMessage(msgId, grpId);
+            botLog.debug({ msgId, grpId, fetched }, "Fetch result");
             if (fetched) {
               const updatedMedia = queries.getMediaForMessage(msgId, grpId);
               firstPhoto = updatedMedia.find((m) => m.media_type === "photo");
+              botLog.debug({ msgId, grpId, foundPhoto: !!firstPhoto }, "After fetch lookup");
             }
-          } catch {
-            // Ignore fetch errors, continue without photo
+          } catch (err) {
+            botLog.error({ err, msgId, grpId }, "Failed to fetch media");
           }
         }
 
         if (firstPhoto) {
           photoPath = `data/media/${firstPhoto.file_path}`;
+          botLog.debug({ photoPath }, "Photo path resolved");
+        } else {
+          botLog.debug({ msgId, grpId }, "No photo available for analysis");
         }
 
         // Run deep analysis (pass group title, photo path, and group ID for metadata)

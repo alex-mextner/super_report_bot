@@ -57,7 +57,7 @@ export function useDeepAnalyze() {
   const [result, setResult] = useState<DeepAnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const analyze = useCallback(async (text: string) => {
+  const analyze = useCallback(async (text: string, messageId?: number, groupId?: number) => {
     try {
       setLoading(true);
       setError(null);
@@ -65,7 +65,7 @@ export function useDeepAnalyze() {
 
       const data = await apiClient<DeepAnalysisResult>("/api/analyze-deep", {
         method: "POST",
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, messageId, groupId }),
       });
 
       setResult(data);

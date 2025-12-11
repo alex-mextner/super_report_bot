@@ -609,13 +609,34 @@ api.post("/admin/users/:id/send", async (c) => {
 
 // POST /api/analyze-deep - deep product analysis with market prices
 api.post("/analyze-deep", async (c) => {
-  const body = await c.req.json<{ text: string; groupTitle?: string; groupId?: number }>();
+  const body = await c.req.json<{ text: string; groupTitle?: string; groupId?: number; messageId?: number }>();
   if (!body.text) {
     return c.json({ error: "Text required" }, 400);
   }
 
   try {
-    const result = await deepAnalyze(body.text, body.groupTitle, null, body.groupId);
+    // Try to get photo if messageId and groupId provided
+    let photoPath: string | null = null;
+    if (body.messageId && body.groupId) {
+      // Check existing media in DB
+      let mediaRows = queries.getMediaForMessage(body.messageId, body.groupId);
+      let firstPhoto = mediaRows.find((m) => m.media_type === "photo");
+
+      // If no photo in DB, try to fetch from Telegram
+      if (!firstPhoto) {
+        const fetched = await fetchMediaForMessage(body.messageId, body.groupId);
+        if (fetched) {
+          mediaRows = queries.getMediaForMessage(body.messageId, body.groupId);
+          firstPhoto = mediaRows.find((m) => m.media_type === "photo");
+        }
+      }
+
+      if (firstPhoto) {
+        photoPath = `data/media/${firstPhoto.file_path}`;
+      }
+    }
+
+    const result = await deepAnalyze(body.text, body.groupTitle, photoPath, body.groupId);
     return c.json(result);
   } catch (error) {
     apiLog.error({ err: error }, "Deep analysis failed");
