@@ -368,6 +368,20 @@ export const userMachine = setup({
 
     /** Clear metadata queue */
     clearMetadataQueue: assign(actions.clearMetadataQueue),
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DELETION FEEDBACK ACTIONS
+    // Collecting user feedback when they delete a subscription
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /** Start feedback collection after subscription deletion */
+    startFeedback: assign(actions.startFeedback),
+
+    /** Store user's outcome answer (bought/not_bought/complicated) */
+    setFeedbackOutcome: assign(actions.setFeedbackOutcome),
+
+    /** Clear feedback-related context */
+    clearFeedback: assign(actions.clearFeedback),
   },
 }).createMachine({
   /**
@@ -560,6 +574,15 @@ export const userMachine = setup({
          */
         SET_USER_MODE: {
           actions: "setUserMode",
+        },
+
+        /**
+         * Start collecting feedback after subscription deletion.
+         * Handler sends this after deactivating the subscription.
+         */
+        START_FEEDBACK: {
+          target: "collectingFeedbackOutcome",
+          actions: "startFeedback",
         },
       },
     },
@@ -1406,6 +1429,81 @@ export const userMachine = setup({
         CANCEL: {
           target: "idle",
           actions: "clearEditing",
+        },
+      },
+    },
+
+    /**
+     * ═════════════════════════════════════════════════════════════════════════════
+     *                   STATE: COLLECTING_FEEDBACK_OUTCOME
+     * ═════════════════════════════════════════════════════════════════════════════
+     *
+     * User deleted a subscription. We ask "Did you manage to buy?"
+     * with options: Yes / No / It's complicated
+     *
+     * The subscription is already deactivated - this is just collecting feedback.
+     */
+    collectingFeedbackOutcome: {
+      on: {
+        /**
+         * User answered the outcome question.
+         * Store the answer and ask for a review.
+         */
+        FEEDBACK_OUTCOME: {
+          target: "awaitingFeedbackReview",
+          actions: "setFeedbackOutcome",
+        },
+
+        /**
+         * User wants to skip the whole feedback flow.
+         * Return to idle without saving anything.
+         */
+        CANCEL: {
+          target: "idle",
+          actions: "clearFeedback",
+        },
+      },
+    },
+
+    /**
+     * ═════════════════════════════════════════════════════════════════════════════
+     *                     STATE: AWAITING_FEEDBACK_REVIEW
+     * ═════════════════════════════════════════════════════════════════════════════
+     *
+     * User answered the outcome question. Now we ask for a text review.
+     * They can type a review or click "Not this time" to skip.
+     *
+     * After this, feedback is saved to DB and admin is notified.
+     */
+    awaitingFeedbackReview: {
+      on: {
+        /**
+         * User typed a review.
+         * Handler saves to DB and notifies admin.
+         */
+        FEEDBACK_REVIEW: {
+          target: "idle",
+          actions: "clearFeedback",
+          // Handler saves feedback with review and notifies admin
+        },
+
+        /**
+         * User clicked "Not this time" to skip review.
+         * Handler saves feedback without review and notifies admin.
+         */
+        SKIP_FEEDBACK: {
+          target: "idle",
+          actions: "clearFeedback",
+          // Handler saves feedback without review and notifies admin
+        },
+
+        /**
+         * User cancels.
+         * Return to idle without saving.
+         */
+        CANCEL: {
+          target: "idle",
+          actions: "clearFeedback",
         },
       },
     },

@@ -37,6 +37,8 @@ import {
   metadataSkipKeyboard,
   metadataPrefilledKeyboard,
   metadataCurrencyKeyboard,
+  feedbackOutcomeKeyboard,
+  feedbackReviewKeyboard,
 } from "./keyboards.ts";
 import { runWithRecovery } from "./operations.ts";
 import { interpretEditCommand } from "../llm/edit.ts";
@@ -1831,6 +1833,46 @@ ${examplesText}
     return;
   }
 
+  // Handle feedback review text after subscription deletion
+  if (currentState === "awaitingFeedbackReview") {
+    const subscriptionId = c.feedbackSubscriptionId;
+    const subscriptionQuery = c.feedbackSubscriptionQuery;
+    const outcome = c.feedbackOutcome;
+
+    if (!subscriptionId || !outcome) {
+      send(userId, { type: "CANCEL" });
+      return;
+    }
+
+    // Save feedback with review
+    queries.saveFeedback({
+      subscriptionId,
+      telegramId: userId,
+      outcome,
+      review: text,
+    });
+
+    // Notify admin
+    const adminId = process.env.ADMIN_ID;
+    if (adminId) {
+      const outcomeText = {
+        bought: "✅ Купил",
+        not_bought: "❌ Не купил",
+        complicated: "🤷 Всё сложно",
+      };
+      const user = queries.getUserByTelegramId(userId);
+      const username = user?.username ? `@${user.username}` : `ID: ${userId}`;
+      await bot.api.sendMessage({
+        chat_id: Number(adminId),
+        text: `📝 Фидбек от ${username}:\n${outcomeText[outcome]}\n\nЗапрос: ${subscriptionQuery ?? "—"}\n\nОтзыв: ${text}`,
+      });
+    }
+
+    send(userId, { type: "FEEDBACK_REVIEW", text });
+    await context.send("Спасибо за отзыв!");
+    return;
+  }
+
   // Handle AI correction for pending subscription
   if (currentState === "correctingPendingAi" && c.pendingSub && c.pendingAiCorrection) {
     const { mode, current, conversation } = c.pendingAiCorrection;
@@ -2317,10 +2359,25 @@ ${c.pendingSub.llmDescription}
 
     case "disable": {
       const subscriptionId = Number(data.id);
+      // Get subscription info before deactivating (for feedback notification)
+      const subToDelete = queries.getSubscriptionById(subscriptionId, userId);
+      const subscriptionQuery = subToDelete?.original_query ?? "Неизвестный запрос";
+
       queries.deactivateSubscription(subscriptionId, userId);
       invalidateSubscriptionsCache();
       await context.answer({ text: "Подписка отключена" });
-      await context.editText("Подписка отключена.");
+
+      // Ask for feedback
+      await context.editText("Подписка отключена.\n\nУдалось ли купить?", {
+        reply_markup: feedbackOutcomeKeyboard(subscriptionId),
+      });
+
+      // Transition FSM to collect feedback
+      send(userId, {
+        type: "START_FEEDBACK",
+        subscriptionId,
+        subscriptionQuery,
+      });
       break;
     }
 
@@ -3831,6 +3888,79 @@ ${bold("ИИ:")} ${result.summary}
         botLog.error({ err: error }, "Deep analysis failed");
         await editCallbackMessage(context, "Ошибка анализа. Попробуйте позже.");
       }
+      break;
+    }
+
+    // =====================================================
+    // Subscription deletion feedback handlers
+    // =====================================================
+
+    case "feedback_outcome": {
+      const subscriptionId = Number(data.id);
+      const outcome = (data as { outcome?: string }).outcome as "bought" | "not_bought" | "complicated";
+
+      if (!outcome || currentState !== "collectingFeedbackOutcome") {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      // Store outcome and ask for review
+      send(userId, { type: "FEEDBACK_OUTCOME", outcome });
+
+      const outcomeLabels = {
+        bought: "Купил",
+        not_bought: "Не купил",
+        complicated: "Всё сложно",
+      };
+      await context.answer({ text: outcomeLabels[outcome] });
+
+      // Ask for review
+      await context.editText(
+        "Спасибо за ответ!\n\nОставьте отзыв сообщением (что понравилось, что можно улучшить):",
+        { reply_markup: feedbackReviewKeyboard(subscriptionId) }
+      );
+      break;
+    }
+
+    case "skip_feedback": {
+      if (currentState !== "awaitingFeedbackReview") {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      const subscriptionId = c.feedbackSubscriptionId;
+      const subscriptionQuery = c.feedbackSubscriptionQuery;
+      const outcome = c.feedbackOutcome;
+
+      // Save feedback without review
+      if (subscriptionId && outcome) {
+        queries.saveFeedback({
+          subscriptionId,
+          telegramId: userId,
+          outcome,
+          review: null,
+        });
+
+        // Notify admin
+        const adminId = process.env.ADMIN_ID;
+        if (adminId) {
+          const outcomeText = {
+            bought: "✅ Купил",
+            not_bought: "❌ Не купил",
+            complicated: "🤷 Всё сложно",
+          };
+          const user = queries.getUserByTelegramId(userId);
+          const username = user?.username ? `@${user.username}` : `ID: ${userId}`;
+          await bot.api.sendMessage({
+            chat_id: Number(adminId),
+            text: `📝 Фидбек от ${username}:\n${outcomeText[outcome]}\n\nЗапрос: ${subscriptionQuery ?? "—"}\n\nОтзыв: —`,
+          });
+        }
+      }
+
+      send(userId, { type: "SKIP_FEEDBACK" });
+      await context.answer({ text: "Спасибо!" });
+      await context.editText("Спасибо за обратную связь!");
       break;
     }
   }

@@ -469,6 +469,12 @@ const stmts = {
   getActiveUsers: db.prepare<User, [number]>(
     `SELECT * FROM users WHERE last_active IS NOT NULL AND last_active > ? ORDER BY last_active DESC`
   ),
+
+  // Subscription feedback
+  insertFeedback: db.prepare<void, [number, number, string, string | null]>(
+    `INSERT INTO subscription_feedback (subscription_id, user_id, outcome, review)
+     VALUES (?, (SELECT id FROM users WHERE telegram_id = ?), ?, ?)`
+  ),
 };
 
 // Helper to parse JSON fields from subscription
@@ -492,6 +498,10 @@ export const queries = {
     console.log("[getOrCreateUser]", { telegramId, firstName, username });
     stmts.upsertUser.run(telegramId, firstName ?? null, username ?? null);
     return stmts.getUser.get(telegramId)!;
+  },
+
+  getUserByTelegramId(telegramId: number): User | null {
+    return stmts.getUser.get(telegramId) ?? null;
   },
 
   getUserMode(telegramId: number): UserMode {
@@ -1250,6 +1260,16 @@ export const queries = {
       )
       .get(messageId);
     return result !== null;
+  },
+
+  // === Subscription Feedback ===
+  saveFeedback(data: {
+    subscriptionId: number;
+    telegramId: number;
+    outcome: "bought" | "not_bought" | "complicated";
+    review: string | null;
+  }): void {
+    stmts.insertFeedback.run(data.subscriptionId, data.telegramId, data.outcome, data.review);
   },
 };
 

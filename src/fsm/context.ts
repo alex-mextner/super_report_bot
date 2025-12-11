@@ -529,6 +529,27 @@ export interface BotContext {
    * Used when adding multiple groups via links in one /addgroup command.
    */
   metadataQueue: MetadataQueue | null;
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //                    DELETION FEEDBACK COLLECTION
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Subscription being deleted, waiting for feedback.
+   * After user clicks "Delete", we ask for feedback before returning to idle.
+   */
+  feedbackSubscriptionId: number | null;
+
+  /**
+   * Original query of the subscription being deleted.
+   * Stored for admin notification.
+   */
+  feedbackSubscriptionQuery: string | null;
+
+  /**
+   * User's answer to "Did you manage to buy?" question.
+   */
+  feedbackOutcome: "bought" | "not_bought" | "complicated" | null;
 }
 
 /**
@@ -583,5 +604,10 @@ export function createInitialContext(
     // Group metadata collection - nothing pending
     pendingGroupMetadata: null,
     metadataQueue: null,
+
+    // Deletion feedback - nothing pending
+    feedbackSubscriptionId: null,
+    feedbackSubscriptionQuery: null,
+    feedbackOutcome: null,
   };
 }

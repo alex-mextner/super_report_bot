@@ -413,3 +413,25 @@ export function metadataCurrencyKeyboard(currencyCode: string, displayLabel: str
     .text("Изменить", JSON.stringify({ action: "metadata_change" }))
     .text("Пропустить →", JSON.stringify({ action: "metadata_skip" }));
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//                       DELETION FEEDBACK KEYBOARDS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Keyboard for "Did you manage to buy?" question after subscription deletion
+ */
+export function feedbackOutcomeKeyboard(subscriptionId: number): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("✅ Да", JSON.stringify({ action: "feedback_outcome", id: subscriptionId, outcome: "bought" }))
+    .text("❌ Нет", JSON.stringify({ action: "feedback_outcome", id: subscriptionId, outcome: "not_bought" }))
+    .text("🤷 Всё сложно", JSON.stringify({ action: "feedback_outcome", id: subscriptionId, outcome: "complicated" }));
+}
+
+/**
+ * Keyboard for requesting review text (with "Not this time" option)
+ */
+export function feedbackReviewKeyboard(subscriptionId: number): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("Не в этот раз", JSON.stringify({ action: "skip_feedback", id: subscriptionId }));
+}

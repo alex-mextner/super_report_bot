@@ -958,3 +958,46 @@ export const advanceMetadataQueue = {
 export const clearMetadataQueue = {
   metadataQueue: () => null as BotContext["metadataQueue"],
 };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//                       DELETION FEEDBACK ACTIONS
+//
+//         Collecting user feedback when they delete a subscription
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Start feedback collection after subscription deletion.
+ *
+ * Store subscription ID and query for later use (admin notification).
+ */
+export const startFeedback = {
+  feedbackSubscriptionId: ({ event }: { event: BotEvent }) => {
+    if (event.type === "START_FEEDBACK") return event.subscriptionId;
+    return null;
+  },
+  feedbackSubscriptionQuery: ({ event }: { event: BotEvent }) => {
+    if (event.type === "START_FEEDBACK") return event.subscriptionQuery;
+    return null;
+  },
+};
+
+/**
+ * Store user's answer to "Did you manage to buy?" question.
+ */
+export const setFeedbackOutcome = {
+  feedbackOutcome: ({ event }: { event: BotEvent }) => {
+    if (event.type === "FEEDBACK_OUTCOME") return event.outcome;
+    return null;
+  },
+};
+
+/**
+ * Clear all feedback-related context.
+ *
+ * Called after feedback is saved or user skips.
+ */
+export const clearFeedback = {
+  feedbackSubscriptionId: () => null as BotContext["feedbackSubscriptionId"],
+  feedbackSubscriptionQuery: () => null as BotContext["feedbackSubscriptionQuery"],
+  feedbackOutcome: () => null as BotContext["feedbackOutcome"],
+};

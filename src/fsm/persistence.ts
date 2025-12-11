@@ -94,7 +94,9 @@ export type StateValue =
   | "editingSubPositive"
   | "editingSubNegative"
   | "editingSubDescription"
-  | "editingSubAi";
+  | "editingSubAi"
+  | "collectingFeedbackOutcome"
+  | "awaitingFeedbackReview";
 
 // Check if actor is in specific state
 export function isInState(actor: UserActor, state: StateValue): boolean {

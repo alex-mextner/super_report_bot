@@ -554,4 +554,46 @@ export type BotEvent =
    *
    * Called after completing metadata for one group when queue has more.
    */
-  | { type: "METADATA_NEXT_GROUP" };
+  | { type: "METADATA_NEXT_GROUP" }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //                     DELETION FEEDBACK EVENTS
+  //
+  //         Collecting user feedback when they delete a subscription
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Start collecting feedback after subscription deletion.
+   *
+   * Called by handler after deactivating subscription.
+   * Stores subscription ID and query for later notification.
+   */
+  | {
+      type: "START_FEEDBACK";
+      subscriptionId: number;
+      subscriptionQuery: string;
+    }
+
+  /**
+   * User answered "Did you manage to buy?" question.
+   *
+   * Outcome: bought / not_bought / complicated
+   */
+  | {
+      type: "FEEDBACK_OUTCOME";
+      outcome: "bought" | "not_bought" | "complicated";
+    }
+
+  /**
+   * User submitted their review text.
+   *
+   * Handler saves to DB and notifies admin.
+   */
+  | { type: "FEEDBACK_REVIEW"; text: string }
+
+  /**
+   * User clicked "Not this time" to skip leaving a review.
+   *
+   * Handler saves feedback without review and notifies admin.
+   */
+  | { type: "SKIP_FEEDBACK" };
