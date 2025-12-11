@@ -3423,6 +3423,103 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
       break;
     }
 
+    case "miss": {
+      // "Мимо" button - message was shown but doesn't match user intent
+      // Short keys s/m/g are normalized to id/msgId/grpId above
+      const subscriptionId = data.id as number;
+      const messageId = data.msgId as number;
+      const groupId = data.grpId as number;
+
+      if (!subscriptionId || !messageId || !groupId) {
+        await context.answer({ text: "Ошибка: нет данных" });
+        return;
+      }
+
+      const subscription = queries.getSubscriptionById(subscriptionId, userId);
+      if (!subscription) {
+        await context.answer({ text: "Подписка не найдена" });
+        return;
+      }
+
+      // Get message text from DB
+      const message = queries.getMessage(messageId, groupId);
+      const messageText = message?.text?.slice(0, 500) || "[текст недоступен]";
+
+      // Build context message for AI
+      const contextMessage = `Это сообщение было показано, но оно мимо:\n"${messageText}"\n\nПредложи как изменить подписку чтобы такие сообщения не попадали.`;
+
+      // Start AI editing with context in conversation
+      send(userId, {
+        type: "EDIT_SUB_AI",
+        data: {
+          subscriptionId,
+          current: {
+            positiveKeywords: subscription.positive_keywords,
+            negativeKeywords: subscription.negative_keywords,
+            llmDescription: subscription.llm_description,
+          },
+          conversation: [{ role: "user" as const, content: contextMessage }],
+        },
+      });
+
+      await context.answer({ text: "Анализирую..." });
+
+      // Trigger AI interpretation immediately
+      const currentSnake = {
+        positive_keywords: subscription.positive_keywords,
+        negative_keywords: subscription.negative_keywords,
+        llm_description: subscription.llm_description,
+      };
+
+      try {
+        const result = await runWithRecovery(userId, "AI_EDIT", undefined, () =>
+          interpretEditCommand(contextMessage, currentSnake, [])
+        );
+
+        // Format diff
+        const addedNeg = result.negative_keywords.filter(
+          (k: string) => !currentSnake.negative_keywords.includes(k)
+        );
+        const removedPos = currentSnake.positive_keywords.filter(
+          (k: string) => !result.positive_keywords.includes(k)
+        );
+
+        let diffText = "";
+        if (addedNeg.length) diffText += `+ Исключения: ${addedNeg.join(", ")}\n`;
+        if (removedPos.length) diffText += `- Удалено: ${removedPos.join(", ")}\n`;
+
+        // Update FSM with proposed changes
+        send(userId, { type: "TEXT_AI_COMMAND", text: contextMessage });
+        send(userId, {
+          type: "AI_PROPOSED",
+          proposed: {
+            positiveKeywords: result.positive_keywords,
+            negativeKeywords: result.negative_keywords,
+            llmDescription: result.llm_description,
+          },
+        });
+
+        await context.editText(
+          format`${bold("Мимо!")} Анализирую сообщение...
+
+${bold("Предложение:")}
+${diffText || "Без изменений"}
+
+${bold("ИИ:")} ${result.summary}
+
+Можешь уточнить или применить:`,
+          { reply_markup: aiEditKeyboard(subscriptionId) }
+        );
+      } catch (error) {
+        botLog.error({ err: error, userId, subscriptionId }, "Miss analysis failed");
+        await context.editText(
+          `Ошибка анализа. Опиши своими словами что изменить в подписке "${subscription.original_query}":`,
+          { reply_markup: aiEditKeyboard(subscriptionId) }
+        );
+      }
+      break;
+    }
+
     case "add_group_quick": {
       const groupId = data.id as number;
       const groupTitle = (data as { title?: string }).title || "Неизвестная группа";
@@ -3699,20 +3796,29 @@ function buildNotificationCaption(
  */
 function buildNotificationKeyboard(
   messageId?: number,
-  groupId?: number
+  groupId?: number,
+  subscriptionId?: number
 ): { inline_keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> } | undefined {
   if (!messageId || !groupId) return undefined;
 
   const messageUrl = buildMessageLink(groupId, messageId);
-  return {
-    inline_keyboard: [
-      [{ text: "📎 Перейти к посту", url: messageUrl }],
-      [{
-        text: "🔍 Анализ цены",
-        callback_data: JSON.stringify({ action: "analyze", msgId: messageId, grpId: groupId }),
-      }],
-    ],
-  };
+  const keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> = [
+    [{ text: "📎 Перейти к посту", url: messageUrl }],
+    [{
+      text: "🔍 Анализ цены",
+      callback_data: JSON.stringify({ action: "analyze", msgId: messageId, grpId: groupId }),
+    }],
+  ];
+
+  // Add "Miss" button if subscription ID available (short keys for 64-byte limit)
+  if (subscriptionId) {
+    keyboard.push([{
+      text: "👎 Мимо",
+      callback_data: JSON.stringify({ a: "miss", s: subscriptionId, m: messageId, g: groupId }),
+    }]);
+  }
+
+  return { inline_keyboard: keyboard };
 }
 
 /**
@@ -3728,10 +3834,11 @@ export async function notifyUser(
   senderName?: string,
   senderUsername?: string,
   media?: MediaItem[],
-  reasoning?: string
+  reasoning?: string,
+  subscriptionId?: number
 ): Promise<void> {
   try {
-    const keyboard = buildNotificationKeyboard(messageId, groupId);
+    const keyboard = buildNotificationKeyboard(messageId, groupId, subscriptionId);
 
     // If we have media, send with photo/video
     if (media && media.length > 0) {

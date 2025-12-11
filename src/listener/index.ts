@@ -519,7 +519,8 @@ async function processMessage(msg: Message): Promise<void> {
             incomingMsg.sender_name,
             incomingMsg.sender_username,
             notificationMedia,
-            verification.reasoning
+            verification.reasoning,
+            subscription.id
           );
           listenerLog.info(
             {
@@ -594,7 +595,8 @@ async function processMessage(msg: Message): Promise<void> {
             incomingMsg.sender_name,
             incomingMsg.sender_username,
             incomingMsg.media,
-            `Высокий скор совпадения: ${((candidate.ngramScore ?? 0) * 100).toFixed(0)}%`
+            `Высокий скор совпадения: ${((candidate.ngramScore ?? 0) * 100).toFixed(0)}%`,
+            subscription.id
           );
         }
       }
