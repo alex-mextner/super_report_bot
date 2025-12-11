@@ -1,5 +1,5 @@
 import { llmLog } from "../logger.ts";
-import { verifyWithDeepSeek } from "./deepseek.ts";
+import { verifyWithDeepSeek, verifyBatchWithDeepSeek } from "./deepseek.ts";
 import { verifyWithVision } from "./vision.ts";
 import type { Subscription, IncomingMessage } from "../types.ts";
 
@@ -159,6 +159,119 @@ export async function verifyMatches(
       });
     }
   }
+
+  return results;
+}
+
+export interface BatchMessageInput {
+  index: number;
+  message: IncomingMessage;
+}
+
+/**
+ * Batch verify multiple messages against a single subscription
+ * Optimized for history scanning: batch text-only messages, process photos individually
+ *
+ * @param messages - array of messages with indices
+ * @param subscription - the subscription to verify against
+ * @returns Map from message index to verification result
+ */
+export async function verifyMatchBatch(
+  messages: BatchMessageInput[],
+  subscription: Subscription
+): Promise<Map<number, VerificationResult>> {
+  const results = new Map<number, VerificationResult>();
+
+  if (messages.length === 0) {
+    return results;
+  }
+
+  // Separate messages with and without photos
+  const withPhoto: BatchMessageInput[] = [];
+  const textOnly: BatchMessageInput[] = [];
+
+  for (const item of messages) {
+    const hasPhoto = item.message.media?.some((m) => m.type === "photo");
+    if (hasPhoto) {
+      withPhoto.push(item);
+    } else {
+      textOnly.push(item);
+    }
+  }
+
+  llmLog.info(
+    {
+      total: messages.length,
+      withPhoto: withPhoto.length,
+      textOnly: textOnly.length,
+      subscriptionId: subscription.id,
+    },
+    "Starting batch verification"
+  );
+
+  // Process text-only messages in batch
+  if (textOnly.length > 0) {
+    try {
+      const batchInput = textOnly.map((item) => ({
+        index: item.index,
+        text: item.message.text,
+      }));
+
+      const batchResults = await verifyBatchWithDeepSeek(
+        batchInput,
+        subscription.llm_description
+      );
+
+      for (const result of batchResults) {
+        const isMatch = result.isMatch && result.confidence >= DEEPSEEK_CONFIDENCE_THRESHOLD;
+        results.set(result.index, {
+          isMatch,
+          confidence: result.confidence,
+          label: isMatch ? "batch_match" : "batch_no_match",
+          reasoning: result.reasoning,
+        });
+      }
+    } catch (error) {
+      llmLog.error({ error, count: textOnly.length }, "Batch verification failed, falling back to sequential");
+      // Fallback: process sequentially
+      for (const item of textOnly) {
+        try {
+          const result = await verifyMatch(item.message, subscription);
+          results.set(item.index, result);
+        } catch {
+          results.set(item.index, {
+            isMatch: false,
+            confidence: 0,
+            label: "error",
+          });
+        }
+      }
+    }
+  }
+
+  // Process messages with photos individually (need Vision API)
+  for (const item of withPhoto) {
+    try {
+      const result = await verifyMatch(item.message, subscription);
+      results.set(item.index, result);
+    } catch (error) {
+      llmLog.error({ error, index: item.index }, "Vision verification failed");
+      results.set(item.index, {
+        isMatch: false,
+        confidence: 0,
+        label: "error",
+        reasoning: "📷 Не удалось проанализировать фото",
+      });
+    }
+  }
+
+  llmLog.info(
+    {
+      total: messages.length,
+      matched: Array.from(results.values()).filter((r) => r.isMatch).length,
+    },
+    "Batch verification complete"
+  );
 
   return results;
 }

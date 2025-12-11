@@ -2,7 +2,8 @@ import { TelegramClient, Message, ForumTopic } from "@mtcute/bun";
 import { tl } from "@mtcute/bun";
 import { queries } from "../db/index.ts";
 import { matchMessageAgainstAll, getPassedMatches } from "../matcher/index.ts";
-import { verifyMatch } from "../llm/verify.ts";
+import { verifyMatch, verifyMatchBatch } from "../llm/verify.ts";
+import { semanticSearch, isSemanticSearchAvailable } from "../embeddings/search.ts";
 import { notifyUser } from "../bot/index.ts";
 import { listenerLog } from "../logger.ts";
 import type { IncomingMessage, Subscription, MediaItem } from "../types.ts";
@@ -1091,121 +1092,185 @@ export async function scanFromCache(
     return { matches: [], total: 0, processed: 0 };
   }
 
-  // Wait for cache to be ready for all groups
-  for (const groupId of groupIds) {
-    let waitCount = 0;
-    while (!isCacheReady(groupId)) {
-      waitCount++;
-      if (waitCount === 1) {
-        listenerLog.info({ groupId }, "Waiting for cache to be ready...");
-      }
-      await sleep(1000);
-
-      // Timeout after 5 minutes
-      if (waitCount > 300) {
-        listenerLog.warn({ groupId }, "Cache wait timeout, skipping group");
-        break;
-      }
-    }
-  }
-
-  // Phase 1: Collect n-gram candidates (cheap)
-  interface NgramCandidate {
-    msg: CachedMessage;
-    incomingMsg: IncomingMessage;
+  // Phase 1: Find candidates via semantic search (fast, uses embeddings in SQLite)
+  interface SearchCandidate {
+    id: number;
+    messageId: number;
+    groupId: number;
+    groupTitle: string;
+    text: string;
     score: number;
+    senderName?: string;
+    senderUsername?: string;
   }
-  const ngramCandidates: NgramCandidate[] = [];
+
+  let candidates: SearchCandidate[] = [];
   let processedCount = 0;
+  const useSemanticSearch = await isSemanticSearchAvailable();
 
-  for (const groupId of groupIds) {
-    if (!isCacheReady(groupId)) continue;
+  if (useSemanticSearch) {
+    // Semantic search: fast vector search in SQLite
+    listenerLog.info({ subscriptionId, groupIds }, "Using semantic search for history scan");
 
-    const messages = getMessages(groupId);
-    listenerLog.debug({ groupId, messageCount: messages.length }, "Scanning cached messages");
+    try {
+      const searchResults = await semanticSearch(
+        subscription.llm_description,
+        MAX_LLM_VERIFICATIONS * 2, // fetch extra for deduplication
+        groupIds.length > 0 ? groupIds : undefined
+      );
 
-    for (const msg of messages) {
-      processedCount++;
+      processedCount = searchResults.length;
 
-      // Check deduplication
-      if (queries.isMessageMatched(subscriptionId, msg.id, groupId)) {
-        continue;
-      }
+      // Filter out already matched and convert to candidates
+      for (const result of searchResults) {
+        if (queries.isMessageMatched(subscriptionId, result.messageId, result.groupId)) {
+          continue;
+        }
 
-      // Convert to IncomingMessage format
-      const incomingMsg: IncomingMessage = {
-        id: msg.id,
-        group_id: msg.groupId,
-        group_title: msg.groupTitle,
-        text: msg.text,
-        sender_name: msg.senderName || "Unknown",
-        sender_username: msg.senderUsername,
-        timestamp: new Date(msg.date * 1000),
-      };
-
-      // N-gram + semantic matching (cheap, local)
-      const candidates = await matchMessageAgainstAll(incomingMsg, [subscription]);
-      if (candidates.length === 0) continue;
-
-      const topCandidate = candidates[0];
-      if (topCandidate) {
-        ngramCandidates.push({
-          msg,
-          incomingMsg,
-          score: topCandidate.ngramScore ?? 0,
+        candidates.push({
+          id: result.id,
+          messageId: result.messageId,
+          groupId: result.groupId,
+          groupTitle: result.groupTitle ?? "",
+          text: result.text,
+          score: 1 - result.distance, // distance → score
+          senderName: result.senderName ?? undefined,
+          senderUsername: result.senderUsername ?? undefined,
         });
       }
+
+      // Limit to max verifications
+      candidates = candidates.slice(0, MAX_LLM_VERIFICATIONS);
+    } catch (error) {
+      listenerLog.warn({ error }, "Semantic search failed, falling back to N-gram");
+      candidates = [];
     }
   }
 
-  // Sort by n-gram score descending
-  ngramCandidates.sort((a, b) => b.score - a.score);
+  // Fallback: N-gram search if semantic unavailable or failed
+  if (candidates.length === 0 && !useSemanticSearch) {
+    listenerLog.info({ subscriptionId, groupIds }, "Using N-gram fallback for history scan");
 
-  // Phase 2: LLM verification only for top candidates (expensive)
-  const topCandidates = ngramCandidates.slice(0, MAX_LLM_VERIFICATIONS);
-  const allMatches: HistoryScanMatch[] = [];
-  let llmMatchCount = 0;
+    for (const groupId of groupIds) {
+      const messages = getMessages(groupId);
+      listenerLog.debug({ groupId, messageCount: messages.length }, "Scanning cached messages");
+
+      for (const msg of messages) {
+        processedCount++;
+
+        if (queries.isMessageMatched(subscriptionId, msg.id, groupId)) {
+          continue;
+        }
+
+        const incomingMsg: IncomingMessage = {
+          id: msg.id,
+          group_id: msg.groupId,
+          group_title: msg.groupTitle,
+          text: msg.text,
+          sender_name: msg.senderName || "Unknown",
+          sender_username: msg.senderUsername,
+          timestamp: new Date(msg.date * 1000),
+        };
+
+        const matchResults = await matchMessageAgainstAll(incomingMsg, [subscription]);
+        if (matchResults.length > 0 && matchResults[0]) {
+          candidates.push({
+            id: 0,
+            messageId: msg.id,
+            groupId: msg.groupId,
+            groupTitle: msg.groupTitle,
+            text: msg.text,
+            score: matchResults[0].ngramScore ?? 0,
+            senderName: msg.senderName,
+            senderUsername: msg.senderUsername,
+          });
+        }
+      }
+    }
+
+    // Sort by score and limit
+    candidates.sort((a, b) => b.score - a.score);
+    candidates = candidates.slice(0, MAX_LLM_VERIFICATIONS);
+  }
 
   listenerLog.info({
-    ngramCandidates: ngramCandidates.length,
-    verifying: topCandidates.length,
-  }, "N-gram phase complete, starting LLM verification");
+    candidates: candidates.length,
+    processed: processedCount,
+    method: useSemanticSearch ? "semantic" : "ngram",
+  }, "Phase 1 complete, starting batch LLM verification");
 
-  for (const { msg, incomingMsg, score } of topCandidates) {
+  // Phase 2: Batch LLM verification
+  const allMatches: HistoryScanMatch[] = [];
+
+  if (candidates.length > 0) {
+    // Prepare batch input
+    const batchInput = candidates.map((c, index) => ({
+      index,
+      message: {
+        id: c.messageId,
+        group_id: c.groupId,
+        group_title: c.groupTitle,
+        text: c.text,
+        sender_name: c.senderName || "Unknown",
+        sender_username: c.senderUsername,
+        timestamp: new Date(),
+      } as IncomingMessage,
+    }));
+
     try {
-      const verification = await verifyMatch(incomingMsg, subscription);
+      const batchResults = await verifyMatchBatch(batchInput, subscription);
 
-      if (verification.isMatch) {
-        llmMatchCount++;
-        allMatches.push({
-          messageId: msg.id,
-          groupId: msg.groupId,
-          groupTitle: msg.groupTitle,
-          text: msg.text,
-          score,
-          senderName: msg.senderName,
-          senderUsername: msg.senderUsername,
-          reasoning: verification.reasoning,
-        });
-        queries.markMessageMatched(subscriptionId, msg.id, msg.groupId);
+      for (const [index, result] of batchResults) {
+        const candidate = candidates[index];
+        if (!candidate) continue;
+
+        if (result.isMatch) {
+          allMatches.push({
+            messageId: candidate.messageId,
+            groupId: candidate.groupId,
+            groupTitle: candidate.groupTitle,
+            text: candidate.text,
+            score: candidate.score,
+            senderName: candidate.senderName,
+            senderUsername: candidate.senderUsername,
+            reasoning: result.reasoning,
+          });
+          queries.markMessageMatched(subscriptionId, candidate.messageId, candidate.groupId);
+        }
       }
     } catch (error) {
-      // On LLM error, use high n-gram score threshold only
-      if (score > 0.8) {
-        llmMatchCount++;
-        allMatches.push({
-          messageId: msg.id,
-          groupId: msg.groupId,
-          groupTitle: msg.groupTitle,
-          text: msg.text,
-          score,
-          senderName: msg.senderName,
-          senderUsername: msg.senderUsername,
-          reasoning: `Высокий скор совпадения: ${(score * 100).toFixed(0)}%`,
-        });
-        queries.markMessageMatched(subscriptionId, msg.id, msg.groupId);
+      listenerLog.error({ error }, "Batch verification failed, falling back to sequential");
 
-        listenerLog.warn({ msgId: msg.id, score: score.toFixed(3) }, "LLM error, high score fallback");
+      // Fallback: sequential verification
+      for (const candidate of candidates) {
+        try {
+          const incomingMsg: IncomingMessage = {
+            id: candidate.messageId,
+            group_id: candidate.groupId,
+            group_title: candidate.groupTitle,
+            text: candidate.text,
+            sender_name: candidate.senderName || "Unknown",
+            sender_username: candidate.senderUsername,
+            timestamp: new Date(),
+          };
+
+          const verification = await verifyMatch(incomingMsg, subscription);
+          if (verification.isMatch) {
+            allMatches.push({
+              messageId: candidate.messageId,
+              groupId: candidate.groupId,
+              groupTitle: candidate.groupTitle,
+              text: candidate.text,
+              score: candidate.score,
+              senderName: candidate.senderName,
+              senderUsername: candidate.senderUsername,
+              reasoning: verification.reasoning,
+            });
+            queries.markMessageMatched(subscriptionId, candidate.messageId, candidate.groupId);
+          }
+        } catch {
+          // Skip on error
+        }
       }
     }
   }
@@ -1220,11 +1285,10 @@ export async function scanFromCache(
     {
       subscriptionId,
       processed: processedCount,
-      ngramCandidates: ngramCandidates.length,
-      llmVerified: topCandidates.length,
-      llmMatches: llmMatchCount,
-      total: allMatches.length,
+      candidates: candidates.length,
+      matches: allMatches.length,
       returned: paginatedMatches.length,
+      method: useSemanticSearch ? "semantic" : "ngram",
     },
     "Cache scan complete"
   );
