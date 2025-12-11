@@ -1,4 +1,4 @@
-import { hf, MODELS, withRetry } from "./index.ts";
+import { chatWithDeepSeek, type ChatMessage } from "./deepseek.ts";
 import { llmLog } from "../logger.ts";
 
 export interface EditInterpretationResult {
@@ -80,7 +80,7 @@ export async function interpretEditCommand(
   // Limit conversation history to last 6 messages to avoid token overflow
   const recentHistory = conversationHistory.slice(-6);
 
-  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+  const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt },
     ...recentHistory.map((m) => ({
       role: m.role as "user" | "assistant",
@@ -89,24 +89,12 @@ export async function interpretEditCommand(
     { role: "user", content: command },
   ];
 
-  const response = await withRetry(async () => {
-    const result = await hf.chatCompletion({
-      model: MODELS.DEEPSEEK_R1,
-      provider: "novita",
-      messages,
-      max_tokens: 2000,
-      temperature: 0.3, // Lower temperature for accuracy
-    });
-    return result.choices[0]?.message?.content || "";
-  });
-
-  // DeepSeek R1 may include <think>...</think> reasoning blocks — strip them
-  const cleanedResponse = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  const response = await chatWithDeepSeek(messages, { temperature: 0.3 });
 
   // Parse JSON from response
-  const jsonMatch = cleanedResponse.match(/\{[\s\S]*\}/);
+  const jsonMatch = response.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
-    llmLog.warn({ response: cleanedResponse.slice(0, 200) }, "Failed to parse edit response");
+    llmLog.warn({ response: response.slice(0, 200) }, "Failed to parse edit response");
     // Return current values with error summary
     return {
       ...current,

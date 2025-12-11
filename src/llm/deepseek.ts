@@ -20,7 +20,7 @@ export interface DeepSeekVerificationResult {
   reasoning?: string;
 }
 
-interface ChatMessage {
+export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
 }
@@ -332,6 +332,57 @@ function parseBatchResponse(
       reasoning: "JSON parse failed",
     }));
   }
+}
+
+export interface ChatWithDeepSeekOptions {
+  temperature?: number;
+  max_tokens?: number;
+}
+
+/**
+ * Generic chat completion using DeepSeek V3 (deepseek-chat)
+ * Faster than R1, no reasoning/thinking blocks
+ */
+export async function chatWithDeepSeek(
+  messages: ChatMessage[],
+  options: ChatWithDeepSeekOptions = {}
+): Promise<string> {
+  if (!DEEPSEEK_API_KEY) {
+    throw new Error("DEEPSEEK_API_KEY not configured");
+  }
+
+  const { temperature = 0.3, max_tokens = 2000 } = options;
+
+  const response = await fetch(DEEPSEEK_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "deepseek-chat",
+      messages,
+      temperature,
+      max_tokens,
+      stream: false,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`DeepSeek API error (${response.status}): ${error}`);
+  }
+
+  const data = (await response.json()) as DeepSeekResponse;
+  const content = data.choices[0]?.message?.content;
+
+  if (!content) {
+    throw new Error("Empty response from DeepSeek");
+  }
+
+  llmLog.debug({ tokens: data.usage.total_tokens }, "DeepSeek chat completion");
+
+  return content;
 }
 
 /**
