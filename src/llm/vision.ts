@@ -141,32 +141,58 @@ export async function checkVisionHealth(): Promise<boolean> {
 export interface ListingImageAnalysis {
   description: string;
   condition: "new" | "used" | "unknown";
+  conditionDetails: string; // detailed condition description (scratches, wear, etc)
+  conditionMismatch: boolean; // true if photo contradicts listing text
+  mismatchReason: string | null; // explanation of mismatch
   suspiciousFlags: string[];
   quality: "real_photo" | "stock_photo" | "screenshot" | "unknown";
 }
 
 /**
  * Analyze listing image to describe product and detect suspicious signs
+ * @param imageBuffer - image data
+ * @param listingText - optional listing text for context and comparison
  */
 export async function analyzeListingImage(
-  imageBuffer: Uint8Array
+  imageBuffer: Uint8Array,
+  listingText?: string
 ): Promise<ListingImageAnalysis> {
   const base64Image = Buffer.from(imageBuffer).toString("base64");
   const imageDataUrl = `data:image/jpeg;base64,${base64Image}`;
 
-  const prompt = `Analyze this product listing image. Respond ONLY with JSON:
-{
-  "description": "brief product description in Russian (brand, type, color)",
-  "condition": "new" | "used" | "unknown",
-  "quality": "real_photo" | "stock_photo" | "screenshot" | "unknown",
-  "suspiciousFlags": ["list of suspicious signs in Russian, empty if none"]
-}
+  const textContext = listingText
+    ? `Текст объявления:
+${listingText.slice(0, 1000)}
 
-Detect suspicious signs:
-- Stock photo: professional lighting, white background, watermarks
-- Screenshot: phone UI, browser elements, image of another image
-- Mismatch: photo doesn't show the actual product
-- Poor quality: blurry, dark, can't see product details`;
+`
+    : "";
+
+  const prompt = `Ты анализируешь фото товара из объявления о продаже.
+
+${textContext}Проанализируй фото и определи:
+1. Что за товар (краткое описание)
+2. Состояние товара: new/used/unknown
+3. Детали состояния: царапины, потёртости, сколы, недостающие части, признаки использования
+4. Качество фото: real_photo/stock_photo/screenshot
+5. Соответствует ли фото описанию в тексте (если текст предоставлен)?
+
+Особое внимание:
+- Если текст говорит "новый/new", а на фото видны признаки использования — это расхождение
+- Если текст говорит "б/у" но фото явно стоковое — это подозрительно
+- Если не видно товар чётко — это подозрительно
+- Стоковое фото: профессиональное освещение, белый фон, водяные знаки
+- Скриншот: UI телефона, элементы браузера
+
+Верни ТОЛЬКО JSON:
+{
+  "description": "краткое описание товара по-русски (бренд, тип, цвет)",
+  "condition": "new" | "used" | "unknown",
+  "conditionDetails": "детальное описание состояния по-русски (царапины, потёртости, комплектность)",
+  "conditionMismatch": true/false,
+  "mismatchReason": "объяснение расхождения по-русски или null если нет расхождения",
+  "quality": "real_photo" | "stock_photo" | "screenshot" | "unknown",
+  "suspiciousFlags": ["список подозрительных признаков по-русски, пустой если нет"]
+}`;
 
   try {
     const response = await withRetry(() =>
@@ -211,6 +237,9 @@ Detect suspicious signs:
     return {
       description: "",
       condition: "unknown",
+      conditionDetails: "",
+      conditionMismatch: false,
+      mismatchReason: null,
       quality: "unknown",
       suspiciousFlags: [],
     };
@@ -218,14 +247,19 @@ Detect suspicious signs:
 }
 
 function parseListingImageResponse(content: string): ListingImageAnalysis {
+  const defaultResult: ListingImageAnalysis = {
+    description: content.slice(0, 200),
+    condition: "unknown",
+    conditionDetails: "",
+    conditionMismatch: false,
+    mismatchReason: null,
+    quality: "unknown",
+    suspiciousFlags: [],
+  };
+
   const jsonMatch = content.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
-    return {
-      description: content.slice(0, 200),
-      condition: "unknown",
-      quality: "unknown",
-      suspiciousFlags: [],
-    };
+    return defaultResult;
   }
 
   try {
@@ -235,17 +269,15 @@ function parseListingImageResponse(content: string): ListingImageAnalysis {
       condition: ["new", "used", "unknown"].includes(parsed.condition)
         ? parsed.condition
         : "unknown",
+      conditionDetails: parsed.conditionDetails || "",
+      conditionMismatch: Boolean(parsed.conditionMismatch),
+      mismatchReason: parsed.mismatchReason || null,
       quality: ["real_photo", "stock_photo", "screenshot", "unknown"].includes(parsed.quality)
         ? parsed.quality
         : "unknown",
       suspiciousFlags: Array.isArray(parsed.suspiciousFlags) ? parsed.suspiciousFlags : [],
     };
   } catch {
-    return {
-      description: content.slice(0, 200),
-      condition: "unknown",
-      quality: "unknown",
-      suspiciousFlags: [],
-    };
+    return defaultResult;
   }
 }

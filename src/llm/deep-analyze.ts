@@ -639,6 +639,11 @@ function detectScamFlags(
         score += 5;
       }
     }
+    // Condition mismatch between text and photo
+    if (imageAnalysis.conditionMismatch && imageAnalysis.mismatchReason) {
+      flags.push(`Расхождение текста и фото: ${imageAnalysis.mismatchReason}`);
+      score += 20;
+    }
   }
 
   // 1. Suspiciously low price — show only the MOST severe flag
@@ -1069,7 +1074,7 @@ export async function deepAnalyze(
 
   // Step 1: Get exchange rates + analyze image (in parallel)
   const ratesPromise = getExchangeRates();
-  const imagePromise = firstPhotoPath ? analyzeImage(firstPhotoPath) : Promise.resolve(undefined);
+  const imagePromise = firstPhotoPath ? analyzeImage(firstPhotoPath, text) : Promise.resolve(undefined);
 
   const [rates, imageAnalysis] = await Promise.all([ratesPromise, imagePromise]);
 
@@ -1163,8 +1168,13 @@ export async function deepAnalyze(
 
 /**
  * Load image from file and analyze it
+ * @param photoPath - path to the image file
+ * @param listingText - listing text for context and comparison
  */
-async function analyzeImage(photoPath: string): Promise<ListingImageAnalysis | undefined> {
+async function analyzeImage(
+  photoPath: string,
+  listingText: string
+): Promise<ListingImageAnalysis | undefined> {
   try {
     const file = Bun.file(photoPath);
     if (!(await file.exists())) {
@@ -1173,7 +1183,7 @@ async function analyzeImage(photoPath: string): Promise<ListingImageAnalysis | u
     }
 
     const buffer = await file.arrayBuffer();
-    return await analyzeListingImage(new Uint8Array(buffer));
+    return await analyzeListingImage(new Uint8Array(buffer), listingText);
   } catch (error) {
     apiLog.error({ error, photoPath }, "Failed to analyze image");
     return undefined;
