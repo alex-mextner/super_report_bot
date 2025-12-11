@@ -3636,7 +3636,7 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
         }
 
         if (firstPhoto) {
-          photoPath = `data/${firstPhoto.file_path}`;
+          photoPath = `data/media/${firstPhoto.file_path}`;
         }
 
         // Run deep analysis (pass group title, photo path, and group ID for metadata)
