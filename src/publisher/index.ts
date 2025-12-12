@@ -6,8 +6,12 @@
  */
 
 import { TelegramClient } from "@mtcute/bun";
+import { mkdirSync } from "fs";
 import { queries } from "../db/index.ts";
 import { botLog } from "../logger.ts";
+
+// Ensure sessions directory exists
+mkdirSync("sessions", { recursive: true });
 
 const API_ID = Number(process.env.API_ID);
 const API_HASH = process.env.API_HASH ?? "";
@@ -19,10 +23,11 @@ if (!API_ID || !API_HASH) {
 // Active clients cache (telegramId -> client)
 const activeClients = new Map<number, TelegramClient>();
 
-// Pending auth sessions (telegramId -> { client, phone })
+// Pending auth sessions (telegramId -> { client, phone, phoneCodeHash })
 interface PendingAuth {
   client: TelegramClient;
   phone: string;
+  phoneCodeHash: string;
 }
 const pendingAuths = new Map<number, PendingAuth>();
 
@@ -86,7 +91,7 @@ export async function getClientForUser(telegramId: number): Promise<TelegramClie
 }
 
 /**
- * Start user authorization flow
+ * Start user authorization flow - sends code to user's Telegram
  */
 export async function startUserAuth(
   telegramId: number,
@@ -99,11 +104,33 @@ export async function startUserAuth(
   try {
     const client = createClient(telegramId);
 
-    // Store pending auth
-    pendingAuths.set(telegramId, { client, phone });
+    // Connect to Telegram
+    await client.connect();
 
-    botLog.info({ telegramId, phone: phone.slice(0, 5) + "***" }, "Starting user auth flow");
-    return { success: true };
+    // Send verification code
+    botLog.info({ telegramId, phone: phone.slice(0, 5) + "***" }, "Sending auth code");
+    const sentCode = await client.sendCode({ phone });
+
+    // sendCode returns User if already authorized, SentCode otherwise
+    if ("phoneCodeHash" in sentCode) {
+      // Store pending auth with phoneCodeHash
+      pendingAuths.set(telegramId, {
+        client,
+        phone,
+        phoneCodeHash: sentCode.phoneCodeHash,
+      });
+
+      botLog.info({ telegramId }, "Auth code sent successfully");
+      return { success: true };
+    } else {
+      // Already authorized - save session
+      const sessionString = await client.exportSession();
+      queries.saveUserSession(telegramId, phone, sessionString);
+      activeClients.set(telegramId, client);
+
+      botLog.info({ telegramId, userId: sentCode.id }, "User already authorized");
+      return { success: true };
+    }
   } catch (error) {
     botLog.error({ error, telegramId }, "Failed to start auth");
     return { error: error instanceof Error ? error.message : "Failed to start auth" };
@@ -138,14 +165,21 @@ export async function completeUserAuth(
   }
 
   try {
-    const { client, phone } = pending;
+    const { client, phone, phoneCodeHash } = pending;
 
-    // Use mtcute's built-in auth flow with provided callbacks
-    const user = await client.start({
-      phone: () => phone,
-      code: () => code,
-      password: () => password || "",
-    });
+    let user;
+
+    if (password) {
+      // Complete 2FA
+      user = await client.checkPassword(password);
+    } else {
+      // Sign in with code
+      user = await client.signIn({
+        phone,
+        phoneCodeHash,
+        phoneCode: code,
+      });
+    }
 
     // Success! Export and save session
     const sessionString = await client.exportSession();
