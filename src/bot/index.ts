@@ -2703,6 +2703,23 @@ ${bold("Запрос:")} ${sub.original_query}
       break;
     }
 
+    case "show_keywords": {
+      const subscriptionId = Number(data.id);
+      const sub = queries.getSubscriptionById(subscriptionId, userId);
+      if (!sub) {
+        await context.answer({ text: "Подписка не найдена" });
+        return;
+      }
+
+      let text = `+ ${sub.positive_keywords.join(", ")}`;
+      if (sub.negative_keywords.length > 0) {
+        text += `\n− ${sub.negative_keywords.join(", ")}`;
+      }
+
+      await context.answer({ text, show_alert: true });
+      break;
+    }
+
     case "edit_positive": {
       const subscriptionId = Number(data.id);
       const sub = queries.getSubscriptionById(subscriptionId, userId);

@@ -112,6 +112,12 @@ export const subscriptionKeyboard = (
       );
       kb.row();
     }
+  } else {
+    // Normal mode: show keywords button
+    kb.text(
+      "🔑 Ключевые слова",
+      JSON.stringify({ action: "show_keywords", id: subscriptionId })
+    ).row();
   }
 
   // Pause/Resume button available in all modes
