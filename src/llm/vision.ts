@@ -17,25 +17,37 @@ export interface VisionVerificationResult {
 
 /**
  * Verify if image matches subscription description using Qwen VL
+ *
+ * @param imageBuffer - Photo data to analyze
+ * @param subscriptionDescription - What user is searching for (e.g. "стеллаж IKEA белый")
+ * @param listingText - Original listing text to understand context (e.g. "Продаю 3к квартиру...")
  */
 export async function verifyWithVision(
   imageBuffer: Uint8Array,
-  subscriptionDescription: string
+  subscriptionDescription: string,
+  listingText?: string
 ): Promise<VisionVerificationResult> {
   const base64Image = Buffer.from(imageBuffer).toString("base64");
   const imageDataUrl = `data:image/jpeg;base64,${base64Image}`;
 
-  const prompt = `You are a product classifier. Look at this image and determine if it matches this search criteria: "${subscriptionDescription}"
+  const listingContext = listingText
+    ? `\nListing text (what is actually being sold):\n"${listingText.slice(0, 500)}"\n`
+    : "";
 
-Analyze the image carefully and respond ONLY with a JSON object in this exact format:
-{"match": true/false, "confidence": 0.0-1.0, "reason": "brief explanation in Russian"}
+  const prompt = `You are a product classifier. Analyze the image and determine if it matches the search criteria.
 
-Be strict but reasonable:
+Rules:
 - Match if the product/item in the image clearly matches the search criteria
 - Don't match if the image shows something different or unrelated
 - Consider visual characteristics, brand, type, condition visible in image
 - DON'T match if the searched item is just a visible COMPONENT of a larger product (e.g. "keyboard" should NOT match laptop photo - buying laptop for keyboard is impractical; "wheels" should NOT match a car photo)
-- The item must be the MAIN product for sale, not just visible in the image`;
+- The item must be the MAIN product for sale, not just visible in the image
+- Use the listing text to understand WHAT is being sold. Objects visible in the photo but NOT mentioned as the product in listing are likely just background/staging
+
+Respond ONLY with JSON: {"match": true/false, "confidence": 0.0-1.0, "reason": "brief explanation in Russian"}
+
+Search criteria: "${subscriptionDescription}"
+${listingContext}`;
 
   try {
     const response = await withRetry(() =>

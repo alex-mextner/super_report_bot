@@ -36,7 +36,7 @@ export async function verifyMatch(
   if (hasPhoto) {
     try {
       const firstPhoto = message.media!.find((m) => m.type === "photo")!;
-      const visionResult = await verifyWithVision(firstPhoto.buffer, description);
+      const visionResult = await verifyWithVision(firstPhoto.buffer, description, text);
 
       llmLog.debug(
         {
