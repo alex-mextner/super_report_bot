@@ -123,6 +123,8 @@ import {
   handlePublishCommand,
   handleConnectTelegram,
   handlePublicationText,
+  handlePublicationPhoto,
+  handleContentDone,
   handleCreatePublication,
   handlePublishToPreset,
   handleConfirmPublication,
@@ -1508,6 +1510,16 @@ bot.on("message", async (context) => {
     // Single message (not album) - process immediately
     await processForwardedMessage(context, userId, context.text || context.caption || "");
     return;
+  }
+
+  // Check publication flow for photos
+  if (isInPublicationFlow(userId) && context.photo) {
+    // Get largest photo size
+    const photo = context.photo[context.photo.length - 1];
+    if (photo) {
+      const handled = await handlePublicationPhoto(bot, userId, photo.fileId);
+      if (handled) return;
+    }
   }
 
   // For non-forward messages, require text
@@ -4742,6 +4754,15 @@ ${bold("ИИ:")} ${result.summary}
         userId,
         async () => { await context.answer(); },
         (text, keyboard) => editCallbackMessage(context, text, { parse_mode: "Markdown", ...keyboard })
+      );
+      break;
+    }
+
+    case "content_done": {
+      await handleContentDone(
+        bot,
+        userId,
+        async () => { await context.answer(); }
       );
       break;
     }

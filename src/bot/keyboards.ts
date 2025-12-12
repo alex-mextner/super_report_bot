@@ -818,3 +818,16 @@ export function cancelAuthKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
     .text("❌ Отмена", JSON.stringify({ action: "cancel_auth" }));
 }
+
+/**
+ * Content input keyboard (for publication text + photos)
+ */
+export function contentInputKeyboard(hasContent: boolean = false): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  if (hasContent) {
+    kb.text("✅ Готово", JSON.stringify({ action: "content_done" }));
+    kb.row();
+  }
+  kb.text("❌ Отмена", JSON.stringify({ action: "cancel_auth" }));
+  return kb;
+}

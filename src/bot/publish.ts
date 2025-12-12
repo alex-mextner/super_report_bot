@@ -14,6 +14,7 @@ import {
   publishPresetKeyboard,
   publishConfirmKeyboard,
   cancelAuthKeyboard,
+  contentInputKeyboard,
 } from "./keyboards.ts";
 import {
   hasActiveSession,
@@ -29,10 +30,11 @@ import { sendPaymentInvoice } from "./payments.ts";
 
 // In-memory state for publication flow
 interface PublicationState {
-  step: "awaiting_phone" | "awaiting_code" | "awaiting_password" | "awaiting_text" | "awaiting_confirm";
+  step: "awaiting_phone" | "awaiting_code" | "awaiting_password" | "awaiting_content" | "awaiting_confirm";
   phone?: string;
   presetId?: number;
   text?: string;
+  photoFileIds?: string[];
 }
 
 const publicationStates = new Map<number, PublicationState>();
@@ -209,53 +211,21 @@ export async function handlePublicationText(
       return true;
     }
 
-    case "awaiting_text": {
-      // Save text and show confirmation
-      const presetId = state.presetId;
-      if (!presetId) {
-        publicationStates.delete(userId);
-        return true;
-      }
+    case "awaiting_content": {
+      // Save/append text to state
+      const currentText = state.text || "";
+      const newText = currentText ? `${currentText}\n\n${text.trim()}` : text.trim();
 
-      // Create publication in DB
-      const publicationId = queries.createPublication({
-        telegramId: userId,
-        presetId,
-        text: text.trim(),
-      });
+      publicationStates.set(userId, { ...state, text: newText });
 
-      if (!publicationId) {
-        await bot.api.sendMessage({
-          chat_id: userId,
-          text: "❌ Ошибка создания публикации. Попробуй позже.",
-        });
-        publicationStates.delete(userId);
-        return true;
-      }
-
-      // Get preset info
-      const presets = queries.getRegionPresets();
-      const preset = presets.find((p) => p.id === presetId);
-      const presetGroups = queries.getPresetGroups(presetId);
-      const presetName = preset?.region_name || "Регион";
-
-      publicationStates.set(userId, { ...state, step: "awaiting_confirm", text: text.trim() });
-
-      const textPreview = text.trim().slice(0, 500) + (text.length > 500 ? "..." : "");
+      const photoCount = state.photoFileIds?.length || 0;
 
       await bot.api.sendMessage({
         chat_id: userId,
-        text: `📋 *Подтверди публикацию*
+        text: `✅ Текст сохранён${photoCount > 0 ? ` (+ ${photoCount} фото)` : ""}
 
-*Текст:*
-${textPreview}
-
-*Куда:* ${presetName} (${presetGroups.length} групп)
-*Цена:* 100⭐
-
-Объявление будет опубликовано от твоего имени с задержками между группами (анти-спам).`,
-        parse_mode: "Markdown",
-        reply_markup: publishConfirmKeyboard(publicationId),
+Можешь добавить ещё текст или фото, или нажми «Готово» для перехода к подтверждению.`,
+        reply_markup: contentInputKeyboard(true),
       });
       return true;
     }
@@ -263,6 +233,134 @@ ${textPreview}
     default:
       return false;
   }
+}
+
+/**
+ * Handle photo message during publication flow
+ */
+export async function handlePublicationPhoto(
+  bot: Bot,
+  userId: number,
+  photoFileId: string
+): Promise<boolean> {
+  const state = publicationStates.get(userId);
+  if (!state || state.step !== "awaiting_content") return false;
+
+  const photos = state.photoFileIds || [];
+
+  if (photos.length >= 10) {
+    await bot.api.sendMessage({
+      chat_id: userId,
+      text: "❌ Максимум 10 фото. Удали лишние или нажми «Готово».",
+      reply_markup: contentInputKeyboard(true),
+    });
+    return true;
+  }
+
+  photos.push(photoFileId);
+  publicationStates.set(userId, { ...state, photoFileIds: photos });
+
+  const hasText = !!state.text;
+
+  await bot.api.sendMessage({
+    chat_id: userId,
+    text: `📷 Фото добавлено (${photos.length}/10)${hasText ? "" : "\n\nНе забудь добавить текст объявления!"}`,
+    reply_markup: contentInputKeyboard(hasText || photos.length > 0),
+  });
+
+  return true;
+}
+
+/**
+ * Handle content_done callback - show confirmation
+ */
+export async function handleContentDone(
+  bot: Bot,
+  userId: number,
+  answerCallback: () => Promise<void>
+): Promise<void> {
+  await answerCallback();
+
+  const state = publicationStates.get(userId);
+  if (!state || state.step !== "awaiting_content") {
+    await bot.api.sendMessage({
+      chat_id: userId,
+      text: "❌ Нет активного объявления. Начни с /publish",
+    });
+    return;
+  }
+
+  if (!state.text) {
+    await bot.api.sendMessage({
+      chat_id: userId,
+      text: "❌ Добавь текст объявления!",
+      reply_markup: contentInputKeyboard(false),
+    });
+    return;
+  }
+
+  const presetId = state.presetId;
+  if (!presetId) {
+    publicationStates.delete(userId);
+    return;
+  }
+
+  // Create publication in DB
+  const publicationId = queries.createPublication({
+    telegramId: userId,
+    presetId,
+    text: state.text,
+    media: state.photoFileIds,
+  });
+
+  if (!publicationId) {
+    await bot.api.sendMessage({
+      chat_id: userId,
+      text: "❌ Ошибка создания публикации. Попробуй позже.",
+    });
+    publicationStates.delete(userId);
+    return;
+  }
+
+  // Get preset info
+  const presets = queries.getRegionPresets();
+  const preset = presets.find((p) => p.id === presetId);
+  const presetGroups = queries.getPresetGroups(presetId);
+  const presetName = preset?.region_name || "Регион";
+
+  publicationStates.set(userId, { ...state, step: "awaiting_confirm" });
+
+  const photoCount = state.photoFileIds?.length || 0;
+
+  // Show full text for review
+  await bot.api.sendMessage({
+    chat_id: userId,
+    text: `📋 *Проверь объявление перед публикацией*
+
+─────────────────
+${state.text}
+─────────────────
+
+${photoCount > 0 ? `📷 *Фото:* ${photoCount} шт.\n` : ""}
+*Куда:* ${presetName} (${presetGroups.length} групп)
+*Цена:* 100⭐`,
+    parse_mode: "Markdown",
+  });
+
+  // Explain AI flow separately
+  await bot.api.sendMessage({
+    chat_id: userId,
+    text: `🤖 *Как работает публикация:*
+
+После оплаты бот для каждой группы:
+1. Сгенерирует уникальную версию текста через AI (чтобы не выглядело как спам)
+2. Покажет тебе для проверки
+3. Отправит только после твоего подтверждения
+
+Ты сможешь отредактировать или пропустить любую группу.`,
+    parse_mode: "Markdown",
+    reply_markup: publishConfirmKeyboard(publicationId),
+  });
 }
 
 /**
@@ -317,25 +415,26 @@ export async function handlePublishToPreset(
 ): Promise<void> {
   await answerCallback();
 
-  // Set state to awaiting text
-  publicationStates.set(userId, { step: "awaiting_text", presetId });
+  // Set state to awaiting content (text + optional photos)
+  publicationStates.set(userId, { step: "awaiting_content", presetId, photoFileIds: [] });
 
   const presets = queries.getRegionPresets();
   const preset = presets.find((p) => p.id === presetId);
   const presetName = preset?.region_name || "Неизвестный регион";
 
   await editMessage(
-    `📝 *Напиши объявление*
+    `📝 *Создание объявления*
 
-Регион: ${presetName}
+*Регион:* ${presetName}
 
-Отправь текст объявления. Можешь добавить:
-• Описание товара
-• Цену
-• Контакты
+Отправь:
+• Текст объявления (описание, цена, контакты)
+• Фото (до 10 штук)
 
-Фото пока не поддерживаются.`,
-    { reply_markup: cancelAuthKeyboard() }
+Можешь отправить сначала текст, потом фото — или наоборот.
+
+Когда закончишь — нажми ✅ *Готово*`,
+    { reply_markup: contentInputKeyboard() }
   );
 }
 
