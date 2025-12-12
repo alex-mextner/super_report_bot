@@ -27,6 +27,7 @@ import {
   stopPublicationWorker,
   isPublisherEnabled,
 } from "./publisher/index.ts";
+import { recoverInterruptedPublications } from "./publisher/interactive.ts";
 
 // Re-export for external use
 export { invalidateSubscriptionsCache };
@@ -78,6 +79,7 @@ async function main() {
 
   // Recover any interrupted operations from previous run (non-blocking)
   recoverPendingOperations(bot);
+  recoverInterruptedPublications(bot);
 
   // Start MTProto listener
   try {

@@ -409,3 +409,36 @@ export function hasActivePublication(userId: number): boolean {
 export function getActivePublicationId(userId: number): number | undefined {
   return activeSessions.get(userId);
 }
+
+/**
+ * Recover interrupted publications after bot restart
+ * Call this on bot startup
+ */
+export async function recoverInterruptedPublications(bot: Bot): Promise<void> {
+  const processing = queries.getProcessingPublications();
+
+  if (processing.length === 0) {
+    botLog.info("No interrupted publications to recover");
+    return;
+  }
+
+  botLog.info({ count: processing.length }, "Recovering interrupted publications");
+
+  for (const pub of processing) {
+    // Restore session
+    activeSessions.set(pub.telegram_id, pub.id);
+
+    // Notify user
+    await bot.api.sendMessage({
+      chat_id: pub.telegram_id,
+      text: `🔄 *Бот был перезапущен*
+
+Твоя публикация продолжается!
+Прогресс: ${pub.published_groups}/${pub.total_groups} групп`,
+      parse_mode: "Markdown",
+    });
+
+    // Continue with next post
+    await processNextPost(bot, pub.telegram_id, pub.id);
+  }
+}

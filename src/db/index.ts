@@ -2245,6 +2245,30 @@ export const queries = {
     };
   },
 
+  /**
+   * Get all publications in "processing" status (for recovery after restart)
+   */
+  getProcessingPublications(): Array<{
+    id: number;
+    telegram_id: number;
+    text: string;
+    total_groups: number;
+    published_groups: number;
+  }> {
+    return db.prepare<{
+      id: number;
+      telegram_id: number;
+      text: string;
+      total_groups: number;
+      published_groups: number;
+    }, []>(`
+      SELECT p.id, u.telegram_id, p.text, p.total_groups, p.published_groups
+      FROM publications p
+      JOIN users u ON p.user_id = u.id
+      WHERE p.status = 'processing'
+    `).all();
+  },
+
   // --- Publication Limits ---
 
   getDailyPublicationCount(telegramId: number): number {
