@@ -284,7 +284,12 @@ Be strict but reasonable:
 - Don't match if the message is only tangentially related
 - Consider synonyms and related concepts
 - Ignore formatting, emoji, typos
-- Don't match if item is sold as part of something larger (e.g. "keyboard" in laptop listing, "wheels" in car listing - impractical to buy whole thing for a component)${photoWarning}`;
+- Don't match if item is sold as part of something larger (e.g. "keyboard" in laptop listing, "wheels" in car listing - impractical to buy whole thing for a component)
+
+CRITICAL - Check listing type (buy vs sell):
+- If search criteria implies BUYING (looking for a product) → DON'T match "куплю/ищу/нужен" listings (those are also buyers!)
+- If search criteria implies SELLING → DON'T match "продам/продаю" listings (those are also sellers!)
+- Match only opposite types: buyer searches → seller listings, seller searches → buyer listings${photoWarning}`;
 
   const userPrompt = `Search criteria: "${subscriptionDescription}"
 
@@ -360,7 +365,11 @@ Be strict but reasonable:
 - Don't match if the message is only tangentially related
 - Consider synonyms and related concepts
 - Ignore formatting, emoji, typos
-- Don't match if item is sold as part of something larger (e.g. "keyboard" in laptop listing - impractical to buy whole thing for a component)`;
+- Don't match if item is sold as part of something larger (e.g. "keyboard" in laptop listing - impractical to buy whole thing for a component)
+
+CRITICAL - Check listing type (buy vs sell):
+- If search criteria implies BUYING → DON'T match "куплю/ищу/нужен" listings (those are also buyers!)
+- If search criteria implies SELLING → DON'T match "продам/продаю" listings (those are also sellers!)`;
 
   const messagesJson = messages
     .map((m) => `[${m.index}]: ${m.text.slice(0, 500)}`)
