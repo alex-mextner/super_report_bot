@@ -102,12 +102,17 @@ export async function startInteractivePublication(
   // Check if we have any groups to publish to
   const availableGroups = presetGroups.length - joinResult.failed.length;
   if (availableGroups === 0) {
+    queries.updatePublicationStatus(publicationId, "failed", "Could not join any groups");
+    queries.grantPublicationCredit(userId);
     await bot.api.sendMessage({
       chat_id: userId,
-      text: "❌ Не удалось вступить ни в одну группу. Публикация отменена.",
+      text: `❌ *Не удалось вступить ни в одну группу*
+
+Публикация отменена.
+
+🎁 Мы начислили тебе *бесплатную публикацию* — используй её когда вступишь в группы вручную!`,
+      parse_mode: "Markdown",
     });
-    queries.updatePublicationStatus(publicationId, "failed", "Could not join any groups");
-    queries.grantPublicationCredit(userId); // Refund
     return;
   }
 

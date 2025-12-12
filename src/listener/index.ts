@@ -853,6 +853,9 @@ export async function startListener(): Promise<void> {
 
   listenerLog.info({ userId: user.id, name: user.displayName }, "Logged in");
 
+  // Sync group usernames from dialogs (for publisher to join groups)
+  syncGroupUsernames().catch((e) => listenerLog.error({ err: e }, "Failed to sync usernames"));
+
   // Setup handlers immediately - bot is ready
   setupMessageHandler();
 
@@ -1489,11 +1492,17 @@ export async function isUserbotMember(chatId: number): Promise<boolean> {
 // Join a chat by username or invite link
 export async function joinGroupByUserbot(
   target: string // @username or t.me/+XXX invite link
-): Promise<{ success: true; chatId: number; title: string } | { success: false; error: string }> {
+): Promise<{ success: true; chatId: number; title: string; username?: string } | { success: false; error: string }> {
   try {
     const chat = await mtClient.joinChat(target);
-    listenerLog.info({ chatId: chat.id, title: chat.title, target }, "Userbot joined chat");
-    return { success: true, chatId: chat.id, title: chat.title || "" };
+    const title = chat.title || "";
+    const username = (chat as { username?: string }).username;
+    listenerLog.info({ chatId: chat.id, title, username, target }, "Userbot joined chat");
+
+    // Save group info to DB immediately
+    queries.upsertGroupInfo(chat.id, title, username || null);
+
+    return { success: true, chatId: chat.id, title, username };
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
     listenerLog.error({ err: error, target }, "Failed to join chat");
@@ -1502,7 +1511,13 @@ export async function joinGroupByUserbot(
       // Already member - try to get chat info
       try {
         const chat = await mtClient.getChat(target);
-        return { success: true, chatId: chat.id, title: chat.title || "" };
+        const title = chat.title || "";
+        const username = (chat as { username?: string }).username;
+
+        // Save group info to DB
+        queries.upsertGroupInfo(chat.id, title, username || null);
+
+        return { success: true, chatId: chat.id, title, username };
       } catch {
         return { success: false, error: "Already member but cannot get info" };
       }
@@ -1552,4 +1567,71 @@ export async function ensureUserbotInGroup(
   }
 
   return { success: false, error: "Нет username или invite link для присоединения" };
+}
+
+/**
+ * Sync group info (title and username) from MTProto dialogs to database
+ * Call this to populate group info for groups the userbot is in
+ */
+export async function syncGroupUsernames(): Promise<{ synced: number; errors: number }> {
+  let synced = 0;
+  let errors = 0;
+
+  try {
+    listenerLog.info("Starting group info sync...");
+
+    for await (const dialog of mtClient.iterDialogs({ limit: 500 })) {
+      const peer = dialog.peer;
+
+      // Skip non-groups
+      if (peer.type !== "chat") continue;
+      const chatType = peer.chatType;
+      if (chatType !== "supergroup" && chatType !== "channel") continue;
+
+      const title = peer.title || null;
+      const username = (peer as { username?: string }).username || null;
+
+      // Skip if no useful info
+      if (!title && !username) continue;
+
+      try {
+        // Upsert group info (creates if not exists)
+        queries.upsertGroupInfo(peer.id, title, username);
+        synced++;
+        listenerLog.debug({ chatId: peer.id, title, username }, "Synced group info");
+      } catch (err) {
+        errors++;
+        listenerLog.warn({ err, chatId: peer.id }, "Failed to sync group info");
+      }
+    }
+
+    listenerLog.info({ synced, errors }, "Group info sync complete");
+    return { synced, errors };
+  } catch (error) {
+    listenerLog.error({ error }, "Failed to sync group info");
+    return { synced, errors: errors + 1 };
+  }
+}
+
+/**
+ * Get group info by ID using MTProto
+ */
+export async function getGroupInfo(groupId: number): Promise<{
+  id: number;
+  title: string;
+  username?: string;
+} | null> {
+  try {
+    const peer = await mtClient.resolvePeer(groupId);
+    const chat = await mtClient.getChat(peer);
+
+    return {
+      id: chat.id,
+      title: chat.title || "Unknown",
+      username: (chat as { username?: string }).username,
+    };
+  } catch (error) {
+    listenerLog.warn({ error, groupId }, "Failed to get group info");
+    return null;
+  }
 }

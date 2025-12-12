@@ -618,6 +618,20 @@ export const queries = {
   },
 
   /**
+   * Upsert group basic info (title and username)
+   * Creates the group if it doesn't exist, updates if it does
+   */
+  upsertGroupInfo(telegramId: number, title: string | null, username: string | null): void {
+    db.prepare(`
+      INSERT INTO groups (telegram_id, title, username)
+      VALUES (?, ?, ?)
+      ON CONFLICT(telegram_id) DO UPDATE SET
+        title = COALESCE(excluded.title, title),
+        username = COALESCE(excluded.username, username)
+    `).run(telegramId, title, username);
+  },
+
+  /**
    * Get group title by telegram ID
    * Tries multiple sources: groups table, user_groups, monitored_groups
    */
