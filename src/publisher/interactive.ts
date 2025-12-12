@@ -12,7 +12,7 @@ import { Bot } from "gramio";
 import { InlineKeyboard } from "@gramio/keyboards";
 import { queries } from "../db/index.ts";
 import { rephraseAdText, type GroupStyleContext } from "../llm/rephrase.ts";
-import { sendTextAsUser, sendMediaAsUser, getClientForUser, analyzeGroupStyle } from "./index.ts";
+import { sendTextAsUser, sendMediaAsUser, getClientForUser, analyzeGroupStyle, joinPresetGroups } from "./index.ts";
 import { botLog } from "../logger.ts";
 
 // Track active publication sessions (userId -> publicationId)
@@ -60,10 +60,65 @@ export async function startInteractivePublication(
     return;
   }
 
+  // First, join all groups from preset
+  const joinMsg = await bot.api.sendMessage({
+    chat_id: userId,
+    text: `🔄 *Вступаю в группы...*\n\nПрогресс: 0/${presetGroups.length}`,
+    parse_mode: "Markdown",
+  });
+
+  const joinResult = await joinPresetGroups(userId, publication.preset_id, async (current, total, groupName, status) => {
+    const statusIcon = status === "joining" ? "⏳" : status === "joined" ? "✅" : "❌";
+    try {
+      await bot.api.editMessageText({
+        chat_id: userId,
+        message_id: joinMsg.message_id,
+        text: `🔄 *Вступаю в группы...*\n\nПрогресс: ${current}/${total}\n${statusIcon} ${groupName}`,
+        parse_mode: "Markdown",
+      });
+    } catch {
+      // Ignore edit errors (too fast updates)
+    }
+  });
+
+  // Delete join progress message
+  try {
+    await bot.api.deleteMessage({ chat_id: userId, message_id: joinMsg.message_id });
+  } catch {
+    // Ignore
+  }
+
+  // Report join results
+  if (joinResult.failed.length > 0) {
+    const failedList = joinResult.failed.map(f => `• ${formatGroupLink(f.groupId, f.groupName)}: ${f.error}`).join("\n");
+    await bot.api.sendMessage({
+      chat_id: userId,
+      text: `⚠️ *Не удалось вступить в некоторые группы:*\n\n${failedList}\n\nЭти группы будут пропущены.`,
+      parse_mode: "Markdown",
+      link_preview_options: { is_disabled: true },
+    });
+  }
+
+  // Check if we have any groups to publish to
+  const availableGroups = presetGroups.length - joinResult.failed.length;
+  if (availableGroups === 0) {
+    await bot.api.sendMessage({
+      chat_id: userId,
+      text: "❌ Не удалось вступить ни в одну группу. Публикация отменена.",
+    });
+    queries.updatePublicationStatus(publicationId, "failed", "Could not join any groups");
+    queries.grantPublicationCredit(userId); // Refund
+    return;
+  }
+
+  // Filter out failed groups and create posts only for joined groups
+  const joinedGroupIds = presetGroups
+    .filter(g => !joinResult.failed.some(f => f.groupId === g.group_id))
+    .map(g => g.group_id);
+
   // Set total groups and create posts
-  queries.setPublicationTotalGroups(publicationId, presetGroups.length);
-  const groupIds = presetGroups.map((g) => g.group_id);
-  queries.createPublicationPosts(publicationId, groupIds);
+  queries.setPublicationTotalGroups(publicationId, joinedGroupIds.length);
+  queries.createPublicationPosts(publicationId, joinedGroupIds);
 
   // Mark as processing
   queries.updatePublicationStatus(publicationId, "processing");
@@ -75,7 +130,7 @@ export async function startInteractivePublication(
     chat_id: userId,
     text: `🚀 *Начинаем публикацию!*
 
-Всего групп: ${presetGroups.length}
+Групп: ${joinedGroupIds.length}${joinResult.failed.length > 0 ? ` (${joinResult.failed.length} пропущено)` : ""}
 
 Сейчас для каждой группы бот сгенерирует уникальную версию текста. Ты сможешь проверить и подтвердить каждое сообщение.`,
     parse_mode: "Markdown",
@@ -83,6 +138,15 @@ export async function startInteractivePublication(
 
   // Process first post
   await processNextPost(bot, userId, publicationId);
+}
+
+/**
+ * Format group name as clickable link
+ */
+function formatGroupLink(groupId: number, groupName: string): string {
+  // Convert -100XXXXXXXXXX to XXXXXXXXXX for t.me/c/ link
+  const internalId = String(groupId).replace(/^-100/, "");
+  return `[${groupName}](https://t.me/c/${internalId}/1)`;
 }
 
 /**
@@ -210,9 +274,11 @@ async function showPostForApproval(
     .text("⏭️ Пропустить", JSON.stringify({ action: "pub_skip", id: postId }))
     .text("🛑 Остановить всё", JSON.stringify({ action: "pub_stop", id: post.publication_id }));
 
+  const groupLink = formatGroupLink(post.group_id, post.group_name || "Группа");
+
   await bot.api.sendMessage({
     chat_id: userId,
-    text: `📝 *${post.group_name || "Группа"}* (${progress + 1}/${publication.total_groups})
+    text: `📝 ${groupLink} (${progress + 1}/${publication.total_groups})
 
 ─────────────────
 ${post.ai_text || publication.text}
@@ -221,6 +287,7 @@ ${post.ai_text || publication.text}
 Проверь текст и выбери действие:`,
     parse_mode: "Markdown",
     reply_markup: keyboard,
+    link_preview_options: { is_disabled: true },
   });
 }
 
@@ -248,18 +315,22 @@ export async function handlePostApprove(
 
   if ("error" in result) {
     queries.updatePublicationPostStatus(postId, "failed", undefined, result.error);
+    const errorGroupLink = formatGroupLink(post.group_id, post.group_name || "Группа");
     await bot.api.sendMessage({
       chat_id: userId,
-      text: `❌ Ошибка отправки в *${post.group_name}*: ${result.error}`,
+      text: `❌ Ошибка отправки в ${errorGroupLink}: ${result.error}`,
       parse_mode: "Markdown",
+      link_preview_options: { is_disabled: true },
     });
   } else {
     queries.updatePublicationPostStatus(postId, "sent", result.messageId);
     queries.incrementPublicationProgress(post.publication_id, true);
+    const successGroupLink = formatGroupLink(post.group_id, post.group_name || "Группа");
     await bot.api.sendMessage({
       chat_id: userId,
-      text: `✅ Отправлено в *${post.group_name}*`,
+      text: `✅ Отправлено в ${successGroupLink}`,
       parse_mode: "Markdown",
+      link_preview_options: { is_disabled: true },
     });
   }
 
@@ -283,10 +354,12 @@ export async function handlePostSkip(
 
   queries.updatePublicationPostStatus(postId, "skipped");
 
+  const skipGroupLink = formatGroupLink(post.group_id, post.group_name || "Группа");
   await bot.api.sendMessage({
     chat_id: userId,
-    text: `⏭️ Пропущено: *${post.group_name}*`,
+    text: `⏭️ Пропущено: ${skipGroupLink}`,
     parse_mode: "Markdown",
+    link_preview_options: { is_disabled: true },
   });
 
   // Process next
@@ -310,9 +383,10 @@ export async function handlePostEdit(
   // Store editing session
   editingSessions.set(userId, postId);
 
+  const editGroupLink = formatGroupLink(post.group_id, post.group_name || "Группа");
   await bot.api.sendMessage({
     chat_id: userId,
-    text: `✏️ *Редактирование для ${post.group_name}*
+    text: `✏️ *Редактирование для* ${editGroupLink}
 
 Отправь исправленный текст:
 
@@ -320,6 +394,7 @@ export async function handlePostEdit(
 ${post.ai_text || publication.text}
 ─────────────────`,
     parse_mode: "Markdown",
+    link_preview_options: { is_disabled: true },
     reply_markup: new InlineKeyboard()
       .text("❌ Отмена", JSON.stringify({ action: "pub_cancel_edit", id: postId })),
   });

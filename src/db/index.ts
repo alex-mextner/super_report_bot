@@ -604,6 +604,20 @@ export const queries = {
   },
 
   /**
+   * Get group by telegram ID (alias for getGroupMetadata, used by publisher)
+   */
+  getGroupByTelegramId(telegramId: number): GroupMetadata | null {
+    return stmts.getGroupMetadata.get(telegramId) ?? null;
+  },
+
+  /**
+   * Update group username
+   */
+  updateGroupUsername(telegramId: number, username: string | null): void {
+    db.prepare("UPDATE groups SET username = ? WHERE telegram_id = ?").run(username, telegramId);
+  },
+
+  /**
    * Get group title by telegram ID
    * Tries multiple sources: groups table, user_groups, monitored_groups
    */

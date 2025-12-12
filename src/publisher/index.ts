@@ -336,6 +336,127 @@ export async function sendMediaAsUser(
 }
 
 /**
+ * Join a group/channel using user's account
+ * Supports both public (via username/link) and groups by ID (if invite hash available)
+ */
+export async function joinGroupAsUser(
+  telegramId: number,
+  groupId: number
+): Promise<{ success: true } | { error: string; canRetry?: boolean }> {
+  const client = await getClientForUser(telegramId);
+  if (!client) {
+    return { error: "No active session", canRetry: false };
+  }
+
+  try {
+    // First check if already a member by trying to resolve
+    try {
+      await client.resolvePeer(groupId);
+      // If we can resolve, we're likely already a member
+      botLog.debug({ telegramId, groupId }, "Already member of group");
+      return { success: true };
+    } catch {
+      // Not in cache - need to join
+    }
+
+    // Fetch dialogs to populate cache first
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    for await (const _ of client.iterDialogs({ limit: 200 })) {
+      // Just iterate to populate cache
+    }
+
+    // Try to resolve again after fetching dialogs
+    try {
+      await client.resolvePeer(groupId);
+      botLog.debug({ telegramId, groupId }, "Found group in dialogs");
+      return { success: true };
+    } catch {
+      // Still not found - try to join by ID (for public supergroups)
+    }
+
+    // For public groups, we need to get the username from our DB
+    const groupInfo = queries.getGroupByTelegramId(groupId);
+    if (groupInfo?.username) {
+      // Join by username
+      botLog.info({ telegramId, groupId, username: groupInfo.username }, "Joining group by username");
+      await client.joinChat(groupInfo.username);
+      return { success: true };
+    }
+
+    // Try joining directly by ID (works for some public supergroups)
+    try {
+      botLog.info({ telegramId, groupId }, "Attempting to join group by ID");
+      await client.joinChat(groupId);
+      return { success: true };
+    } catch (joinError) {
+      const msg = joinError instanceof Error ? joinError.message : String(joinError);
+
+      // Check for specific errors
+      if (msg.includes("INVITE_REQUEST_SENT")) {
+        return { error: "Заявка на вступление отправлена. Дождись одобрения админа.", canRetry: true };
+      }
+      if (msg.includes("USER_ALREADY_PARTICIPANT")) {
+        return { success: true };
+      }
+      if (msg.includes("CHANNELS_TOO_MUCH")) {
+        return { error: "Ты состоишь в слишком многих группах. Выйди из некоторых и попробуй снова.", canRetry: false };
+      }
+      if (msg.includes("CHAT_WRITE_FORBIDDEN")) {
+        return { error: "В этой группе запрещено писать.", canRetry: false };
+      }
+
+      throw joinError;
+    }
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : "Join failed";
+    botLog.error({ error, telegramId, groupId }, "Failed to join group");
+    return { error: errorMsg, canRetry: true };
+  }
+}
+
+/**
+ * Join all groups from a preset
+ * Returns list of groups that failed to join
+ */
+export async function joinPresetGroups(
+  telegramId: number,
+  presetId: number,
+  onProgress?: (current: number, total: number, groupName: string, status: "joining" | "joined" | "failed") => Promise<void>
+): Promise<{ joined: number; failed: Array<{ groupId: number; groupName: string; error: string }> }> {
+  const presetGroups = queries.getPresetGroups(presetId);
+  const failed: Array<{ groupId: number; groupName: string; error: string }> = [];
+  let joined = 0;
+
+  for (let i = 0; i < presetGroups.length; i++) {
+    const pg = presetGroups[i]!;
+    const groupName = queries.getGroupTitle(pg.group_id) || `Группа ${pg.group_id}`;
+
+    if (onProgress) {
+      await onProgress(i + 1, presetGroups.length, groupName, "joining");
+    }
+
+    const result = await joinGroupAsUser(telegramId, pg.group_id);
+
+    if ("error" in result) {
+      failed.push({ groupId: pg.group_id, groupName, error: result.error });
+      if (onProgress) {
+        await onProgress(i + 1, presetGroups.length, groupName, "failed");
+      }
+    } else {
+      joined++;
+      if (onProgress) {
+        await onProgress(i + 1, presetGroups.length, groupName, "joined");
+      }
+    }
+
+    // Small delay between joins to avoid flood
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+
+  return { joined, failed };
+}
+
+/**
  * Analyze group message style by fetching recent messages
  */
 export interface GroupStyleAnalysis {

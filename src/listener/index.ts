@@ -398,6 +398,11 @@ async function processMessage(msg: Message): Promise<void> {
   const incomingMsg = await toIncomingMessage(msg);
   if (!incomingMsg) return;
 
+  // Save group username if available (for publisher to join groups)
+  if (incomingMsg.group_username) {
+    queries.updateGroupUsername(incomingMsg.group_id, incomingMsg.group_username);
+  }
+
   // Enrich URL-only messages with fetched content
   // This prevents false positives from URL n-grams matching arbitrary queries
   const originalText = incomingMsg.text;

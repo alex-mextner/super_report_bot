@@ -68,6 +68,7 @@ export interface MonitoredGroup {
 export interface GroupMetadata {
   telegram_id: number;
   title: string | null;
+  username: string | null; // @username for joining (without @)
   country: string | null; // ISO 3166-1 alpha-2: 'RS', 'RU', 'AM', etc.
   city: string | null;
   currency: string | null; // ISO 4217: 'RSD', 'RUB', 'EUR', 'USD', etc.

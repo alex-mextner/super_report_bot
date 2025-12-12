@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS subscription_groups (
 CREATE TABLE IF NOT EXISTS groups (
   telegram_id INTEGER PRIMARY KEY,
   title TEXT,
+  username TEXT,             -- @username for joining (without @)
   country TEXT,              -- ISO 3166-1 alpha-2: 'RS', 'RU', 'AM', etc.
   city TEXT,                 -- 'Belgrade', 'Moscow', 'Yerevan'
   currency TEXT,             -- ISO 4217: 'RSD', 'RUB', 'EUR', 'USD', etc.
