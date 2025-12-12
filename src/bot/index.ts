@@ -2952,6 +2952,38 @@ ${bold("Описание:")} ${sub.llm_description}
       break;
     }
 
+    case "manual_ai_edit": {
+      // User wants to describe changes manually instead of using AI suggestion
+      if (currentState !== "editingSubAi" || !c.pendingAiEdit) {
+        await context.answer({ text: "Сессия истекла" });
+        return;
+      }
+
+      const { subscriptionId, current } = c.pendingAiEdit;
+      const posPreview = current.positiveKeywords.slice(0, 10).join(", ");
+      const posMore =
+        current.positiveKeywords.length > 10
+          ? ` (+${current.positiveKeywords.length - 10})`
+          : "";
+
+      await context.answer({ text: "Опиши изменения" });
+      await context.editText(
+        format`${bold("Опиши что изменить")}
+
+${bold("Текущие параметры:")}
+${bold("+ слова:")} ${code(posPreview + posMore)}
+${bold("- слова:")} ${code(current.negativeKeywords.join(", ") || "нет")}
+${bold("Описание:")} ${current.llmDescription}
+
+Напиши что изменить, например:
+• "добавь слово аренда"
+• "убери слово продажа"
+• "добавь в исключения офис"`,
+        { reply_markup: aiEditStartKeyboard(subscriptionId) }
+      );
+      break;
+    }
+
     case "correct_pending": {
       // Enter AI correction mode for pending subscription
       if (currentState !== "awaitingConfirmation" || !c.pendingSub) {

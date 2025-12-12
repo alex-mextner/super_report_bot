@@ -222,6 +222,11 @@ export function aiEditKeyboard(subscriptionId: number): InlineKeyboard {
     .text(
       "Отмена",
       JSON.stringify({ action: "cancel_ai_edit", id: subscriptionId })
+    )
+    .row()
+    .text(
+      "Плохо, скорректирую сам (с ИИ)",
+      JSON.stringify({ action: "manual_ai_edit", id: subscriptionId })
     );
 }
 
