@@ -1,4 +1,4 @@
-import { TelegramClient, Message, ForumTopic } from "@mtcute/bun";
+import { TelegramClient, Message, ForumTopic, MessageEntity } from "@mtcute/bun";
 import { tl } from "@mtcute/bun";
 import { queries } from "../db/index.ts";
 import { matchMessageAgainstAll, getPassedMatches } from "../matcher/index.ts";
@@ -215,11 +215,43 @@ async function downloadMediaFromAlbum(messages: Message[]): Promise<MediaItem[]>
   return items;
 }
 
+// Apply strikethrough markdown formatting to text based on entities
+// Converts Telegram strikethrough entities to ~~text~~ markdown
+function applyStrikethroughMarkdown(
+  text: string,
+  entities: ReadonlyArray<MessageEntity>
+): string {
+  if (!entities || entities.length === 0) return text;
+
+  // Collect strikethrough ranges
+  const ranges: Array<{ offset: number; length: number }> = [];
+  for (const entity of entities) {
+    if (entity.kind === "strikethrough") {
+      ranges.push({ offset: entity.offset, length: entity.length });
+    }
+  }
+
+  if (ranges.length === 0) return text;
+
+  // Sort by offset descending to insert from end (avoids offset shifts)
+  ranges.sort((a, b) => b.offset - a.offset);
+
+  let result = text;
+  for (const { offset, length } of ranges) {
+    const before = result.slice(0, offset);
+    const struck = result.slice(offset, offset + length);
+    const after = result.slice(offset + length);
+    result = before + "~~" + struck + "~~" + after;
+  }
+
+  return result;
+}
+
 // Extract text/caption from album messages (can be on any photo in the album)
 function extractTextFromAlbum(messages: Message[]): string {
   for (const msg of messages) {
     if (msg.text && msg.text.trim()) {
-      return msg.text;
+      return applyStrikethroughMarkdown(msg.text, msg.entities);
     }
   }
   return "";
@@ -349,7 +381,7 @@ async function toIncomingMessage(msg: Message): Promise<IncomingMessage | null> 
 
   // Download media and extract text (caption can be on any photo in album)
   let media: MediaItem[] | undefined;
-  let text = msg.text || "";
+  let text = applyStrikethroughMarkdown(msg.text || "", msg.entities);
 
   try {
     if (msg.groupedId) {

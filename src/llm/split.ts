@@ -39,6 +39,12 @@ IMPORTANT:
 - "iPhone 13 + чехол" = ONE item (bundle)
 - "iPhone 13 - 50k, Samsung S22 - 40k" = TWO items (different products)
 
+SOLD ITEMS (DO NOT INCLUDE):
+- If item NAME or entire item text is strikethrough (~~название~~) = SOLD, skip it
+- Strikethrough PRICE is OK (just a discount), don't skip
+- Items marked "Продано", "SOLD", "продан" = skip them
+- Only return items that are still for sale
+
 Return JSON only:
 {"items": ["full text of item 1", "full text of item 2", ...], "single": true/false}`;
 

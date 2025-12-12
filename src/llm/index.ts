@@ -285,6 +285,7 @@ Be strict but reasonable:
 - Consider synonyms and related concepts
 - Ignore formatting, emoji, typos
 - Don't match if item is sold as part of something larger (e.g. "keyboard" in laptop listing, "wheels" in car listing - impractical to buy whole thing for a component)
+- Don't match SOLD items: if item name is strikethrough (~~название~~), or text contains "Продано", "SOLD", "продан". Note: strikethrough price is OK (just discount).
 
 CRITICAL - Check listing type (buy vs sell):
 - If search criteria implies BUYING (looking for a product) → DON'T match "куплю/ищу/нужен" listings (those are also buyers!)
