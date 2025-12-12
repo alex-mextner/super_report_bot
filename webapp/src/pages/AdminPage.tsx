@@ -142,6 +142,11 @@ function SubscriptionRow({ sub, availableGroups, onUpdateKeywords, onUpdateGroup
         <span className={`expand-icon ${expanded ? "expanded" : ""}`}>▼</span>
       </div>
       <div className="admin-sub-query">{sub.original_query}</div>
+      {sub.llm_description && (
+        <div className="admin-sub-description">
+          {expanded ? sub.llm_description : sub.llm_description.slice(0, 100) + (sub.llm_description.length > 100 ? "..." : "")}
+        </div>
+      )}
 
       {!expanded && (
         <KeywordsDisplay
