@@ -11,8 +11,8 @@
 import { Bot } from "gramio";
 import { InlineKeyboard } from "@gramio/keyboards";
 import { queries } from "../db/index.ts";
-import { rephraseAdText } from "../llm/rephrase.ts";
-import { sendTextAsUser, sendMediaAsUser, getClientForUser } from "./index.ts";
+import { rephraseAdText, type GroupStyleContext } from "../llm/rephrase.ts";
+import { sendTextAsUser, sendMediaAsUser, getClientForUser, analyzeGroupStyle } from "./index.ts";
 import { botLog } from "../logger.ts";
 
 // Track active publication sessions (userId -> publicationId)
@@ -122,13 +122,45 @@ export async function processNextPost(
 
   const genMsg = await bot.api.sendMessage({
     chat_id: userId,
-    text: `⏳ Генерирую версию для: *${groupTitle}*...`,
+    text: `⏳ Анализирую стиль группы *${groupTitle}*...`,
     parse_mode: "Markdown",
     reply_markup: skipKeyboard,
   });
 
-  // Generate AI version
-  const result = await rephraseAdText(publication.text, groupTitle);
+  // Analyze group style first
+  const styleAnalysis = await analyzeGroupStyle(userId, nextPost.group_id);
+
+  // Build style context for rephrase
+  let styleContext: GroupStyleContext | undefined;
+  if (styleAnalysis) {
+    styleContext = {
+      groupName: groupTitle,
+      avgLength: styleAnalysis.avgLength,
+      hasEmojis: styleAnalysis.hasEmojis,
+      hasHashtags: styleAnalysis.hasHashtags,
+      styleHints: styleAnalysis.styleHints,
+      sampleMessages: styleAnalysis.sampleMessages,
+    };
+    botLog.debug({ groupTitle, styleHints: styleAnalysis.styleHints }, "Group style analyzed");
+  } else {
+    styleContext = { groupName: groupTitle };
+  }
+
+  // Update message to show generation phase
+  try {
+    await bot.api.editMessageText({
+      chat_id: userId,
+      message_id: genMsg.message_id,
+      text: `⏳ Генерирую версию для: *${groupTitle}*...`,
+      parse_mode: "Markdown",
+      reply_markup: skipKeyboard,
+    });
+  } catch {
+    // Ignore edit errors
+  }
+
+  // Generate AI version with style context
+  const result = await rephraseAdText(publication.text, styleContext);
 
   // Delete "generating" message
   try {

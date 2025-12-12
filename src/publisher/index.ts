@@ -336,6 +336,141 @@ export async function sendMediaAsUser(
 }
 
 /**
+ * Analyze group message style by fetching recent messages
+ */
+export interface GroupStyleAnalysis {
+  avgLength: number;
+  hasEmojis: boolean;
+  hasHashtags: boolean;
+  hasMentions: boolean;
+  sampleMessages: string[];
+  styleHints: string;
+}
+
+/**
+ * Fetch and analyze messages from a group to understand posting style
+ * Only considers messages older than 1 hour and filters out system/admin messages
+ */
+export async function analyzeGroupStyle(
+  telegramId: number,
+  groupId: number
+): Promise<GroupStyleAnalysis | null> {
+  const client = await getClientForUser(telegramId);
+  if (!client) return null;
+
+  try {
+    const peer = await resolvePeerWithRetry(client, groupId);
+    const oneHourAgo = Math.floor(Date.now() / 1000) - 3600;
+
+    const messages: string[] = [];
+    let totalLength = 0;
+    let emojiCount = 0;
+    let hashtagCount = 0;
+    let mentionCount = 0;
+
+    // Fetch last 50 messages
+    for await (const msg of client.iterHistory(peer, { limit: 50 })) {
+      // Skip recent messages (less than 1 hour old)
+      if (msg.date.getTime() / 1000 > oneHourAgo) continue;
+
+      // Skip non-text messages
+      if (!msg.text) continue;
+
+      const text = msg.text;
+
+      // Skip system messages and admin notices
+      if (isSystemOrAdminMessage(text)) continue;
+
+      // Skip spam/ads (very short or repetitive links)
+      if (isSpamMessage(text)) continue;
+
+      // Analyze style
+      totalLength += text.length;
+      if (/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/u.test(text)) emojiCount++;
+      if (/#\w+/.test(text)) hashtagCount++;
+      if (/@\w+/.test(text)) mentionCount++;
+
+      // Keep sample of good messages
+      if (messages.length < 5 && text.length > 50 && text.length < 1000) {
+        messages.push(text);
+      }
+
+      if (messages.length >= 5 && totalLength > 0) break;
+    }
+
+    if (messages.length === 0) {
+      return null;
+    }
+
+    const avgLength = Math.round(totalLength / messages.length);
+    const hasEmojis = emojiCount > messages.length * 0.3;
+    const hasHashtags = hashtagCount > messages.length * 0.2;
+    const hasMentions = mentionCount > messages.length * 0.1;
+
+    // Build style hints for LLM
+    const hints: string[] = [];
+    if (hasEmojis) hints.push("используют эмодзи");
+    else hints.push("редко используют эмодзи");
+    if (hasHashtags) hints.push("используют хэштеги");
+    if (avgLength < 200) hints.push("короткие сообщения");
+    else if (avgLength > 500) hints.push("длинные подробные сообщения");
+
+    return {
+      avgLength,
+      hasEmojis,
+      hasHashtags,
+      hasMentions,
+      sampleMessages: messages,
+      styleHints: hints.join(", "),
+    };
+  } catch (error) {
+    botLog.warn({ error, groupId }, "Failed to analyze group style");
+    return null;
+  }
+}
+
+/**
+ * Check if message is system/admin message
+ */
+function isSystemOrAdminMessage(text: string): boolean {
+  const lower = text.toLowerCase();
+  const patterns = [
+    /^(правила|rules)/i,
+    /^(внимание|attention)/i,
+    /^(объявление от администрации|admin notice)/i,
+    /^(запрещено|forbidden|banned)/i,
+    /добро пожаловать/i,
+    /welcome to/i,
+    /pinned message/i,
+    /закреплённое сообщение/i,
+    /^@\w+\s+(забанен|banned|kicked|удалён)/i,
+  ];
+
+  return patterns.some(p => p.test(lower));
+}
+
+/**
+ * Check if message looks like spam
+ */
+function isSpamMessage(text: string): boolean {
+  // Too short
+  if (text.length < 20) return true;
+
+  // Too many links
+  const linkCount = (text.match(/https?:\/\//g) || []).length;
+  if (linkCount > 3) return true;
+
+  // Repetitive characters
+  if (/(.)\1{5,}/.test(text)) return true;
+
+  // All caps
+  const upperRatio = (text.match(/[A-ZА-Я]/g) || []).length / text.length;
+  if (upperRatio > 0.7 && text.length > 50) return true;
+
+  return false;
+}
+
+/**
  * Disconnect and remove user client
  */
 export async function disconnectUser(telegramId: number): Promise<void> {
