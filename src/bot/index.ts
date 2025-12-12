@@ -1788,7 +1788,7 @@ ${code(unique.join(", "))}
 ${bold("Негативные:")}
 ${code(c.pendingSub.negativeKeywords.join(", ") || "нет")}
         `,
-        { reply_markup: confirmKeyboard(queryId) }
+        { reply_markup: confirmKeyboard(queryId, queries.getUserMode(userId)) }
       );
       return;
     }
@@ -1844,7 +1844,7 @@ ${code(c.pendingSub.positiveKeywords.join(", "))}
 ${bold("Негативные:")}
 ${code(unique.join(", "))}
         `,
-        { reply_markup: confirmKeyboard(queryId) }
+        { reply_markup: confirmKeyboard(queryId, queries.getUserMode(userId)) }
       );
       return;
     }
@@ -1930,7 +1930,7 @@ ${code(updatedC.pendingSub?.positiveKeywords.join(", ") || "")}
 ${bold("Негативные:")}
 ${code(updatedC.pendingSub?.negativeKeywords.join(", ") || "нет")}
         `,
-        { reply_markup: confirmKeyboard(queryId) }
+        { reply_markup: confirmKeyboard(queryId, queries.getUserMode(userId)) }
       );
       return;
     }
@@ -2511,7 +2511,7 @@ ${code(updatedC.pendingSub?.negativeKeywords.join(", ") || "нет")}
 ${bold("Описание для LLM:")}
 ${updatedC.pendingSub?.llmDescription ?? ""}
           `,
-          { reply_markup: confirmKeyboard(queryId) }
+          { reply_markup: confirmKeyboard(queryId, queries.getUserMode(userId)) }
         );
       } else {
         const list = keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
@@ -2546,7 +2546,7 @@ ${code(c.pendingSub.negativeKeywords.join(", ") || "нет")}
 ${bold("Описание для LLM:")}
 ${c.pendingSub.llmDescription}
         `,
-        { reply_markup: confirmKeyboard(queryId) }
+        { reply_markup: confirmKeyboard(queryId, queries.getUserMode(userId)) }
       );
       break;
     }
@@ -2850,7 +2850,7 @@ ${result.llm_description}
 Подтверди или измени:
         `,
         {
-          reply_markup: confirmKeyboard(queryId),
+          reply_markup: confirmKeyboard(queryId, queries.getUserMode(userId)),
         }
       );
       break;
@@ -3030,11 +3030,11 @@ ${proposed.llmDescription}
 
 Подтверди или измени:
           `,
-          { reply_markup: confirmKeyboard(queryId) }
+          { reply_markup: confirmKeyboard(queryId, mode) }
         );
       } else {
         await context.editText("Подтверди или измени:", {
-          reply_markup: confirmKeyboard(queryId),
+          reply_markup: confirmKeyboard(queryId, mode),
         });
       }
       break;
@@ -3070,7 +3070,7 @@ ${pending.llmDescription}
 Подтверди или измени:
         `,
         {
-          reply_markup: confirmKeyboard(queryId),
+          reply_markup: confirmKeyboard(queryId, queries.getUserMode(userId)),
         }
       );
       break;
