@@ -18,6 +18,7 @@ import {
 import { searchBrave, generateExamplesFromBrave } from "../llm/brave.ts";
 import {
   confirmKeyboard,
+  keywordEditConfirmKeyboard,
   subscriptionKeyboard,
   groupPickerKeyboard,
   inviteLinkKeyboard,
@@ -295,7 +296,7 @@ ${result.llm_description}
 
 Подтверди или отмени:`,
       {
-        reply_markup: confirmKeyboard(queryId, mode),
+        reply_markup: confirmKeyboard(queryId),
       }
     );
   } else {
@@ -314,7 +315,7 @@ ${result.llm_description}
 
 Подтверди или измени параметры:`,
       {
-        reply_markup: confirmKeyboard(queryId, mode),
+        reply_markup: keywordEditConfirmKeyboard(queryId),
       }
     );
   }
@@ -1788,7 +1789,7 @@ ${code(unique.join(", "))}
 ${bold("Негативные:")}
 ${code(c.pendingSub.negativeKeywords.join(", ") || "нет")}
         `,
-        { reply_markup: confirmKeyboard(queryId, queries.getUserMode(userId)) }
+        { reply_markup: keywordEditConfirmKeyboard(queryId) }
       );
       return;
     }
@@ -1844,7 +1845,7 @@ ${code(c.pendingSub.positiveKeywords.join(", "))}
 ${bold("Негативные:")}
 ${code(unique.join(", "))}
         `,
-        { reply_markup: confirmKeyboard(queryId, queries.getUserMode(userId)) }
+        { reply_markup: keywordEditConfirmKeyboard(queryId) }
       );
       return;
     }
@@ -1930,7 +1931,7 @@ ${code(updatedC.pendingSub?.positiveKeywords.join(", ") || "")}
 ${bold("Негативные:")}
 ${code(updatedC.pendingSub?.negativeKeywords.join(", ") || "нет")}
         `,
-        { reply_markup: confirmKeyboard(queryId, queries.getUserMode(userId)) }
+        { reply_markup: keywordEditConfirmKeyboard(queryId) }
       );
       return;
     }
@@ -2511,7 +2512,7 @@ ${code(updatedC.pendingSub?.negativeKeywords.join(", ") || "нет")}
 ${bold("Описание для LLM:")}
 ${updatedC.pendingSub?.llmDescription ?? ""}
           `,
-          { reply_markup: confirmKeyboard(queryId, queries.getUserMode(userId)) }
+          { reply_markup: keywordEditConfirmKeyboard(queryId) }
         );
       } else {
         const list = keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
@@ -2546,7 +2547,7 @@ ${code(c.pendingSub.negativeKeywords.join(", ") || "нет")}
 ${bold("Описание для LLM:")}
 ${c.pendingSub.llmDescription}
         `,
-        { reply_markup: confirmKeyboard(queryId, queries.getUserMode(userId)) }
+        { reply_markup: keywordEditConfirmKeyboard(queryId) }
       );
       break;
     }
@@ -2850,7 +2851,9 @@ ${result.llm_description}
 Подтверди или измени:
         `,
         {
-          reply_markup: confirmKeyboard(queryId, queries.getUserMode(userId)),
+          reply_markup: queries.getUserMode(userId) === "advanced"
+            ? keywordEditConfirmKeyboard(queryId)
+            : confirmKeyboard(queryId),
         }
       );
       break;
@@ -3030,11 +3033,11 @@ ${proposed.llmDescription}
 
 Подтверди или измени:
           `,
-          { reply_markup: confirmKeyboard(queryId, mode) }
+          { reply_markup: keywordEditConfirmKeyboard(queryId) }
         );
       } else {
         await context.editText("Подтверди или измени:", {
-          reply_markup: confirmKeyboard(queryId, mode),
+          reply_markup: confirmKeyboard(queryId),
         });
       }
       break;
@@ -3070,7 +3073,9 @@ ${pending.llmDescription}
 Подтверди или измени:
         `,
         {
-          reply_markup: confirmKeyboard(queryId, queries.getUserMode(userId)),
+          reply_markup: queries.getUserMode(userId) === "advanced"
+            ? keywordEditConfirmKeyboard(queryId)
+            : confirmKeyboard(queryId),
         }
       );
       break;

@@ -32,7 +32,7 @@ import {
   generateClarificationQuestions,
 } from "../llm/clarify";
 import { interpretEditCommand } from "../llm/edit";
-import { confirmKeyboard, skipQuestionKeyboard } from "./keyboards";
+import { confirmKeyboard, keywordEditConfirmKeyboard, skipQuestionKeyboard } from "./keyboards";
 import type { Bot } from "gramio";
 import { format, bold } from "gramio";
 
@@ -200,7 +200,9 @@ async function retryGenerateKeywords(
   await bot.api.sendMessage({
     chat_id: userId,
     text,
-    reply_markup: confirmKeyboard(queryId, mode),
+    reply_markup: mode === "advanced"
+      ? keywordEditConfirmKeyboard(queryId)
+      : confirmKeyboard(queryId),
   });
 }
 
@@ -508,6 +510,8 @@ async function retryGenerateExamples(
   await bot.api.sendMessage({
     chat_id: userId,
     text,
-    reply_markup: confirmKeyboard(queryId, mode),
+    reply_markup: mode === "advanced"
+      ? keywordEditConfirmKeyboard(queryId)
+      : confirmKeyboard(queryId),
   });
 }

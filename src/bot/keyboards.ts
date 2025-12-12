@@ -52,25 +52,30 @@ export function pendingGroupsKeyboard(groups: PendingGroup[]): InlineKeyboard {
 }
 
 /**
- * Confirmation keyboard for subscription creation
- * Both modes: Confirm + Correct + Cancel
- * Advanced mode adds: manual keyword editing
+ * Basic confirmation keyboard for subscription creation
+ * Confirm + Correct + Cancel
  */
-export const confirmKeyboard = (queryId: string, mode: UserMode = "advanced") => {
-  const kb = new InlineKeyboard()
+export const confirmKeyboard = (queryId: string) => {
+  return new InlineKeyboard()
     .text("Подтвердить", JSON.stringify({ action: "confirm", id: queryId }))
-    .text("🤖 Скорректировать", JSON.stringify({ action: "correct_pending", id: queryId }));
+    .text("🤖 Скорректировать", JSON.stringify({ action: "correct_pending", id: queryId }))
+    .row()
+    .text("Отмена", JSON.stringify({ action: "cancel", id: queryId }));
+};
 
-  if (mode === "advanced") {
-    kb.row();
-    kb.text("✏️ + слова", JSON.stringify({ action: "edit_positive_pending" }));
-    kb.text("✏️ − слова", JSON.stringify({ action: "edit_negative_pending" }));
-  }
-
-  kb.row();
-  kb.text("Отмена", JSON.stringify({ action: "cancel", id: queryId }));
-
-  return kb;
+/**
+ * Confirmation keyboard with keyword editing buttons (for advanced mode)
+ * Confirm + Correct + Edit keywords + Cancel
+ */
+export const keywordEditConfirmKeyboard = (queryId: string) => {
+  return new InlineKeyboard()
+    .text("Подтвердить", JSON.stringify({ action: "confirm", id: queryId }))
+    .text("🤖 Скорректировать", JSON.stringify({ action: "correct_pending", id: queryId }))
+    .row()
+    .text("✏️ + слова", JSON.stringify({ action: "edit_positive_pending" }))
+    .text("✏️ − слова", JSON.stringify({ action: "edit_negative_pending" }))
+    .row()
+    .text("Отмена", JSON.stringify({ action: "cancel", id: queryId }));
 };
 
 export const subscriptionKeyboard = (

@@ -15,6 +15,7 @@
 import { describe, test, expect } from "bun:test";
 import {
   confirmKeyboard,
+  keywordEditConfirmKeyboard,
   subscriptionKeyboard,
   backKeyboard,
   groupPickerKeyboard,
@@ -44,8 +45,8 @@ describe("confirmKeyboard", () => {
     expect(actions).toContain("cancel");
   });
 
-  test("advanced mode includes manual keyword editing actions", () => {
-    const keyboard = confirmKeyboard("test_id", "advanced");
+  test("keywordEditConfirmKeyboard includes manual keyword editing actions", () => {
+    const keyboard = keywordEditConfirmKeyboard("test_id");
     const json = keyboard.toJSON();
 
     const allButtons = json.inline_keyboard.flat();
@@ -58,8 +59,8 @@ describe("confirmKeyboard", () => {
     expect(actions).toContain("edit_negative_pending");
   });
 
-  test("normal mode excludes manual keyword editing", () => {
-    const keyboard = confirmKeyboard("test_id", "normal");
+  test("basic confirmKeyboard excludes manual keyword editing", () => {
+    const keyboard = confirmKeyboard("test_id");
     const json = keyboard.toJSON();
 
     const allButtons = json.inline_keyboard.flat();
