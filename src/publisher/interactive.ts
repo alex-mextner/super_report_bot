@@ -115,18 +115,20 @@ export async function processNextPost(
   // Get group name
   const groupTitle = queries.getGroupTitle(nextPost.group_id) || `Группа ${nextPost.group_id}`;
 
-  // Show "generating" message
+  // Show "generating" message with skip button
+  const skipKeyboard = new InlineKeyboard()
+    .text("⏭️ Пропустить", JSON.stringify({ action: "pub_skip", id: nextPost.id }))
+    .text("🛑 Стоп", JSON.stringify({ action: "pub_stop", id: publicationId }));
+
   const genMsg = await bot.api.sendMessage({
     chat_id: userId,
     text: `⏳ Генерирую версию для: *${groupTitle}*...`,
     parse_mode: "Markdown",
+    reply_markup: skipKeyboard,
   });
 
   // Generate AI version
   const result = await rephraseAdText(publication.text, groupTitle);
-
-  // Save AI text and mark as awaiting approval
-  queries.setPublicationPostAiText(nextPost.id, result.text, groupTitle);
 
   // Delete "generating" message
   try {
@@ -137,6 +139,16 @@ export async function processNextPost(
   } catch {
     // Ignore delete errors
   }
+
+  // Check if post was skipped/stopped while generating
+  const postAfterGen = queries.getPublicationPost(nextPost.id);
+  if (!postAfterGen || postAfterGen.status !== "pending") {
+    // User skipped or stopped - don't show approval
+    return;
+  }
+
+  // Save AI text and mark as awaiting approval
+  queries.setPublicationPostAiText(nextPost.id, result.text, groupTitle);
 
   // Show for approval
   await showPostForApproval(bot, userId, nextPost.id);
