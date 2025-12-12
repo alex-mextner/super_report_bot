@@ -3874,6 +3874,10 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
 
     case "miss": {
       // "Мимо" button - message was shown but doesn't match user intent
+      // Show feedback immediately before any DB/AI operations
+      await context.answer();
+      await context.send("⏳ Анализирую сообщение...");
+
       // Short keys s/m/g are normalized to id/msgId/grpId above
       const subscriptionId = data.id as number;
       const messageId = data.msgId as number;
@@ -3910,8 +3914,6 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
           conversation: [{ role: "user" as const, content: contextMessage }],
         },
       });
-
-      await context.answer({ text: "Анализирую..." });
 
       // Trigger AI interpretation immediately
       const currentSnake = {
