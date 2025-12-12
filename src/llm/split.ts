@@ -6,7 +6,7 @@
  */
 
 import { llmLog } from "../logger.ts";
-import { chatWithDeepSeek } from "./deepseek.ts";
+import { llmFast } from "./index.ts";
 
 export interface SplitResult {
   items: string[]; // Texts of separate items
@@ -50,13 +50,14 @@ ${text.slice(0, 3000)}
 Split into items or return as single.`;
 
   try {
-    const response = await chatWithDeepSeek(
-      [
+    const response = await llmFast({
+      messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      { temperature: 0.1, max_tokens: text.length + 500 }
-    );
+      temperature: 0.1,
+      maxTokens: text.length + 500,
+    });
 
     const result = parseSplitResponse(response, text);
 

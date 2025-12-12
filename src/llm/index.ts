@@ -1,3 +1,14 @@
+/**
+ * Unified LLM Client
+ *
+ * All LLM calls go through HuggingFace Inference API with automatic retries and fallbacks.
+ * Models are grouped by use case:
+ * - llmLight: Fast simple tasks (Qwen 72B → Qwen 4B fallback)
+ * - llmThink: Reasoning tasks (DeepSeek R1)
+ * - llmFast: Classification/verification (DeepSeek V3.2 - faster & cheaper than R1)
+ * - llmVision: Image analysis (Qwen-VL)
+ */
+
 import { InferenceClient } from "@huggingface/inference";
 import { llmLog } from "../logger.ts";
 
@@ -9,19 +20,58 @@ if (!HF_TOKEN) {
 
 export const hf = new InferenceClient(HF_TOKEN);
 
-// Models
+// =====================================================
+// Models & Providers
+// =====================================================
+
 export const MODELS = {
-  // For keyword generation (DeepSeek R1 via Novita provider)
+  // Reasoning model (DeepSeek R1 via Novita) - $0.56/$2.00 per 1M
   DEEPSEEK_R1: "deepseek-ai/DeepSeek-R1",
-  // Fast model for simple tasks (Qwen 2.5 via Nebius)
+  // Fast chat model (DeepSeek V3 via Novita) - $0.27/$0.40 per 1M
+  DEEPSEEK_V3: "deepseek-ai/DeepSeek-V3",
+  // Light model (Qwen 2.5 72B via Nebius)
   QWEN_FAST: "Qwen/Qwen2.5-72B-Instruct",
-  // Fallback for keyword generation
-  MISTRAL: "mistralai/Mistral-7B-Instruct-v0.3",
-  // For zero-shot classification (verification)
+  // Small fallback (Qwen3 4B via nscale)
+  QWEN_SMALL: "Qwen/Qwen3-4B-Instruct-2507",
+  // Vision model (Qwen-VL via Novita)
+  QWEN_VL: "Qwen/Qwen2.5-VL-72B-Instruct",
+  // Zero-shot classification
   BART_MNLI: "facebook/bart-large-mnli",
 } as const;
 
-// Rate limiting
+type HFProvider = "nebius" | "nscale" | "novita" | "fireworks-ai" | "together" | "groq" | "sambanova";
+
+interface ProviderConfig {
+  model: string;
+  provider: HFProvider;
+  retries: number;
+}
+
+// Provider chains for different use cases
+const LIGHT_PROVIDERS: ProviderConfig[] = [
+  { model: MODELS.QWEN_FAST, provider: "nebius", retries: 3 },
+  { model: MODELS.QWEN_SMALL, provider: "nscale", retries: 2 },
+];
+
+const THINK_PROVIDERS: ProviderConfig[] = [
+  { model: MODELS.DEEPSEEK_R1, provider: "novita", retries: 3 },
+  { model: MODELS.QWEN_FAST, provider: "nebius", retries: 2 }, // fallback to non-reasoning
+];
+
+const FAST_PROVIDERS: ProviderConfig[] = [
+  { model: MODELS.DEEPSEEK_V3, provider: "novita", retries: 3 },
+  { model: MODELS.QWEN_FAST, provider: "nebius", retries: 2 },
+  { model: MODELS.QWEN_SMALL, provider: "nscale", retries: 2 },
+];
+
+const VISION_PROVIDERS: ProviderConfig[] = [
+  { model: MODELS.QWEN_VL, provider: "novita", retries: 3 },
+];
+
+// =====================================================
+// Rate Limiting & Retry Logic
+// =====================================================
+
 let lastRequestTime = 0;
 const MIN_REQUEST_INTERVAL = 500; // ms
 
@@ -39,7 +89,6 @@ export async function withRateLimit<T>(fn: () => Promise<T>): Promise<T> {
   return fn();
 }
 
-// Retry with exponential backoff
 export async function withRetry<T>(
   fn: () => Promise<T>,
   maxRetries: number = 5,
@@ -54,7 +103,6 @@ export async function withRetry<T>(
       lastError = error as Error;
       const errorMsg = error instanceof Error ? error.message : String(error);
 
-      // Check HTTP status from HuggingFace ProviderApiError
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const httpStatus = (error as any)?.httpResponse?.status;
 
@@ -65,13 +113,14 @@ export async function withRetry<T>(
         errorMsg.includes("503") ||
         errorMsg.includes("504") ||
         errorMsg.includes("timeout") ||
+        errorMsg.includes("ECONNRESET") ||
+        errorMsg.includes("ETIMEDOUT") ||
         httpStatus === 429 ||
         httpStatus === 502 ||
         httpStatus === 503 ||
         httpStatus === 504;
 
       if (isRetryable && i < maxRetries - 1) {
-        // Longer delays for 504 (server timeout) — model needs more time
         const is504 = errorMsg.includes("504") || httpStatus === 504;
         const multiplier = is504 ? 3 : 2;
         const delay = baseDelay * Math.pow(multiplier, i);
@@ -85,3 +134,342 @@ export async function withRetry<T>(
 
   throw lastError;
 }
+
+// =====================================================
+// Types
+// =====================================================
+
+export type LLMMessage = {
+  role: "system" | "user" | "assistant";
+  content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+  [key: string]: unknown;
+};
+
+export interface LLMOptions {
+  messages: LLMMessage[];
+  maxTokens?: number;
+  temperature?: number;
+}
+
+// =====================================================
+// Core LLM Functions
+// =====================================================
+
+async function callWithFallback(
+  providers: ProviderConfig[],
+  messages: LLMMessage[],
+  maxTokens: number,
+  temperature: number,
+  taskName: string
+): Promise<string> {
+  let lastError: Error | null = null;
+
+  for (const config of providers) {
+    try {
+      const result = await withRetry(
+        async () => {
+          const response = await hf.chatCompletion({
+            model: config.model,
+            provider: config.provider,
+            messages: messages as Parameters<typeof hf.chatCompletion>[0]["messages"],
+            max_tokens: maxTokens,
+            temperature,
+          });
+          return response.choices[0]?.message?.content || "";
+        },
+        config.retries,
+        1000
+      );
+
+      if (result) {
+        llmLog.debug({ task: taskName, provider: config.provider, model: config.model }, "LLM success");
+        return result;
+      }
+    } catch (error) {
+      lastError = error as Error;
+      llmLog.warn(
+        { task: taskName, error: lastError.message?.slice(0, 100), provider: config.provider },
+        "LLM provider failed, trying next"
+      );
+    }
+  }
+
+  throw lastError || new Error(`All providers failed for ${taskName}`);
+}
+
+/**
+ * Light tasks: fast simple completions
+ * Best for: editing, simple Q&A, formatting
+ * Models: Qwen 72B → Qwen 4B
+ */
+export async function llmLight(options: LLMOptions): Promise<string> {
+  const { messages, maxTokens = 2000, temperature = 0.3 } = options;
+  return callWithFallback(LIGHT_PROVIDERS, messages, maxTokens, temperature, "light");
+}
+
+/**
+ * Think tasks: reasoning with chain-of-thought
+ * Best for: keyword generation, complex analysis, planning
+ * Models: DeepSeek R1 → Qwen 72B
+ */
+export async function llmThink(options: LLMOptions): Promise<string> {
+  const { messages, maxTokens = 2500, temperature = 0.6 } = options;
+  const response = await callWithFallback(THINK_PROVIDERS, messages, maxTokens, temperature, "think");
+  // Strip <think>...</think> blocks from DeepSeek R1
+  return response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+}
+
+/**
+ * Fast tasks: quick classification/verification
+ * Best for: message verification, yes/no decisions, simple classification
+ * Models: DeepSeek V3.2 → Qwen 72B → Qwen 4B
+ */
+export async function llmFast(options: LLMOptions): Promise<string> {
+  const { messages, maxTokens = 500, temperature = 0.1 } = options;
+  return callWithFallback(FAST_PROVIDERS, messages, maxTokens, temperature, "fast");
+}
+
+/**
+ * Vision tasks: image analysis
+ * Best for: photo verification, image description
+ * Models: Qwen-VL
+ */
+export async function llmVision(options: LLMOptions): Promise<string> {
+  const { messages, maxTokens = 1000, temperature = 0.3 } = options;
+  return callWithFallback(VISION_PROVIDERS, messages, maxTokens, temperature, "vision");
+}
+
+// =====================================================
+// Verification Functions (moved from deepseek.ts)
+// =====================================================
+
+export interface VerificationResult {
+  isMatch: boolean;
+  confidence: number;
+  reasoning?: string;
+}
+
+export interface BatchVerificationInput {
+  index: number;
+  text: string;
+}
+
+export interface BatchVerificationResult {
+  index: number;
+  isMatch: boolean;
+  confidence: number;
+  reasoning?: string;
+}
+
+/**
+ * Verify if a message matches a subscription description
+ * @param hasPhoto - if true, the message contains photo(s) that LLM cannot see
+ */
+export async function verifyMessage(
+  messageText: string,
+  subscriptionDescription: string,
+  hasPhoto?: boolean
+): Promise<VerificationResult> {
+  const photoWarning = hasPhoto
+    ? "\n\nIMPORTANT: This message contains photo(s) that you CANNOT see. Do NOT guess about photo content based on emojis or text descriptions. Focus ONLY on analyzing the text content itself."
+    : "";
+
+  const systemPrompt = `You are a message classifier. Your task is to determine if a message matches a search criteria.
+
+Respond ONLY with a JSON object in this exact format:
+{"match": true/false, "confidence": 0.0-1.0, "reason": "brief explanation in Russian"}
+
+Be strict but reasonable:
+- Match if the message is clearly relevant to the search criteria
+- Don't match if the message is only tangentially related
+- Consider synonyms and related concepts
+- Ignore formatting, emoji, typos
+- Don't match if item is sold as part of something larger (e.g. "keyboard" in laptop listing, "wheels" in car listing - impractical to buy whole thing for a component)${photoWarning}`;
+
+  const userPrompt = `Search criteria: "${subscriptionDescription}"
+
+Message to classify:
+"""
+${messageText.slice(0, 2000)}
+"""
+
+Does this message match the search criteria?`;
+
+  const response = await llmFast({
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    maxTokens: 200,
+    temperature: 0.1,
+  });
+
+  return parseVerificationResponse(response);
+}
+
+function parseVerificationResponse(content: string): VerificationResult {
+  const jsonMatch = content.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    const lowerContent = content.toLowerCase();
+    const isMatch = lowerContent.includes('"match": true') ||
+                    lowerContent.includes('"match":true') ||
+                    (lowerContent.includes("yes") && !lowerContent.includes("no"));
+    return {
+      isMatch,
+      confidence: isMatch ? 0.6 : 0.4,
+      reasoning: content.slice(0, 200),
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]);
+    return {
+      isMatch: Boolean(parsed.match),
+      confidence: typeof parsed.confidence === "number" ? parsed.confidence : (parsed.match ? 0.8 : 0.2),
+      reasoning: parsed.reason || parsed.reasoning,
+    };
+  } catch {
+    const isMatch = content.toLowerCase().includes('"match": true');
+    return {
+      isMatch,
+      confidence: 0.5,
+      reasoning: content.slice(0, 200),
+    };
+  }
+}
+
+/**
+ * Verify multiple messages in a single API call (batch)
+ * Much faster than individual calls for history scanning
+ */
+export async function verifyMessageBatch(
+  messages: BatchVerificationInput[],
+  subscriptionDescription: string
+): Promise<BatchVerificationResult[]> {
+  if (messages.length === 0) {
+    return [];
+  }
+
+  const systemPrompt = `You are a message classifier. Your task is to classify MULTIPLE messages against a search criteria.
+
+Respond ONLY with a JSON array. For each message, return:
+[{"index": 0, "match": true/false, "confidence": 0.0-1.0, "reason": "brief explanation in Russian"}, ...]
+
+Be strict but reasonable:
+- Match if the message is clearly relevant to the search criteria
+- Don't match if the message is only tangentially related
+- Consider synonyms and related concepts
+- Ignore formatting, emoji, typos
+- Don't match if item is sold as part of something larger (e.g. "keyboard" in laptop listing - impractical to buy whole thing for a component)`;
+
+  const messagesJson = messages
+    .map((m) => `[${m.index}]: ${m.text.slice(0, 500)}`)
+    .join("\n\n");
+
+  const userPrompt = `Search criteria: "${subscriptionDescription}"
+
+Messages to classify:
+${messagesJson}
+
+Classify each message. Return JSON array with results for all ${messages.length} messages.`;
+
+  const response = await llmFast({
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    maxTokens: 100 * messages.length,
+    temperature: 0.1,
+  });
+
+  return parseBatchResponse(response, messages);
+}
+
+function parseBatchResponse(
+  content: string,
+  originalMessages: BatchVerificationInput[]
+): BatchVerificationResult[] {
+  const jsonMatch = content.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) {
+    llmLog.warn({ content: content.slice(0, 200) }, "Failed to parse batch response as JSON array");
+    return originalMessages.map((m) => ({
+      index: m.index,
+      isMatch: false,
+      confidence: 0,
+      reasoning: "Failed to parse LLM response",
+    }));
+  }
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]) as Array<{
+      index: number;
+      match: boolean;
+      confidence?: number;
+      reason?: string;
+    }>;
+
+    const resultMap = new Map<number, BatchVerificationResult>();
+    for (const item of parsed) {
+      resultMap.set(item.index, {
+        index: item.index,
+        isMatch: Boolean(item.match),
+        confidence: typeof item.confidence === "number" ? item.confidence : (item.match ? 0.8 : 0.2),
+        reasoning: item.reason,
+      });
+    }
+
+    return originalMessages.map((m) => {
+      const result = resultMap.get(m.index);
+      if (result) return result;
+      return {
+        index: m.index,
+        isMatch: false,
+        confidence: 0,
+        reasoning: "Missing from LLM response",
+      };
+    });
+  } catch {
+    llmLog.warn({ content: content.slice(0, 200) }, "JSON parse failed for batch response");
+    return originalMessages.map((m) => ({
+      index: m.index,
+      isMatch: false,
+      confidence: 0,
+      reasoning: "JSON parse failed",
+    }));
+  }
+}
+
+// =====================================================
+// Health Check
+// =====================================================
+
+export async function checkLLMHealth(): Promise<boolean> {
+  try {
+    await llmFast({
+      messages: [{ role: "user", content: "ping" }],
+      maxTokens: 1,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// =====================================================
+// Legacy exports for backward compatibility
+// =====================================================
+
+/** @deprecated Use llmLight instead */
+export const llmChat = llmLight;
+
+/** @deprecated Use verifyMessage instead */
+export const verifyWithDeepSeek = verifyMessage;
+
+/** @deprecated Use verifyMessageBatch instead */
+export const verifyBatchWithDeepSeek = verifyMessageBatch;
+
+/** @deprecated Use LLMMessage instead */
+export type ChatMessage = LLMMessage;
+
+/** @deprecated Use LLMMessage instead */
+export type LLMChatMessage = LLMMessage;

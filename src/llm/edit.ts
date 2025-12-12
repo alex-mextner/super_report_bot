@@ -1,5 +1,4 @@
-import { chatWithDeepSeek, type ChatMessage } from "./deepseek.ts";
-import { hf, MODELS, withRetry } from "./index.ts";
+import { llmLight, type LLMMessage } from "./index.ts";
 import { llmLog } from "../logger.ts";
 
 export interface EditInterpretationResult {
@@ -98,28 +97,76 @@ function parseEditResponse(
 }
 
 /**
- * Try HuggingFace (Qwen) for fast response
+ * Simple command parser for basic operations when all LLMs fail
+ * Supports: "+ слово", "- слово", "добавь слово", "убери слово", "исключи слово"
  */
-async function tryHuggingFace(
-  systemPrompt: string,
-  messages: Array<{ role: "user" | "assistant" | "system"; content: string }>
-): Promise<string> {
-  const result = await hf.chatCompletion({
-    model: MODELS.QWEN_FAST,
-    provider: "nebius",
-    messages: [
-      { role: "system", content: systemPrompt },
-      ...messages,
-    ],
-    max_tokens: 1500,
-    temperature: 0.3,
-  });
-  return result.choices[0]?.message?.content || "";
+function trySimpleParser(
+  command: string,
+  current: CurrentParams
+): EditInterpretationResult | null {
+  const cmd = command.toLowerCase().trim();
+
+  // Pattern: "+ слово" or "добавь слово"
+  const addMatch = cmd.match(/^(?:\+|добавь|добавить)\s+(.+)$/);
+  if (addMatch?.[1]) {
+    const word = addMatch[1].trim();
+    if (!current.positive_keywords.includes(word)) {
+      return {
+        positive_keywords: [...current.positive_keywords, word],
+        negative_keywords: current.negative_keywords,
+        llm_description: current.llm_description,
+        summary: `Добавлено: ${word}`,
+      };
+    }
+    return {
+      ...current,
+      summary: `«${word}» уже есть в списке`,
+    };
+  }
+
+  // Pattern: "- слово" or "убери слово" or "удали слово"
+  const removeMatch = cmd.match(/^(?:-|убери|убрать|удали|удалить)\s+(.+)$/);
+  if (removeMatch?.[1]) {
+    const word = removeMatch[1].trim();
+    if (current.positive_keywords.includes(word)) {
+      return {
+        positive_keywords: current.positive_keywords.filter((w) => w !== word),
+        negative_keywords: current.negative_keywords,
+        llm_description: current.llm_description,
+        summary: `Удалено: ${word}`,
+      };
+    }
+    return {
+      ...current,
+      summary: `«${word}» не найдено в списке`,
+    };
+  }
+
+  // Pattern: "исключи слово" or "минус слово" (add to negative)
+  const excludeMatch = cmd.match(/^(?:исключи|исключить|минус)\s+(.+)$/);
+  if (excludeMatch?.[1]) {
+    const word = excludeMatch[1].trim();
+    if (!current.negative_keywords.includes(word)) {
+      return {
+        positive_keywords: current.positive_keywords,
+        negative_keywords: [...current.negative_keywords, word],
+        llm_description: current.llm_description,
+        summary: `Исключено: ${word}`,
+      };
+    }
+    return {
+      ...current,
+      summary: `«${word}» уже в исключениях`,
+    };
+  }
+
+  // Command not recognized
+  return null;
 }
 
 /**
  * Interpret user's free-form edit command and return updated subscription parameters
- * Uses HuggingFace (Qwen) with retry, falls back to DeepSeek API
+ * Uses llmLight with automatic fallbacks (Qwen 72B → Qwen 4B)
  */
 export async function interpretEditCommand(
   command: string,
@@ -135,41 +182,39 @@ export async function interpretEditCommand(
   // Limit conversation history to last 6 messages to avoid token overflow
   const recentHistory = conversationHistory.slice(-6);
 
-  const chatMessages = [
+  const messages: LLMMessage[] = [
+    { role: "system", content: systemPrompt },
     ...recentHistory.map((m) => ({
       role: m.role as "user" | "assistant",
       content: m.content,
     })),
-    { role: "user" as const, content: command },
+    { role: "user", content: command },
   ];
 
-  // Try HuggingFace (Qwen) first — faster
+  // Try LLM with automatic fallbacks
   try {
-    const response = await withRetry(
-      () => tryHuggingFace(systemPrompt, chatMessages),
-      3, // 3 retries
-      1000 // 1s base delay
-    );
-    llmLog.debug({ provider: "huggingface", response: response.slice(0, 200) }, "Edit command via HF");
+    const response = await llmLight({
+      messages,
+      maxTokens: 1500,
+      temperature: 0.3,
+    });
+    llmLog.debug({ response: response.slice(0, 200) }, "Edit command via LLM");
     return parseEditResponse(response, current);
-  } catch (hfError) {
-    llmLog.warn({ error: hfError }, "HuggingFace edit failed, trying DeepSeek fallback");
+  } catch (llmError) {
+    llmLog.warn({ error: llmError }, "LLM edit failed, trying simple parser");
   }
 
-  // Fallback to DeepSeek API
-  try {
-    const messages: ChatMessage[] = [
-      { role: "system", content: systemPrompt },
-      ...chatMessages,
-    ];
-    const response = await chatWithDeepSeek(messages, { temperature: 0.3 });
-    llmLog.debug({ provider: "deepseek", response: response.slice(0, 200) }, "Edit command via DeepSeek");
-    return parseEditResponse(response, current);
-  } catch (dsError) {
-    llmLog.error({ error: dsError }, "Both HuggingFace and DeepSeek failed for edit");
-    return {
-      ...current,
-      summary: "Ошибка LLM. Попробуй позже или переформулируй.",
-    };
+  // Final fallback: simple command parser (no LLM)
+  const simpleResult = trySimpleParser(command, current);
+  if (simpleResult) {
+    llmLog.debug({ provider: "simple-parser" }, "Edit command via simple parser");
+    return simpleResult;
   }
+
+  // All failed — return current params without error message to user
+  llmLog.error("All LLM providers failed for edit, returning unchanged params");
+  return {
+    ...current,
+    summary: "Не смог обработать команду. Попробуй написать проще, например: «+ слово» или «убери слово»",
+  };
 }

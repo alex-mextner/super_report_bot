@@ -2,7 +2,7 @@ import { getMessagesIncludingDeleted, getAllCachedMessages } from "../cache/mess
 import { calculateKeywordNgramSimilarity, phraseMatches } from "../matcher/ngram.ts";
 import { generateNgrams } from "../matcher/normalize.ts";
 import { semanticSearch } from "../embeddings/search.ts";
-import { verifyBatchWithDeepSeek } from "../llm/deepseek.ts";
+import { verifyMessageBatch } from "../llm/index.ts";
 import type { RatingExample } from "../types.ts";
 import { botLog } from "../logger.ts";
 
@@ -254,7 +254,7 @@ export async function filterExamplesWithAI(
 
   try {
     const input = realExamples.map((e, i) => ({ index: i, text: e.text }));
-    const results = await verifyBatchWithDeepSeek(input, query);
+    const results = await verifyMessageBatch(input, query);
 
     const filtered = realExamples.filter((_, i) => {
       const result = results.find((r) => r.index === i);

@@ -4,7 +4,9 @@ import { withRateLimit, withRetry, MODELS } from "./index.ts";
 describe("MODELS", () => {
   test("exports expected model constants", () => {
     expect(MODELS.DEEPSEEK_R1).toBe("deepseek-ai/DeepSeek-R1");
-    expect(MODELS.MISTRAL).toBe("mistralai/Mistral-7B-Instruct-v0.3");
+    expect(MODELS.DEEPSEEK_V3).toBe("deepseek-ai/DeepSeek-V3");
+    expect(MODELS.QWEN_FAST).toBe("Qwen/Qwen2.5-72B-Instruct");
+    expect(MODELS.QWEN_SMALL).toBe("Qwen/Qwen3-4B-Instruct-2507");
     expect(MODELS.BART_MNLI).toBe("facebook/bart-large-mnli");
   });
 });

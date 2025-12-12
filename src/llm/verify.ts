@@ -1,5 +1,5 @@
 import { llmLog } from "../logger.ts";
-import { verifyWithDeepSeek, verifyBatchWithDeepSeek } from "./deepseek.ts";
+import { verifyMessage, verifyMessageBatch } from "./index.ts";
 import { verifyWithVision, matchPhotosToItems } from "./vision.ts";
 import { splitMessageToItems } from "./split.ts";
 import type { Subscription, IncomingMessage, ItemVerificationResult } from "../types.ts";
@@ -76,7 +76,7 @@ export async function verifyMatch(
   // Text-based verification with DeepSeek
   // Pass hasPhoto flag so DeepSeek doesn't guess about photo content from emojis
   try {
-    const result = await verifyWithDeepSeek(text, description, hasPhoto);
+    const result = await verifyMessage(text, description, hasPhoto);
 
     const isMatch = result.isMatch && result.confidence >= DEEPSEEK_CONFIDENCE_THRESHOLD;
 
@@ -218,7 +218,7 @@ export async function verifyMatchBatch(
         text: item.message.text,
       }));
 
-      const batchResults = await verifyBatchWithDeepSeek(
+      const batchResults = await verifyMessageBatch(
         batchInput,
         subscription.llm_description
       );
@@ -325,7 +325,7 @@ export async function verifyMatchWithItems(
 
   let batchResults;
   try {
-    batchResults = await verifyBatchWithDeepSeek(batchInput, description);
+    batchResults = await verifyMessageBatch(batchInput, description);
   } catch (error) {
     llmLog.error({ error, subscriptionId: subscription.id }, "Batch item verification failed");
     // Fallback to single-item logic

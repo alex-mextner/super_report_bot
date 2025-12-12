@@ -1,12 +1,12 @@
 /**
  * Text Rephrasing for Publications
  *
- * Uses DeepSeek to rephrase ad text to avoid spam detection.
+ * Rephrases ad text to avoid spam detection.
  * Each group gets a unique version of the same message.
  * Adapts to group's posting style if analysis is provided.
  */
 
-import { chatWithDeepSeek, type ChatMessage } from "./deepseek.ts";
+import { llmFast, type LLMMessage } from "./index.ts";
 import { llmLog } from "../logger.ts";
 
 export interface RephraseResult {
@@ -70,7 +70,7 @@ export async function rephraseAdText(
     }
   }
 
-  const messages: ChatMessage[] = [
+  const messages: LLMMessage[] = [
     {
       role: "system",
       content: `Ты помощник для перефразирования объявлений о продаже.
@@ -104,9 +104,10 @@ ${originalText}`,
   ];
 
   try {
-    const rephrased = await chatWithDeepSeek(messages, {
-      temperature: 0.7, // Higher for more variation
-      max_tokens: Math.max(500, originalText.length * 2),
+    const rephrased = await llmFast({
+      messages,
+      temperature: 0.7,
+      maxTokens: Math.max(500, originalText.length * 2),
     });
 
     // Basic validation - should contain some original elements

@@ -15,6 +15,7 @@ import { analyzeListingImage, type ListingImageAnalysis } from "./vision.ts";
 import { semanticSearch } from "../embeddings/search.ts";
 import type { GroupMetadata } from "../types.ts";
 import { items as pluralItems } from "../utils/pluralize.ts";
+import { withRetry } from "./index.ts";
 
 const BRAVE_API = "https://api.search.brave.com/res/v1/web/search";
 const BRAVE_KEY = process.env.BRAVE_API_KEY;
@@ -287,39 +288,42 @@ async function searchWeb(query: string): Promise<BraveResult[]> {
 // ============= LLM Calls =============
 
 async function callDeepSeek(systemPrompt: string, userPrompt: string, maxTokens = 2000): Promise<string> {
-  try {
-    if (!DEEPSEEK_KEY) {
-      throw new Error("DEEPSEEK_API_KEY not set");
-    }
-    const response = await fetch(DEEPSEEK_API, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${DEEPSEEK_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "deepseek-chat",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        temperature: 0.3,
-        max_tokens: maxTokens,
-      }),
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      apiLog.warn({ status: response.status, text }, "DeepSeek request failed");
-      throw new Error(`DeepSeek API error: ${response.status}`);
-    }
-
-    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    return data.choices?.[0]?.message?.content || "";
-  } catch (error) {
-    apiLog.error({ err: error }, "DeepSeek error");
-    throw error;
+  if (!DEEPSEEK_KEY) {
+    throw new Error("DEEPSEEK_API_KEY not set");
   }
+
+  return withRetry(
+    async () => {
+      const response = await fetch(DEEPSEEK_API, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${DEEPSEEK_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "deepseek-chat",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          temperature: 0.3,
+          max_tokens: maxTokens,
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        apiLog.warn({ status: response.status, text }, "DeepSeek request failed");
+        throw new Error(`DeepSeek API error: ${response.status}`);
+      }
+
+      const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      return data.choices?.[0]?.message?.content || "";
+    },
+    3, // 3 retries
+    2000 // 2s base delay
+  );
 }
 
 // ============= Listing Extraction =============
