@@ -218,6 +218,33 @@ export function cancelPendingAuth(telegramId: number): void {
 }
 
 /**
+ * Resolve peer with retry - if peer not in cache, fetch dialogs first
+ */
+async function resolvePeerWithRetry(client: TelegramClient, groupId: number) {
+  try {
+    return await client.resolvePeer(groupId);
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+
+    // If peer not in cache, try fetching dialogs to populate cache
+    if (errorMsg.includes("not found in local cache")) {
+      botLog.info({ groupId }, "Peer not in cache, fetching dialogs...");
+
+      // Fetch dialogs to populate cache
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of client.iterDialogs({ limit: 200 })) {
+        // Just iterate to populate cache
+      }
+
+      // Try again
+      return await client.resolvePeer(groupId);
+    }
+
+    throw error;
+  }
+}
+
+/**
  * Send text message to a group from user's account
  */
 export async function sendTextAsUser(
@@ -231,16 +258,24 @@ export async function sendTextAsUser(
   }
 
   try {
-    // Resolve the group peer
-    const peer = await client.resolvePeer(groupId);
+    // Resolve the group peer (with retry if not in cache)
+    const peer = await resolvePeerWithRetry(client, groupId);
 
     // Send text message using mtcute's sendText method
     const result = await client.sendText(peer, text);
 
     return { success: true, messageId: result.id };
   } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : "Send failed";
+
+    // Provide helpful message for common errors
+    if (errorMsg.includes("not found in local cache")) {
+      botLog.warn({ telegramId, groupId }, "User not member of group");
+      return { error: "Ты не состоишь в этой группе. Вступи в группу и попробуй снова." };
+    }
+
     botLog.error({ error, telegramId, groupId }, "Failed to send message as user");
-    return { error: error instanceof Error ? error.message : "Send failed" };
+    return { error: errorMsg };
   }
 }
 
@@ -260,7 +295,8 @@ export async function sendMediaAsUser(
   }
 
   try {
-    const peer = await client.resolvePeer(groupId);
+    // Resolve the group peer (with retry if not in cache)
+    const peer = await resolvePeerWithRetry(client, groupId);
 
     if (photoFileIds.length === 0) {
       // No photos - just send text
@@ -286,8 +322,16 @@ export async function sendMediaAsUser(
     const firstResult = results[0];
     return { success: true, messageId: firstResult?.id ?? 0 };
   } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : "Send failed";
+
+    // Provide helpful message for common errors
+    if (errorMsg.includes("not found in local cache")) {
+      botLog.warn({ telegramId, groupId }, "User not member of group");
+      return { error: "Ты не состоишь в этой группе. Вступи в группу и попробуй снова." };
+    }
+
     botLog.error({ error, telegramId, groupId, photoCount: photoFileIds.length }, "Failed to send media as user");
-    return { error: error instanceof Error ? error.message : "Send failed" };
+    return { error: errorMsg };
   }
 }
 

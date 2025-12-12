@@ -2300,6 +2300,31 @@ export const queries = {
   canPublishToday(telegramId: number, maxPerDay: number = 10): boolean {
     return this.getDailyPublicationCount(telegramId) < maxPerDay;
   },
+
+  // --- Publication Credits ---
+
+  getPublicationCredits(telegramId: number): number {
+    const result = db
+      .prepare<{ free_pub_credits: number }, [number]>(
+        "SELECT free_pub_credits FROM users WHERE telegram_id = ?"
+      )
+      .get(telegramId);
+    return result?.free_pub_credits ?? 0;
+  },
+
+  grantPublicationCredit(telegramId: number): void {
+    db.prepare(
+      "UPDATE users SET free_pub_credits = free_pub_credits + 1 WHERE telegram_id = ?"
+    ).run(telegramId);
+  },
+
+  usePublicationCredit(telegramId: number): boolean {
+    const result = db.prepare(`
+      UPDATE users SET free_pub_credits = free_pub_credits - 1
+      WHERE telegram_id = ? AND free_pub_credits > 0
+    `).run(telegramId);
+    return result.changes > 0;
+  },
 };
 
 export { db };

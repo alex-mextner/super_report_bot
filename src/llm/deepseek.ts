@@ -339,6 +339,7 @@ function parseBatchResponse(
 export interface ChatWithDeepSeekOptions {
   temperature?: number;
   max_tokens?: number;
+  timeout?: number; // ms, default 30000
 }
 
 /**
@@ -353,7 +354,7 @@ export async function chatWithDeepSeek(
     throw new Error("DEEPSEEK_API_KEY not configured");
   }
 
-  const { temperature = 0.3, max_tokens = 2000 } = options;
+  const { temperature = 0.3, max_tokens = 2000, timeout = 30000 } = options;
 
   const response = await fetch(DEEPSEEK_URL, {
     method: "POST",
@@ -368,6 +369,7 @@ export async function chatWithDeepSeek(
       max_tokens,
       stream: false,
     }),
+    signal: AbortSignal.timeout(timeout),
   });
 
   if (!response.ok) {

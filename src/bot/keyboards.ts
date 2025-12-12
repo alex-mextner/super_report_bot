@@ -804,11 +804,19 @@ export function publishPresetKeyboard(
 /**
  * Publication confirmation keyboard
  */
-export function publishConfirmKeyboard(publicationId: number): InlineKeyboard {
-  return new InlineKeyboard()
-    .text("✅ Опубликовать — 100⭐", JSON.stringify({ action: "confirm_publication", id: publicationId }))
-    .row()
-    .text("❌ Отмена", JSON.stringify({ action: "cancel_publication" }));
+export function publishConfirmKeyboard(publicationId: number, hasCredit: boolean = false): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+
+  if (hasCredit) {
+    keyboard.text("🎁 Использовать бесплатную публикацию", JSON.stringify({ action: "use_pub_credit", id: publicationId }));
+    keyboard.row();
+  }
+
+  keyboard.text("✅ Опубликовать — 100⭐", JSON.stringify({ action: "confirm_publication", id: publicationId }));
+  keyboard.row();
+  keyboard.text("❌ Отмена", JSON.stringify({ action: "cancel_publication" }));
+
+  return keyboard;
 }
 
 /**

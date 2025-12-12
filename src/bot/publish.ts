@@ -358,6 +358,9 @@ ${photoCount > 0 ? `📷 *Фото:* ${photoCount} шт.\n` : ""}
     parse_mode: "Markdown",
   });
 
+  // Check for free credits
+  const credits = queries.getPublicationCredits(userId);
+
   // Explain AI flow separately
   await bot.api.sendMessage({
     chat_id: userId,
@@ -368,9 +371,9 @@ ${photoCount > 0 ? `📷 *Фото:* ${photoCount} шт.\n` : ""}
 2. Покажет тебе для проверки
 3. Отправит только после твоего подтверждения
 
-Ты сможешь отредактировать или пропустить любую группу.`,
+Ты сможешь отредактировать или пропустить любую группу.${credits > 0 ? `\n\n🎁 У тебя есть *${credits}* бесплатных публикаций!` : ""}`,
     parse_mode: "Markdown",
-    reply_markup: publishConfirmKeyboard(publicationId),
+    reply_markup: publishConfirmKeyboard(publicationId, credits > 0),
   });
 }
 
@@ -483,6 +486,49 @@ export async function handleConfirmPublication(
   });
 
   publicationStates.delete(userId);
+}
+
+/**
+ * Handle use_pub_credit callback - use free credit instead of payment
+ */
+export async function handleUsePubCredit(
+  bot: Bot,
+  userId: number,
+  publicationId: number,
+  answerCallback: () => Promise<void>
+): Promise<void> {
+  await answerCallback();
+
+  const publication = queries.getPublication(publicationId);
+  if (!publication) {
+    await bot.api.sendMessage({
+      chat_id: userId,
+      text: "❌ Публикация не найдена.",
+    });
+    publicationStates.delete(userId);
+    return;
+  }
+
+  // Try to use credit
+  const used = queries.usePublicationCredit(userId);
+  if (!used) {
+    await bot.api.sendMessage({
+      chat_id: userId,
+      text: "❌ У тебя нет бесплатных публикаций.",
+    });
+    return;
+  }
+
+  await bot.api.sendMessage({
+    chat_id: userId,
+    text: "🎁 Бесплатная публикация активирована!",
+  });
+
+  publicationStates.delete(userId);
+
+  // Start interactive publication directly
+  const { startInteractivePublication } = await import("../publisher/interactive.ts");
+  await startInteractivePublication(bot, userId, publicationId);
 }
 
 /**

@@ -373,6 +373,27 @@ async function checkPublicationComplete(
 
   queries.updatePublicationStatus(publicationId, "completed");
 
+  // If no messages were sent successfully, grant a free credit
+  if (publication.published_groups === 0) {
+    queries.grantPublicationCredit(userId);
+
+    await bot.api.sendMessage({
+      chat_id: userId,
+      text: `😔 *Публикация не удалась*
+
+Ни одно сообщение не было отправлено.
+
+🎁 Мы начислили тебе *бесплатную публикацию* — используй её в следующий раз!`,
+      parse_mode: "Markdown",
+    });
+
+    botLog.info(
+      { publicationId, userId },
+      "Publication failed completely, credit granted"
+    );
+    return;
+  }
+
   await bot.api.sendMessage({
     chat_id: userId,
     text: `🎉 *Публикация завершена!*

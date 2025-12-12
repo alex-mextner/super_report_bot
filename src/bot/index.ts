@@ -4841,6 +4841,23 @@ ${bold("ИИ:")} ${result.summary}
       );
       break;
     }
+
+    case "use_pub_credit": {
+      const publicationId = typeof data.id === "number" ? data.id : parseInt(String(data.id), 10);
+      if (!publicationId || isNaN(publicationId)) {
+        await context.answer({ text: "Ошибка данных" });
+        return;
+      }
+
+      const { handleUsePubCredit } = await import("./publish.ts");
+      await handleUsePubCredit(
+        bot,
+        userId,
+        publicationId,
+        async () => { await context.answer(); }
+      );
+      break;
+    }
   }
 });
 
