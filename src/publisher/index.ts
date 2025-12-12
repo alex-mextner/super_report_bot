@@ -245,6 +245,53 @@ export async function sendTextAsUser(
 }
 
 /**
+ * Send message with photos to a group from user's account
+ * @param photoFileIds - Bot API file IDs (will be converted)
+ */
+export async function sendMediaAsUser(
+  telegramId: number,
+  groupId: number,
+  text: string,
+  photoFileIds: string[]
+): Promise<{ success: true; messageId: number } | { error: string }> {
+  const client = await getClientForUser(telegramId);
+  if (!client) {
+    return { error: "No active session. Authorize with /publish first." };
+  }
+
+  try {
+    const peer = await client.resolvePeer(groupId);
+
+    if (photoFileIds.length === 0) {
+      // No photos - just send text
+      const result = await client.sendText(peer, text);
+      return { success: true, messageId: result.id };
+    }
+
+    if (photoFileIds.length === 1) {
+      // Single photo with caption
+      const { InputMedia } = await import("@mtcute/bun");
+      const result = await client.sendMedia(peer, InputMedia.auto(photoFileIds[0]!, { caption: text }));
+      return { success: true, messageId: result.id };
+    }
+
+    // Multiple photos - use media group
+    // Caption goes on first photo only
+    const { InputMedia } = await import("@mtcute/bun");
+    const mediaItems = photoFileIds.map((fileId, index) =>
+      InputMedia.auto(fileId, index === 0 ? { caption: text } : undefined)
+    );
+
+    const results = await client.sendMediaGroup(peer, mediaItems);
+    const firstResult = results[0];
+    return { success: true, messageId: firstResult?.id ?? 0 };
+  } catch (error) {
+    botLog.error({ error, telegramId, groupId, photoCount: photoFileIds.length }, "Failed to send media as user");
+    return { error: error instanceof Error ? error.message : "Send failed" };
+  }
+}
+
+/**
  * Disconnect and remove user client
  */
 export async function disconnectUser(telegramId: number): Promise<void> {

@@ -426,7 +426,9 @@ CREATE TABLE IF NOT EXISTS publication_posts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   publication_id INTEGER NOT NULL REFERENCES publications(id) ON DELETE CASCADE,
   group_id INTEGER NOT NULL,        -- telegram group id
-  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'scheduled', 'sent', 'failed')),
+  group_name TEXT,                  -- group name for display
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'awaiting_approval', 'approved', 'skipped', 'sent', 'failed')),
+  ai_text TEXT,                     -- AI-rephrased text for this group
   message_id INTEGER,               -- telegram message id after posting
   scheduled_at INTEGER,             -- when to post
   sent_at INTEGER,

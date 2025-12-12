@@ -1512,18 +1512,25 @@ bot.on("message", async (context) => {
     return;
   }
 
-  // Check publication flow for photos
+  // Check publication flow for photos (with optional caption as text)
   if (isInPublicationFlow(userId) && context.photo) {
     // Get largest photo size
     const photo = context.photo[context.photo.length - 1];
     if (photo) {
-      const handled = await handlePublicationPhoto(bot, userId, photo.fileId);
+      const handled = await handlePublicationPhoto(bot, userId, photo.fileId, context.caption);
       if (handled) return;
     }
   }
 
   // For non-forward messages, require text
   if (!context.text || context.text.startsWith("/")) return;
+
+  // Check if user is editing a publication post
+  const { isEditing, handleEditedText } = await import("../publisher/interactive.ts");
+  if (isEditing(userId)) {
+    const handled = await handleEditedText(bot, userId, context.text);
+    if (handled) return;
+  }
 
   // Check publication flow first (phone/code/password/text input)
   if (isInPublicationFlow(userId)) {
@@ -4767,6 +4774,41 @@ ${bold("ИИ:")} ${result.summary}
       break;
     }
 
+    case "pub_approve": {
+      await context.answer();
+      const { handlePostApprove } = await import("../publisher/interactive.ts");
+      await handlePostApprove(bot, userId, data.id as number);
+      break;
+    }
+
+    case "pub_skip": {
+      await context.answer();
+      const { handlePostSkip } = await import("../publisher/interactive.ts");
+      await handlePostSkip(bot, userId, data.id as number);
+      break;
+    }
+
+    case "pub_edit": {
+      await context.answer();
+      const { handlePostEdit } = await import("../publisher/interactive.ts");
+      await handlePostEdit(bot, userId, data.id as number);
+      break;
+    }
+
+    case "pub_cancel_edit": {
+      await context.answer();
+      const { handleCancelEdit } = await import("../publisher/interactive.ts");
+      await handleCancelEdit(bot, userId, data.id as number);
+      break;
+    }
+
+    case "pub_stop": {
+      await context.answer();
+      const { handleStopPublication } = await import("../publisher/interactive.ts");
+      await handleStopPublication(bot, userId, data.id as number);
+      break;
+    }
+
     case "publish_to_preset": {
       const presetId = typeof data.id === "number" ? data.id : parseInt(String(data.id), 10);
       if (!presetId || isNaN(presetId)) {
@@ -4878,6 +4920,12 @@ bot.on("successful_payment", async (context) => {
 
         botLog.info({ userId, messageId: payload.messageId, groupId: payload.groupId }, "Paid deep analysis completed");
       }
+    }
+
+    if (payload.type === "publication" && payload.publicationId) {
+      // Start interactive publication flow
+      const { startInteractivePublication } = await import("../publisher/interactive.ts");
+      await startInteractivePublication(bot, userId, payload.publicationId);
     }
   } catch (error) {
     botLog.error({ error, userId }, "Post-payment action failed");

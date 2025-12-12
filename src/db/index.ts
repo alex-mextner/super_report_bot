@@ -603,6 +603,28 @@ export const queries = {
     return stmts.getGroupMetadata.get(telegramId) ?? null;
   },
 
+  /**
+   * Get group title by telegram ID
+   * Tries multiple sources: groups table, user_groups, monitored_groups
+   */
+  getGroupTitle(telegramId: number): string | null {
+    // Try groups table first (has metadata)
+    const metadata = stmts.getGroupMetadata.get(telegramId);
+    if (metadata?.title) return metadata.title;
+
+    // Try user_groups
+    const userGroup = stmts.getGroupTitleById.get(telegramId);
+    if (userGroup?.group_title) return userGroup.group_title;
+
+    // Try monitored_groups
+    const monitored = db.prepare<{ title: string }, [number]>(
+      "SELECT title FROM monitored_groups WHERE telegram_id = ?"
+    ).get(telegramId);
+    if (monitored?.title) return monitored.title;
+
+    return null;
+  },
+
   upsertGroupMetadata(data: {
     telegramId: number;
     title?: string | null;
@@ -2058,7 +2080,7 @@ export const queries = {
 
   updatePublicationPostStatus(
     id: number,
-    status: "pending" | "scheduled" | "sent" | "failed",
+    status: "pending" | "awaiting_approval" | "approved" | "skipped" | "sent" | "failed",
     messageId?: number,
     errorMessage?: string
   ): void {
@@ -2075,6 +2097,152 @@ export const queries = {
         WHERE id = ?
       `).run(status, errorMessage ?? null, id);
     }
+  },
+
+  /**
+   * Set AI-generated text for a publication post
+   */
+  setPublicationPostAiText(postId: number, aiText: string, groupName?: string): void {
+    db.prepare(`
+      UPDATE publication_posts
+      SET ai_text = ?, group_name = ?, status = 'awaiting_approval'
+      WHERE id = ?
+    `).run(aiText, groupName ?? null, postId);
+  },
+
+  /**
+   * Get post awaiting user approval
+   */
+  getPostAwaitingApproval(publicationId: number): {
+    id: number;
+    publication_id: number;
+    group_id: number;
+    group_name: string | null;
+    ai_text: string | null;
+  } | null {
+    return db.prepare<{
+      id: number;
+      publication_id: number;
+      group_id: number;
+      group_name: string | null;
+      ai_text: string | null;
+    }, [number]>(`
+      SELECT id, publication_id, group_id, group_name, ai_text
+      FROM publication_posts
+      WHERE publication_id = ? AND status = 'awaiting_approval'
+      ORDER BY id ASC
+      LIMIT 1
+    `).get(publicationId) ?? null;
+  },
+
+  /**
+   * Get next pending post for a publication (to generate AI text)
+   */
+  getNextPendingPost(publicationId: number): {
+    id: number;
+    publication_id: number;
+    group_id: number;
+  } | null {
+    return db.prepare<{
+      id: number;
+      publication_id: number;
+      group_id: number;
+    }, [number]>(`
+      SELECT id, publication_id, group_id
+      FROM publication_posts
+      WHERE publication_id = ? AND status = 'pending'
+      ORDER BY id ASC
+      LIMIT 1
+    `).get(publicationId) ?? null;
+  },
+
+  /**
+   * Get approved posts ready to send
+   */
+  getApprovedPosts(limit: number = 5): Array<{
+    id: number;
+    publication_id: number;
+    group_id: number;
+    ai_text: string | null;
+  }> {
+    return db.prepare<{
+      id: number;
+      publication_id: number;
+      group_id: number;
+      ai_text: string | null;
+    }, [number]>(`
+      SELECT id, publication_id, group_id, ai_text
+      FROM publication_posts
+      WHERE status = 'approved'
+      ORDER BY id ASC
+      LIMIT ?
+    `).all(limit);
+  },
+
+  /**
+   * Get publication post by ID
+   */
+  getPublicationPost(postId: number): {
+    id: number;
+    publication_id: number;
+    group_id: number;
+    group_name: string | null;
+    ai_text: string | null;
+    status: string;
+  } | null {
+    return db.prepare<{
+      id: number;
+      publication_id: number;
+      group_id: number;
+      group_name: string | null;
+      ai_text: string | null;
+      status: string;
+    }, [number]>(`
+      SELECT id, publication_id, group_id, group_name, ai_text, status
+      FROM publication_posts
+      WHERE id = ?
+    `).get(postId) ?? null;
+  },
+
+  /**
+   * Update AI text (for user edits)
+   */
+  updatePostAiText(postId: number, aiText: string): void {
+    db.prepare(`
+      UPDATE publication_posts SET ai_text = ? WHERE id = ?
+    `).run(aiText, postId);
+  },
+
+  /**
+   * Count remaining posts for publication
+   */
+  countRemainingPosts(publicationId: number): {
+    pending: number;
+    awaiting_approval: number;
+    approved: number;
+    total: number;
+  } {
+    const result = db.prepare<{
+      pending: number;
+      awaiting: number;
+      approved: number;
+      total: number;
+    }, [number]>(`
+      SELECT
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN status = 'awaiting_approval' THEN 1 ELSE 0 END) as awaiting,
+        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+        COUNT(*) as total
+      FROM publication_posts
+      WHERE publication_id = ? AND status NOT IN ('sent', 'failed', 'skipped')
+    `).get(publicationId);
+
+    return {
+      pending: result?.pending ?? 0,
+      awaiting_approval: result?.awaiting ?? 0,
+      approved: result?.approved ?? 0,
+      total: result?.total ?? 0,
+    };
   },
 
   // --- Publication Limits ---

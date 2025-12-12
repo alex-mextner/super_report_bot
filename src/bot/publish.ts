@@ -237,11 +237,13 @@ export async function handlePublicationText(
 
 /**
  * Handle photo message during publication flow
+ * @param caption - optional caption text sent with photo
  */
 export async function handlePublicationPhoto(
   bot: Bot,
   userId: number,
-  photoFileId: string
+  photoFileId: string,
+  caption?: string
 ): Promise<boolean> {
   const state = publicationStates.get(userId);
   if (!state || state.step !== "awaiting_content") return false;
@@ -252,20 +254,29 @@ export async function handlePublicationPhoto(
     await bot.api.sendMessage({
       chat_id: userId,
       text: "❌ Максимум 10 фото. Удали лишние или нажми «Готово».",
-      reply_markup: contentInputKeyboard(true),
+      reply_markup: contentInputKeyboard(!!state.text),
     });
     return true;
   }
 
   photos.push(photoFileId);
-  publicationStates.set(userId, { ...state, photoFileIds: photos });
 
-  const hasText = !!state.text;
+  // If caption provided, use it as text (or append to existing)
+  let newText = state.text;
+  if (caption?.trim()) {
+    newText = state.text
+      ? `${state.text}\n\n${caption.trim()}`
+      : caption.trim();
+  }
+
+  publicationStates.set(userId, { ...state, photoFileIds: photos, text: newText });
+
+  const hasText = !!newText;
 
   await bot.api.sendMessage({
     chat_id: userId,
-    text: `📷 Фото добавлено (${photos.length}/10)${hasText ? "" : "\n\nНе забудь добавить текст объявления!"}`,
-    reply_markup: contentInputKeyboard(hasText || photos.length > 0),
+    text: `📷 Фото добавлено (${photos.length}/10)${caption ? " + текст сохранён" : ""}${hasText ? "" : "\n\nНе забудь добавить текст объявления!"}`,
+    reply_markup: contentInputKeyboard(hasText),
   });
 
   return true;

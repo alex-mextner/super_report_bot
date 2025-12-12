@@ -11,7 +11,7 @@
 import type { Bot } from "gramio";
 import { queries } from "../db/index.ts";
 import { botLog } from "../logger.ts";
-import { startPublication } from "../publisher/index.ts";
+import { startInteractivePublication } from "../publisher/interactive.ts";
 
 // Plan prices in Stars
 export const PLAN_PRICES = {
@@ -342,17 +342,11 @@ export async function handleSuccessfulPayment(
           return { success: false, message: "Публикация не указана" };
         }
 
-        // Update publication status and start processing
-        queries.updatePublicationStatus(payload.publicationId, "pending");
-
-        // Start publication in background (creates posts, triggers worker)
-        startPublication(payload.publicationId).catch((err) => {
-          botLog.error({ error: err, publicationId: payload.publicationId }, "Failed to start publication");
-        });
-
+        // Interactive publication will be started by the caller
+        // Just return success here, the actual flow starts in bot handler
         return {
           success: true,
-          message: "✅ Оплата принята! Публикация начата.\n\nОбъявления будут отправляться с задержками (анти-спам).",
+          message: "✅ Оплата принята! Сейчас начнём публикацию...",
         };
       }
 
