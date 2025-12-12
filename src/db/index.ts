@@ -1708,6 +1708,90 @@ export const queries = {
       .all(user.id, now);
   },
 
+  /**
+   * Get a random active product promotion that this user hasn't seen yet
+   * Returns message data for display in bot
+   */
+  getUnseenProductPromotion(telegramId: number): {
+    promotion_id: number;
+    message_id: number;
+    group_id: number;
+    text: string;
+    group_title: string;
+    sender_name: string | null;
+  } | null {
+    const user = this.getUserByTelegramId(telegramId);
+    if (!user) return null;
+
+    const now = Math.floor(Date.now() / 1000);
+    return db
+      .prepare<
+        {
+          promotion_id: number;
+          message_id: number;
+          group_id: number;
+          text: string;
+          group_title: string;
+          sender_name: string | null;
+        },
+        [number, number]
+      >(`
+        SELECT
+          p.id as promotion_id,
+          p.message_id,
+          p.product_group_id as group_id,
+          m.text,
+          m.group_title,
+          m.sender_name
+        FROM promotions p
+        JOIN messages m ON m.message_id = p.message_id AND m.group_id = p.product_group_id
+        WHERE p.type = 'product'
+          AND p.is_active = 1
+          AND p.ends_at > ?
+          AND p.id NOT IN (
+            SELECT promotion_id FROM promotion_views WHERE user_id = ?
+          )
+        ORDER BY RANDOM()
+        LIMIT 1
+      `)
+      .get(now, user.id) ?? null;
+  },
+
+  /**
+   * Mark promotion as viewed by user
+   */
+  markPromotionViewed(
+    telegramId: number,
+    promotionId: number,
+    context: "bot_analyzing" | "bot_keywords" | "webapp_loading"
+  ): void {
+    const user = this.getUserByTelegramId(telegramId);
+    if (!user) return;
+
+    db.prepare(`
+      INSERT OR IGNORE INTO promotion_views (promotion_id, user_id, context)
+      VALUES (?, ?, ?)
+    `).run(promotionId, user.id, context);
+  },
+
+  /**
+   * Get all currently promoted product IDs (for sorting in webapp)
+   * Returns array of {message_id, group_id} for active promotions
+   */
+  getPromotedProductIds(): Array<{ message_id: number; group_id: number }> {
+    const now = Math.floor(Date.now() / 1000);
+    return db
+      .prepare<{ message_id: number; group_id: number }, [number]>(`
+        SELECT message_id, product_group_id as group_id
+        FROM promotions
+        WHERE type = 'product'
+          AND is_active = 1
+          AND ends_at > ?
+          AND message_id IS NOT NULL
+      `)
+      .all(now);
+  },
+
   // --- Premium Users for Priority Notifications ---
   getPremiumUsersForMessage(
     messageText: string,

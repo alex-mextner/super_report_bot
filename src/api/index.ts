@@ -730,6 +730,7 @@ api.get("/health", (c) => {
 
 /**
  * Get products from cache
+ * Promoted products appear first, then sorted by date
  */
 function getProductsFromCache(search?: string, groupId?: number, offset = 0, limit = 20) {
   // Get all messages from cache
@@ -739,6 +740,12 @@ function getProductsFromCache(search?: string, groupId?: number, offset = 0, lim
   if (groupId !== undefined) {
     messages = messages.filter((m) => m.groupId === groupId);
   }
+
+  // Get promoted product IDs for sorting
+  const promotedProducts = queries.getPromotedProductIds();
+  const promotedSet = new Set(
+    promotedProducts.map((p) => `${p.message_id}:${p.group_id}`)
+  );
 
   // Map to product format
   let allMessages = messages.map((msg) => ({
@@ -753,10 +760,17 @@ function getProductsFromCache(search?: string, groupId?: number, offset = 0, lim
     sender_name: msg.senderName ?? null,
     message_date: msg.date,
     messageLink: buildTelegramLink(msg.groupId, msg.id, msg.topicId),
+    _isPromoted: promotedSet.has(`${msg.id}:${msg.groupId}`),
   }));
 
-  // Sort by date descending
-  allMessages.sort((a, b) => b.message_date - a.message_date);
+  // Sort: promoted first, then by date descending
+  allMessages.sort((a, b) => {
+    // Promoted items first
+    if (a._isPromoted && !b._isPromoted) return -1;
+    if (!a._isPromoted && b._isPromoted) return 1;
+    // Then by date
+    return b.message_date - a.message_date;
+  });
 
   // Fuzzy search with n-gram similarity
   if (search) {

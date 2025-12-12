@@ -189,6 +189,53 @@ function ensureIdle(userId: number): void {
   }
 }
 
+/**
+ * Build Telegram message link for promoted product
+ */
+function buildPromoLink(groupId: number, messageId: number): string {
+  const chatIdStr = String(groupId);
+  const cleanChatId = chatIdStr.startsWith("-100")
+    ? chatIdStr.slice(4)
+    : chatIdStr.replace("-", "");
+  return `https://t.me/c/${cleanChatId}/${messageId}`;
+}
+
+/**
+ * Send progress message with optional promotion
+ * Shows unseen promotion to user while they wait for LLM response
+ */
+async function sendProgressWithPromo(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  context: any,
+  userId: number,
+  text: string,
+  promoContext: "bot_analyzing" | "bot_keywords"
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<any> {
+  const promo = queries.getUnseenProductPromotion(userId);
+
+  if (promo) {
+    // Mark as viewed immediately
+    queries.markPromotionViewed(userId, promo.promotion_id, promoContext);
+
+    // Format promo text (truncate if too long)
+    const promoText = promo.text.length > 300
+      ? promo.text.slice(0, 300) + "..."
+      : promo.text;
+    const link = buildPromoLink(promo.group_id, promo.message_id);
+
+    const fullText = `${text}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `📢 Пока ждём:\n\n` +
+      `${promoText}\n\n` +
+      `👉 ${link}`;
+
+    return context.send(fullText, { link_preview_options: { is_disabled: true } });
+  }
+
+  return context.send(text);
+}
+
 // Helper: show single example for rating
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function showExampleForRating(
@@ -411,7 +458,12 @@ async function finishRatingAndGenerateKeywords(
     ? formatClarificationContext(c.clarification.questions, c.clarification.answers)
     : undefined;
 
-  const progressMsg = await context.send("Генерирую ключевые слова с учётом твоих оценок...");
+  const progressMsg = await sendProgressWithPromo(
+    context,
+    userId,
+    "Генерирую ключевые слова с учётом твоих оценок...",
+    "bot_keywords"
+  );
   const messageId = progressMsg?.message?.message_id;
 
   // Run LLM generation with recovery tracking
@@ -1219,7 +1271,7 @@ async function processSubscriptionQuery(context: any, userId: number, query: str
     // Save query for recovery before starting LLM call
     send(userId, { type: "SAVE_QUERY", query });
 
-    await context.send("Анализирую запрос...");
+    await sendProgressWithPromo(context, userId, "Анализирую запрос...", "bot_analyzing");
 
     try {
       const analysis = await runWithRecovery(
@@ -2157,7 +2209,7 @@ ${bold("ИИ:")} ${result.summary}
       });
     } else {
       // All questions answered — start rating flow (semantic search by query)
-      await context.send("Анализирую ответы...");
+      await sendProgressWithPromo(context, userId, "Анализирую ответы...", "bot_analyzing");
       const updatedC = ctx(userId);
       const finalAnswers = updatedC.clarification?.answers || [...answers, text];
       const clarificationContext = formatClarificationContext(questions, finalAnswers);

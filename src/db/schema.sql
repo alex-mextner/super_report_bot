@@ -372,6 +372,18 @@ CREATE INDEX IF NOT EXISTS idx_promotions_user ON promotions(user_id);
 CREATE INDEX IF NOT EXISTS idx_promotions_group ON promotions(group_id);
 CREATE INDEX IF NOT EXISTS idx_promotions_product ON promotions(message_id, product_group_id);
 
+-- Track which promotions were shown to which users
+CREATE TABLE IF NOT EXISTS promotion_views (
+  promotion_id INTEGER NOT NULL REFERENCES promotions(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  context TEXT,                          -- 'bot_analyzing', 'bot_keywords', 'webapp_loading'
+  viewed_at INTEGER DEFAULT (unixepoch()),
+  PRIMARY KEY (promotion_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_promotion_views_user ON promotion_views(user_id);
+CREATE INDEX IF NOT EXISTS idx_promotion_views_promo ON promotion_views(promotion_id);
+
 -- User Publications
 -- ===========================================
 
