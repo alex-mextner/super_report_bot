@@ -126,4 +126,13 @@ export const en: Translations = {
   secondsAgo: "{n}s ago",
   minutesAgoShort: "{n}m ago",
   hoursAgoShort: "{n}h ago",
+
+  // AdminGroupsPage
+  adminGroups: "Groups",
+  groupTitle: "Title",
+  groupTitlePlaceholder: "Group name",
+  groupCountry: "Country",
+  groupCity: "City",
+  groupCurrency: "Currency",
+  groupIsMarketplace: "Marketplace (items for sale)",
 };

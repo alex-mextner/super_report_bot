@@ -41,6 +41,7 @@ import {
   presetBuyKeyboard,
   presetSelectionKeyboard,
   regionSelectionKeyboard,
+  simpleRegionKeyboard,
   promotionDurationKeyboard,
   languageKeyboard,
 } from "./keyboards.ts";
@@ -697,7 +698,7 @@ bot.command("start", async (context) => {
     const referrerTelegramIdStr = args.slice(4); // Remove "ref_" prefix
     const referrerTelegramId = parseInt(referrerTelegramIdStr, 10);
 
-    if (!isNaN(referrerTelegramId) && referrerTelegramId !== userId) {
+    if (!Number.isNaN(referrerTelegramId) && referrerTelegramId !== userId) {
       const referrerExists = queries.getUserByTelegramId(referrerTelegramId);
       if (referrerExists) {
         const success = queries.setReferrer(userId, referrerTelegramId);
@@ -719,6 +720,13 @@ bot.command("start", async (context) => {
   }
 
   await context.send(tr("cmd_start_welcome"));
+
+  // For new users, ask about their region
+  if (isNewUser) {
+    await context.send(tr("region_select_prompt"), {
+      reply_markup: simpleRegionKeyboard(tr),
+    });
+  }
 });
 
 // /referral command - show referral link and stats
@@ -1188,25 +1196,13 @@ ${tr("sub_limit_upgrade_prompt")}`,
   // Check if user has region selected
   const userPlan = queries.getUserPlan(userId);
   if (!userPlan.region_code) {
-    // Get unique countries from presets
-    const countries = queries.getUniqueCountries();
-    if (countries.length > 0) {
-      // Save query to continue after region selection
-      send(userId, { type: "SAVE_PENDING_QUERY", query });
+    // Save query to continue after region selection
+    send(userId, { type: "SAVE_PENDING_QUERY", query });
 
-      const countryOptions = countries.map((c) => ({
-        country_code: c.country_code,
-        country_name: getCountryName(c.country_code),
-      }));
-
-      await context.send(
-        format`${bold(tr("presets_select_region"))}
-
-${tr("presets_region_explanation")}`,
-        { reply_markup: regionSelectionKeyboard(countryOptions, tr) }
-      );
-      return;
-    }
+    await context.send(tr("region_select_prompt"), {
+      reply_markup: simpleRegionKeyboard(tr),
+    });
+    return;
   }
 
   const mode = queries.getUserMode(userId);
@@ -4153,7 +4149,7 @@ ${tr("miss_clarify_or_apply")}`,
     }
 
     case "select_region": {
-      // User selected region (country) for presets
+      // User selected region for presets
       const raw = JSON.parse(context.data || "{}");
       const regionCode = raw.code as string;
 
@@ -4168,6 +4164,7 @@ ${tr("miss_clarify_or_apply")}`,
       // Get pending query and continue subscription creation
       const pendingQuery = c.pendingQuery;
       if (pendingQuery) {
+        // Continue subscription creation after region selection
         send(userId, { type: "CLEAR_PENDING_QUERY" });
         await context.answer({ text: tr("preset_region", { name: getCountryName(regionCode) }) });
         // Delete the region selection message
@@ -4180,10 +4177,42 @@ ${tr("miss_clarify_or_apply")}`,
           pendingQuery
         );
       } else {
-        await context.answer({ text: tr("preset_region_saved", { name: getCountryName(regionCode) }) });
-        // Delete the region selection message
+        // No pending query - show region-specific message
+        // Delete the region selection message first
         if (context.message?.id) {
           await bot.api.deleteMessage({ chat_id: userId, message_id: context.message.id });
+        }
+
+        if (regionCode === "rs_belgrade" || regionCode === "rs_novi_sad") {
+          // Show presets for Belgrade/Novi Sad
+          await context.answer({ text: "✅" });
+          // Map to preset code (region_presets uses belgrade/novi_sad)
+          const presetCode = regionCode === "rs_belgrade" ? "belgrade" : "novi_sad";
+          const preset = queries.getPresetByCode(presetCode);
+          if (preset) {
+            const presetGroups = queries.getPresetGroups(preset.id);
+            const groupIds = presetGroups.map((pg) => pg.group_id);
+            await bot.api.sendMessage({
+              chat_id: userId,
+              text: tr("region_saved_with_presets"),
+              reply_markup: presetsListKeyboard(
+                [{ id: preset.id, region_code: preset.region_code, region_name: preset.region_name, group_count: groupIds.length, hasAccess: true }],
+                tr
+              ),
+            });
+          } else {
+            await bot.api.sendMessage({
+              chat_id: userId,
+              text: tr("region_saved_with_presets"),
+            });
+          }
+        } else {
+          // "other" region - ask to use /addgroup
+          await context.answer({ text: "✅" });
+          await bot.api.sendMessage({
+            chat_id: userId,
+            text: tr("region_other_addgroup"),
+          });
         }
       }
       break;

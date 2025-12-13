@@ -302,7 +302,10 @@ export function AdminPage() {
       <div className="admin-header">
         <div className="admin-title-row">
           <h1>{t("subscriptions")}</h1>
-          <Link to="/admin/users" className="admin-nav-link">{t("users")}</Link>
+          <div className="admin-nav-links">
+            <Link to="/admin/groups" className="admin-nav-link">{t("adminGroups")}</Link>
+            <Link to="/admin/users" className="admin-nav-link">{t("users")}</Link>
+          </div>
         </div>
         <div className="admin-stats">
           <span>{t("totalCount", { count: subscriptions.length })}</span>

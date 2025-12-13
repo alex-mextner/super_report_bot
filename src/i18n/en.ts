@@ -646,6 +646,15 @@ The bot uses AI, keywords and semantic analysis — it finds posts with typos, i
   tip_plans: "💡 On Pro plan, analysis costs only 10⭐ instead of 20⭐",
   tip_usecase_rare: "💡 Bot is great for finding rare items — monitors groups 24/7",
   tip_usecase_price: "💡 Track prices: create a subscription for 'iPhone under €300'",
+
+  // Region selection (new users)
+  region_select_prompt: "🗺️ Select your region:",
+  region_belgrade: "🏙️ Belgrade",
+  region_novi_sad: "🏙️ Novi Sad",
+  region_other: "🌍 Other region",
+  region_saved_with_presets: "✅ Region saved!\n\nHere are groups for your region. Use /addgroup if you want to add groups the bot doesn't know yet.",
+  region_other_addgroup: "✅ Region saved!\n\nUse /addgroup to add groups for monitoring.",
+  region_mention_addgroup: "💡 Use /addgroup if you want to add more groups.",
 };
 
 export default en;

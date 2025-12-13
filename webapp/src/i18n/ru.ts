@@ -125,6 +125,15 @@ export const ru = {
   secondsAgo: "{n}с назад",
   minutesAgoShort: "{n}м назад",
   hoursAgoShort: "{n}ч назад",
+
+  // AdminGroupsPage
+  adminGroups: "Группы",
+  groupTitle: "Название",
+  groupTitlePlaceholder: "Название группы",
+  groupCountry: "Страна",
+  groupCity: "Город",
+  groupCurrency: "Валюта",
+  groupIsMarketplace: "Барахолка (продают товары)",
 } as const;
 
 export type TranslationKey = keyof typeof ru;

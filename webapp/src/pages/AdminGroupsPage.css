@@ -1,0 +1,180 @@
+.admin-groups-page {
+  padding: 16px;
+  min-height: 100vh;
+  background: var(--tg-theme-bg-color, #fff);
+}
+
+.admin-groups-page.loading,
+.admin-groups-page.error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tg-theme-hint-color, #999);
+}
+
+.admin-groups-page.error {
+  color: var(--tg-theme-destructive-text-color, #ff3b30);
+}
+
+.incomplete-stat {
+  color: var(--tg-theme-destructive-text-color, #ff3b30);
+}
+
+.admin-group-row {
+  background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.admin-group-row.incomplete {
+  border-left: 3px solid #ffcc00;
+}
+
+.admin-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.admin-group-title {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--tg-theme-text-color, #000);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.marketplace-badge {
+  font-size: 12px;
+}
+
+.admin-group-meta {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.meta-tag {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--tg-theme-button-color, #007aff);
+  color: var(--tg-theme-button-text-color, #fff);
+}
+
+.incomplete-badge {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffcc00;
+  color: #000;
+  font-size: 12px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.admin-group-expanded {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--tg-theme-hint-color, #ddd);
+}
+
+.form-field {
+  margin-bottom: 12px;
+}
+
+.form-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tg-theme-hint-color, #999);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.form-field input[type="text"] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--tg-theme-hint-color, #ddd);
+  border-radius: 8px;
+  background: var(--tg-theme-bg-color, #fff);
+  color: var(--tg-theme-text-color, #000);
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.form-field input[type="text"]:focus {
+  outline: none;
+  border-color: var(--tg-theme-button-color, #007aff);
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+
+.form-row .form-field input[type="text"] {
+  text-transform: uppercase;
+}
+
+.checkbox-field label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-transform: none;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.checkbox-field input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.editor-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--tg-theme-hint-color, #ddd);
+}
+
+.save-btn {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  background: #34c759;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.save-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.reset-btn {
+  padding: 12px 16px;
+  border: 1px solid var(--tg-theme-hint-color, #ddd);
+  border-radius: 8px;
+  background: var(--tg-theme-bg-color, #fff);
+  color: var(--tg-theme-text-color, #000);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.reset-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

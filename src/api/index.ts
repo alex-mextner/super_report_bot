@@ -360,14 +360,54 @@ api.get("/subscriptions/:id/groups", (c) => {
 
 // === Admin API ===
 
-// GET /api/admin/groups - all available groups from DB (admin only)
+// GET /api/admin/groups - all groups with metadata (admin only)
 api.get("/admin/groups", (c) => {
   if (!c.get("isAdmin")) {
     return c.json({ error: "Admin only" }, 403);
   }
 
-  const groups = queries.getAllGroups();
-  return c.json({ items: groups });
+  const groups = queries.getAllGroupsMetadata();
+  const items = groups.map((g) => ({
+    id: g.telegram_id,
+    title: g.title,
+    username: g.username,
+    country: g.country,
+    city: g.city,
+    currency: g.currency,
+    is_marketplace: g.is_marketplace === 1,
+    created_at: g.created_at,
+  }));
+
+  apiLog.debug({ count: items.length }, "GET /api/admin/groups");
+  return c.json({ items });
+});
+
+// PUT /api/admin/groups/:id - update group metadata (admin only)
+api.put("/admin/groups/:id", async (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const telegramId = Number(c.req.param("id"));
+  const body = await c.req.json<{
+    title?: string;
+    country?: string;
+    city?: string;
+    currency?: string;
+    is_marketplace?: boolean;
+  }>();
+
+  queries.upsertGroupMetadata({
+    telegramId,
+    title: body.title ?? null,
+    country: body.country ?? null,
+    city: body.city ?? null,
+    currency: body.currency ?? null,
+    isMarketplace: body.is_marketplace,
+  });
+
+  apiLog.info({ telegramId }, "Admin updated group metadata");
+  return c.json({ success: true });
 });
 
 // GET /api/admin/subscriptions - all subscriptions (admin only)

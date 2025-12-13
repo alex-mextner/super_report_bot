@@ -646,6 +646,15 @@ Bot koristi AI, ključne reči i semantičku analizu — pronalazi objave sa gre
   tip_plans: "💡 Na Pro planu analiza košta samo 10⭐ umesto 20⭐",
   tip_usecase_rare: "💡 Bot je odličan za pronalaženje retkih stvari — prati grupe 24/7",
   tip_usecase_price: "💡 Prati cene: napravi pretplatu za 'iPhone ispod 300€'",
+
+  // Region selection (new users)
+  region_select_prompt: "🗺️ Izaberi svoj region:",
+  region_belgrade: "🏙️ Beograd",
+  region_novi_sad: "🏙️ Novi Sad",
+  region_other: "🌍 Drugi region",
+  region_saved_with_presets: "✅ Region sačuvan!\n\nEvo grupa za tvoj region. Koristi /addgroup ako želiš da dodaš grupe koje bot još ne poznaje.",
+  region_other_addgroup: "✅ Region sačuvan!\n\nKoristi /addgroup da dodaš grupe za praćenje.",
+  region_mention_addgroup: "💡 Koristi /addgroup ako želiš da dodaš dodatne grupe.",
 };
 
 export default rs;

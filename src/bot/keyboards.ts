@@ -461,6 +461,16 @@ export function regionSelectionKeyboard(countries: Array<{ country_code: string;
   return kb;
 }
 
+// Simple region keyboard: Belgrade / Novi Sad / Other (for new users)
+export function simpleRegionKeyboard(t: Translator = defaultT): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(t("region_belgrade"), JSON.stringify({ action: "select_region", code: "rs_belgrade" }))
+    .row()
+    .text(t("region_novi_sad"), JSON.stringify({ action: "select_region", code: "rs_novi_sad" }))
+    .row()
+    .text(t("region_other"), JSON.stringify({ action: "select_region", code: "other" }));
+}
+
 export function presetSelectionKeyboard(
   presets: Array<{ id: number; region_name: string; group_count: number; hasAccess: boolean }>,
   t: Translator = defaultT

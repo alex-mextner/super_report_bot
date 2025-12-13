@@ -126,4 +126,13 @@ export const rs: Translations = {
   secondsAgo: "pre {n}s",
   minutesAgoShort: "pre {n}m",
   hoursAgoShort: "pre {n}h",
+
+  // AdminGroupsPage
+  adminGroups: "Grupe",
+  groupTitle: "Naziv",
+  groupTitlePlaceholder: "Naziv grupe",
+  groupCountry: "Država",
+  groupCity: "Grad",
+  groupCurrency: "Valuta",
+  groupIsMarketplace: "Buvljak (prodaju se stvari)",
 };
