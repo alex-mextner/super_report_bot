@@ -34,9 +34,13 @@
 }
 
 .admin-nav-link {
-  font-size: 14px;
-  color: var(--tg-theme-link-color, #007aff);
+  padding: 6px 12px;
+  background: var(--tg-theme-button-color, #007aff);
+  color: #fff;
   text-decoration: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .admin-stats {
@@ -137,7 +141,7 @@
   padding: 2px 6px;
   border-radius: 4px;
   background: var(--tg-theme-button-color, #007aff);
-  color: var(--tg-theme-button-text-color, #fff);
+  color: #fff;
 }
 
 .expand-icon {
@@ -175,7 +179,7 @@
 
 .edit-btn {
   background: var(--tg-theme-button-color, #007aff);
-  color: var(--tg-theme-button-text-color, #fff);
+  color: #fff;
 }
 
 .add-group-btn {

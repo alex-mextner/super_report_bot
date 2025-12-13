@@ -41,7 +41,7 @@
 .admin-nav-link {
   padding: 6px 12px;
   background: var(--tg-theme-button-color, #007aff);
-  color: var(--tg-theme-button-text-color, #fff);
+  color: #fff;
   text-decoration: none;
   border-radius: 8px;
   font-size: 13px;
@@ -104,7 +104,7 @@
 
 .admin-sub-badge.matches {
   background: var(--tg-theme-button-color, #007aff);
-  color: var(--tg-theme-button-text-color, #fff);
+  color: #fff;
 }
 
 .expand-icon {
@@ -174,7 +174,7 @@
   padding: 4px 8px;
   border-radius: 6px;
   background: var(--tg-theme-button-color, #007aff);
-  color: var(--tg-theme-button-text-color, #fff);
+  color: #fff;
 }
 
 .group-remove {
@@ -323,7 +323,7 @@
 
 .matches-toggle-btn:hover {
   background: var(--tg-theme-button-color, #007aff);
-  color: var(--tg-theme-button-text-color, #fff);
+  color: #fff;
 }
 
 .matches-list {
