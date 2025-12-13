@@ -33,7 +33,7 @@ export const MODELS = {
   QWEN_FAST: "Qwen/Qwen2.5-72B-Instruct",
   QWEN_SMALL: "Qwen/Qwen3-4B-Instruct-2507",
   // Vision model ($0.18/M tokens)
-  LLAMA_VISION: "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
+  LLAMA_VISION: "meta-llama/Llama-3.2-11B-Vision-Instruct",
   // Zero-shot classification (free, multilingual incl. Russian)
   XLM_ROBERTA_XNLI: "joeddav/xlm-roberta-large-xnli",
 } as const;
