@@ -8,7 +8,14 @@ const rs: Translations = {
   // Commands
   cmd_start_welcome: `Zdravo! Pomoći ću ti da pronađeš oglase u Telegram grupama.
 
-Koje objave hvatati? Opiši kao da si korisnik koji objavljuje u grupi.`,
+📌 Primeri pretrage:
+
+🏠 Stanovanje — «Izdajem stan do 500€ u centru»
+🛒 Kupovina — «Prodajem iPhone 14 Pro»
+💼 Posao — «Tražimo frontend programera»
+🔧 Usluge — «Popravljam tehniku»
+
+Opiši kao osoba koja objavljuje — kako izgleda post koji ti treba?`,
   cmd_help: `Komande:
 /start — početak
 /list — moje pretplate

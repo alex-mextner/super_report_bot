@@ -8,7 +8,14 @@ const en: Translations = {
   // Commands
   cmd_start_welcome: `Hi! I'll help you find listings in Telegram groups.
 
-What posts to catch? Describe as if you're a user posting in a group.`,
+📌 Example searches:
+
+🏠 Housing — "Apartment for rent, €500, city center"
+🛒 Shopping — "Selling iPhone 14 Pro"
+💼 Jobs — "Hiring frontend developer"
+🔧 Services — "Appliance repair services"
+
+Describe as the person posting — what does the post you need look like?`,
   cmd_help: `Commands:
 /start — start
 /list — my subscriptions
