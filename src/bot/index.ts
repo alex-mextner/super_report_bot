@@ -34,10 +34,6 @@ import {
   removeKeywordsKeyboard,
   ratingKeyboard,
   settingsKeyboard,
-  marketplaceKeyboard,
-  metadataSkipKeyboard,
-  metadataPrefilledKeyboard,
-  metadataCurrencyKeyboard,
   feedbackOutcomeKeyboard,
   feedbackReviewKeyboard,
   premiumKeyboard,
@@ -953,27 +949,10 @@ bot.command("addgroup", async (context) => {
 
   await context.send(results.join("\n"));
 
-  // If groups were added — start metadata collection for each
+  // If groups were added — show add group prompt
   if (addedGroups.length > 0) {
-    // Enter addingGroup state first
     send(userId, { type: "ADDGROUP" });
-
-    // If multiple groups, create queue
-    if (addedGroups.length > 1) {
-      send(userId, { type: "START_METADATA_QUEUE", groups: addedGroups });
-    }
-
-    // Start with first group
-    const firstGroup = addedGroups[0]!;
-    const prefilled = parseGroupTitle(firstGroup.groupTitle);
-    send(userId, {
-      type: "START_METADATA_COLLECTION",
-      groupId: firstGroup.groupId,
-      groupTitle: firstGroup.groupTitle,
-      prefilled,
-    });
-
-    await askNextMetadataQuestion(context, userId);
+    await showAddGroupPrompt(context, userId);
   }
 });
 
@@ -1144,12 +1123,10 @@ async function showAddGroupPrompt(
 }
 
 // Add group for user (join userbot if needed, save to DB)
-// Returns groupId on success for metadata collection
 async function addGroupForUser(
   context: { send: (text: string, options?: object) => Promise<unknown> },
   userId: number,
-  group: PendingGroup,
-  skipMetadata: boolean = false
+  group: PendingGroup
 ): Promise<{ success: boolean; groupId?: number }> {
   const icon = group.isChannel ? "📢" : "👥";
 
@@ -1164,21 +1141,7 @@ async function addGroupForUser(
       reply_markup: { remove_keyboard: true },
     });
 
-    if (skipMetadata) {
-      await showAddGroupPrompt(context, userId);
-      return { success: true, groupId: group.id };
-    }
-
-    // Start metadata collection
-    const prefilled = parseGroupTitle(group.title || "");
-    send(userId, {
-      type: "START_METADATA_COLLECTION",
-      groupId: group.id,
-      groupTitle: group.title || "Unknown",
-      prefilled,
-    });
-
-    await askNextMetadataQuestion(context, userId);
+    await showAddGroupPrompt(context, userId);
     return { success: true, groupId: group.id };
   } else {
     const tr = getTranslator(userId);
@@ -1187,112 +1150,6 @@ async function addGroupForUser(
     });
     await showAddGroupPrompt(context, userId);
     return { success: false };
-  }
-}
-
-// Helper: ask next metadata question based on current step
-async function askNextMetadataQuestion(
-  context: { send: (text: string, options?: object) => Promise<unknown> },
-  userId: number
-): Promise<void> {
-  const tr = getTranslator(userId);
-  const userCtx = ctx(userId);
-  const meta = userCtx.pendingGroupMetadata;
-
-  if (!meta) {
-    botLog.warn({ userId }, "askNextMetadataQuestion called but no pendingGroupMetadata");
-    await showAddGroupPrompt(context, userId);
-    return;
-  }
-
-  switch (meta.step) {
-    case "marketplace":
-      await context.send(tr("meta_marketplace_prompt", { title: meta.groupTitle }), {
-        reply_markup: marketplaceKeyboard(tr),
-      });
-      break;
-
-    case "country":
-      if (meta.prefilled.country && !meta.awaitingTextInput) {
-        // Has prefilled country — show confirm button
-        const countryName = getCountryName(meta.prefilled.country);
-        await context.send(tr("meta_country_label"), {
-          reply_markup: metadataPrefilledKeyboard(meta.prefilled.country, `${countryName} (${meta.prefilled.country})`, tr),
-        });
-      } else {
-        await context.send(tr("meta_country_prompt"), {
-          reply_markup: metadataSkipKeyboard(tr),
-        });
-      }
-      break;
-
-    case "city":
-      if (meta.prefilled.city && !meta.awaitingTextInput) {
-        await context.send(tr("meta_city_label"), {
-          reply_markup: metadataPrefilledKeyboard(meta.prefilled.city, meta.prefilled.city, tr),
-        });
-      } else {
-        await context.send(tr("meta_city_prompt"), {
-          reply_markup: metadataSkipKeyboard(tr),
-        });
-      }
-      break;
-
-    case "currency": {
-      // Prefill currency from country if available
-      const defaultCurrency = meta.country ? getDefaultCurrency(meta.country) : null;
-      if (defaultCurrency && !meta.awaitingTextInput) {
-        const currencyName = getCurrencyName(defaultCurrency);
-        await context.send(tr("meta_currency_label"), {
-          reply_markup: metadataCurrencyKeyboard(defaultCurrency, currencyName, tr),
-        });
-      } else {
-        await context.send(tr("meta_currency_prompt"), {
-          reply_markup: metadataSkipKeyboard(tr),
-        });
-      }
-      break;
-    }
-  }
-}
-
-// Helper: save metadata to DB and show next group or add prompt
-async function finishMetadataCollection(
-  context: { send: (text: string, options?: object) => Promise<unknown> },
-  userId: number
-): Promise<void> {
-  const userCtx = ctx(userId);
-  const meta = userCtx.pendingGroupMetadata;
-  const queue = userCtx.metadataQueue;
-
-  // Save to DB if we have metadata
-  if (meta) {
-    queries.upsertGroupMetadata({
-      telegramId: meta.groupId,
-      title: meta.groupTitle,
-      country: meta.country,
-      city: meta.city,
-      currency: meta.currency,
-      isMarketplace: meta.isMarketplace ?? false,
-    });
-    botLog.info({ groupId: meta.groupId, meta }, "Group metadata saved");
-  }
-
-  // Check if more groups in queue
-  if (queue && queue.groups.length > 1) {
-    // Next group
-    const nextGroup = queue.groups[1]!;
-    const prefilled = parseGroupTitle(nextGroup.groupTitle);
-    send(userId, {
-      type: "START_METADATA_COLLECTION",
-      groupId: nextGroup.groupId,
-      groupTitle: nextGroup.groupTitle,
-      prefilled,
-    });
-    await askNextMetadataQuestion(context, userId);
-  } else {
-    // All done
-    await showAddGroupPrompt(context, userId);
   }
 }
 
@@ -1689,96 +1546,6 @@ bot.on("message", async (context) => {
       await addGroupForUser(context, userId, group);
     } else {
       await context.send(tr("groups_invalid_format"));
-    }
-    return;
-  }
-
-  // Handle text input for group metadata (country, city, currency)
-  if (currentState === "collectingGroupMetadata" && c.pendingGroupMetadata?.awaitingTextInput) {
-    const meta = c.pendingGroupMetadata;
-    const step = meta.step;
-    const inputText = text.trim();
-
-    let matchedValue: string | null = null;
-    let displayName: string | null = null;
-
-    switch (step) {
-      case "country": {
-        const match = matchCountry(inputText);
-        if (match) {
-          matchedValue = match.code;
-          displayName = `${match.name} (${match.code})`;
-        }
-        break;
-      }
-      case "city": {
-        const match = matchCity(inputText);
-        if (match) {
-          matchedValue = match.city;
-          displayName = match.city;
-        } else {
-          // Accept any city name if no match (just normalize case)
-          matchedValue = inputText;
-          displayName = inputText;
-        }
-        break;
-      }
-      case "currency": {
-        const match = matchCurrency(inputText);
-        if (match) {
-          matchedValue = match.code;
-          displayName = `${match.name} (${match.code})`;
-        }
-        break;
-      }
-    }
-
-    if (matchedValue && displayName) {
-      // Send the matched value
-      send(userId, { type: "METADATA_TEXT", text: matchedValue });
-
-      const updatedMeta = ctx(userId).pendingGroupMetadata;
-      const isLastStep = step === "currency";
-
-      if (isLastStep) {
-        await context.send(`${displayName}`);
-        // Save metadata and finish
-        await finishMetadataCollection(context, userId);
-
-        // Check if there are more groups in queue
-        const updatedCtx = ctx(userId);
-        if (updatedCtx.metadataQueue && updatedCtx.metadataQueue.groups.length > 0) {
-          // Start next group
-          const nextGroup = updatedCtx.metadataQueue.groups[0]!;
-          const prefilled = parseGroupTitle(nextGroup.groupTitle);
-          send(userId, {
-            type: "START_METADATA_COLLECTION",
-            groupId: nextGroup.groupId,
-            groupTitle: nextGroup.groupTitle,
-            prefilled,
-          });
-
-          await askNextMetadataQuestion(context, userId);
-        } else {
-          await showAddGroupPrompt(context, userId);
-        }
-      } else {
-        await context.send(`${displayName}`);
-        // Ask next question
-        await askNextMetadataQuestion(context, userId);
-      }
-    } else {
-      // No match found
-      let hint = "";
-      switch (step) {
-        case "country":
-          hint = tr("meta_country_error");
-          break;
-        case "currency":
-          hint = tr("meta_currency_error");
-          break;
-      }
-      await context.send(hint, { reply_markup: metadataSkipKeyboard(tr) });
     }
     return;
   }
@@ -4137,158 +3904,6 @@ ${tr("miss_clarify_or_apply")}`,
         botLog.error({ err: e, groupId }, "Failed to add group quick");
         await editCallbackMessage(context, tr("group_add_use_addgroup"));
       }
-      break;
-    }
-
-    // =====================================================
-    // Group metadata collection handlers
-    // =====================================================
-
-    case "metadata_marketplace": {
-      if (currentState !== "collectingGroupMetadata" || !c.pendingGroupMetadata) {
-        await context.answer({ text: tr("cb_session_expired") });
-        return;
-      }
-
-      const isMarketplace = (data as { value?: boolean }).value ?? false;
-      send(userId, { type: "METADATA_MARKETPLACE", isMarketplace });
-
-      await context.answer({ text: isMarketplace ? tr("meta_answer_yes") : tr("meta_answer_no") });
-
-      // Ask next question (country)
-      await askNextMetadataQuestion(
-        { send: (text, opts) => bot.api.sendMessage({ chat_id: userId, text, ...opts }) },
-        userId
-      );
-      break;
-    }
-
-    case "metadata_skip": {
-      if (currentState !== "collectingGroupMetadata" || !c.pendingGroupMetadata) {
-        await context.answer({ text: tr("cb_session_expired") });
-        return;
-      }
-
-      const meta = c.pendingGroupMetadata;
-      const isLastStep = meta.step === "currency";
-
-      send(userId, { type: "METADATA_SKIP" });
-      await context.answer({ text: tr("clarify_skipped") });
-
-      if (isLastStep) {
-        // Save metadata and finish
-        const ctxWrapper = { send: (text: string, opts?: object) => bot.api.sendMessage({ chat_id: userId, text, ...opts }) };
-        await finishMetadataCollection(ctxWrapper, userId);
-
-        // Check if there are more groups in queue
-        const updatedCtx = ctx(userId);
-        if (updatedCtx.metadataQueue && updatedCtx.metadataQueue.groups.length > 0) {
-          // Start next group
-          const nextGroup = updatedCtx.metadataQueue.groups[0]!;
-          const prefilled = parseGroupTitle(nextGroup.groupTitle);
-          send(userId, {
-            type: "START_METADATA_COLLECTION",
-            groupId: nextGroup.groupId,
-            groupTitle: nextGroup.groupTitle,
-            prefilled,
-          });
-
-          await askNextMetadataQuestion(ctxWrapper, userId);
-        } else {
-          // No more groups, show add group prompt
-          await showAddGroupPrompt(ctxWrapper, userId);
-        }
-      } else {
-        // Ask next question
-        await askNextMetadataQuestion(
-          { send: (text, opts) => bot.api.sendMessage({ chat_id: userId, text, ...opts }) },
-          userId
-        );
-      }
-      break;
-    }
-
-    case "metadata_confirm": {
-      if (currentState !== "collectingGroupMetadata" || !c.pendingGroupMetadata) {
-        await context.answer({ text: tr("cb_session_expired") });
-        return;
-      }
-
-      const value = (data as { value?: string }).value;
-      if (!value) {
-        await context.answer({ text: tr("error_data") });
-        return;
-      }
-
-      const meta = c.pendingGroupMetadata;
-      const isLastStep = meta.step === "currency";
-
-      // Confirm prefilled value (sends METADATA_TEXT which advances step)
-      send(userId, { type: "METADATA_TEXT", text: value });
-      await context.answer({ text: tr("meta_confirmed") });
-
-      if (isLastStep) {
-        // Save metadata and finish
-        const ctxWrapper = { send: (text: string, opts?: object) => bot.api.sendMessage({ chat_id: userId, text, ...opts }) };
-        await finishMetadataCollection(ctxWrapper, userId);
-
-        // Check if there are more groups in queue
-        const updatedCtx = ctx(userId);
-        if (updatedCtx.metadataQueue && updatedCtx.metadataQueue.groups.length > 0) {
-          // Start next group
-          const nextGroup = updatedCtx.metadataQueue.groups[0]!;
-          const prefilled = parseGroupTitle(nextGroup.groupTitle);
-          send(userId, {
-            type: "START_METADATA_COLLECTION",
-            groupId: nextGroup.groupId,
-            groupTitle: nextGroup.groupTitle,
-            prefilled,
-          });
-
-          await askNextMetadataQuestion(ctxWrapper, userId);
-        } else {
-          // No more groups, show add group prompt
-          await showAddGroupPrompt(ctxWrapper, userId);
-        }
-      } else {
-        // Ask next question
-        await askNextMetadataQuestion(
-          { send: (text, opts) => bot.api.sendMessage({ chat_id: userId, text, ...opts }) },
-          userId
-        );
-      }
-      break;
-    }
-
-    case "metadata_change": {
-      if (currentState !== "collectingGroupMetadata" || !c.pendingGroupMetadata) {
-        await context.answer({ text: tr("cb_session_expired") });
-        return;
-      }
-
-      // Switch to text input mode
-      send(userId, { type: "METADATA_CHANGE_PREFILLED" });
-      await context.answer({ text: tr("meta_enter_value") });
-
-      const meta = ctx(userId).pendingGroupMetadata!;
-      let prompt = "";
-      switch (meta.step) {
-        case "country":
-          prompt = tr("meta_prompt_country");
-          break;
-        case "city":
-          prompt = tr("meta_prompt_city");
-          break;
-        case "currency":
-          prompt = tr("meta_prompt_currency");
-          break;
-      }
-
-      await bot.api.sendMessage({
-        chat_id: userId,
-        text: prompt,
-        reply_markup: metadataSkipKeyboard(),
-      });
       break;
     }
 

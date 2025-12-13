@@ -90,7 +90,6 @@ export type StateValue =
   | "selectingGroups"
   | "addingGroup"
   | "awaitingInviteLink"
-  | "collectingGroupMetadata"
   | "editingSubPositive"
   | "editingSubNegative"
   | "editingSubDescription"

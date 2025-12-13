@@ -16,7 +16,8 @@
       "Bash(/Users/ultra/.bun/bin/bunx tsc:*)",
       "Bash(bun x tsc:*)",
       "Bash(npx tsc:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(tree:*)"
     ],
     "deny": [],
     "ask": []

@@ -23,61 +23,6 @@ import type { UserMode, ExampleRating, PendingGroup } from "../types";
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
- *                         GROUP METADATA COLLECTION
- * ─────────────────────────────────────────────────────────────────────────────
- *
- * After adding a group via /addgroup, we ask optional metadata questions:
- * - Is this a marketplace? (do they sell things?)
- * - Country (with fuzzy matching to ISO code)
- * - City
- * - Currency (with fuzzy matching to ISO code)
- *
- * All questions can be skipped. Values can be pre-filled from group title.
- */
-export type MetadataStep = "marketplace" | "country" | "city" | "currency";
-
-export interface PendingGroupMetadata {
-  /** Which group we're collecting metadata for */
-  groupId: number;
-
-  /** Group title for display */
-  groupTitle: string;
-
-  /** Current question step */
-  step: MetadataStep;
-
-  /** Collected answers (null = not answered yet or skipped) */
-  isMarketplace: boolean | null;
-  country: string | null; // ISO code (RU, RS, etc.)
-  city: string | null;
-  currency: string | null; // ISO code (RUB, RSD, etc.)
-
-  /**
-   * Pre-filled values extracted from group title.
-   * If present, show "Confirm" button instead of text input.
-   */
-  prefilled: {
-    country?: string; // ISO code
-    city?: string;
-  };
-
-  /**
-   * If true, user chose "Change" on prefilled value,
-   * so we show text input instead of confirm button.
-   */
-  awaitingTextInput?: boolean;
-}
-
-/**
- * Queue of groups pending metadata collection.
- * Used when multiple groups are added via links in one command.
- */
-export interface MetadataQueue {
-  groups: Array<{ groupId: number; groupTitle: string }>;
-}
-
-/**
- * ─────────────────────────────────────────────────────────────────────────────
  *                          PENDING OPERATION
  * ─────────────────────────────────────────────────────────────────────────────
  *
@@ -515,22 +460,6 @@ export interface BotContext {
   pendingOperation: PendingOperation | null;
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //                    GROUP METADATA COLLECTION
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Current group being asked about (marketplace, country, city, currency).
-   * Set after successfully adding a group, cleared after all questions answered.
-   */
-  pendingGroupMetadata: PendingGroupMetadata | null;
-
-  /**
-   * Queue of groups waiting for metadata collection.
-   * Used when adding multiple groups via links in one /addgroup command.
-   */
-  metadataQueue: MetadataQueue | null;
-
-  // ═══════════════════════════════════════════════════════════════════════════
   //                    DELETION FEEDBACK COLLECTION
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -600,10 +529,6 @@ export function createInitialContext(
 
     // Operation recovery - no pending operation
     pendingOperation: null,
-
-    // Group metadata collection - nothing pending
-    pendingGroupMetadata: null,
-    metadataQueue: null,
 
     // Deletion feedback - nothing pending
     feedbackSubscriptionId: null,

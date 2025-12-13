@@ -186,18 +186,6 @@ Koje objave hvatati? Opiši kao da si korisnik koji objavljuje u grupi.`,
   groups_selected_count: "Izabrano: {selected} od {total}",
   groups_adding: "Dodajem grupu...",
 
-  // Metadata
-  meta_marketplace_prompt: "Da li se proizvodi prodaju u grupi \"{title}\"?",
-  meta_country_label: "Država grupe:",
-  meta_country_prompt: "U kojoj državi je grupa? (npr. Srbija, Rusija)",
-  meta_city_label: "Grad grupe:",
-  meta_city_prompt: "Koji grad? (npr. Beograd, Moskva)",
-  meta_currency_label: "Valuta grupe:",
-  meta_currency_prompt: "Koja je glavna valuta? (npr. dinari, rublje, evro)",
-  meta_country_error: "Ne mogu da prepoznam državu. Pokušaj drugačije (npr. Srbija, Serbia, RS)",
-  meta_currency_error: "Ne mogu da prepoznam valutu. Pokušaj kod (EUR, RSD) ili ime (evro, dinar)",
-  meta_confirmed: "Potvrđeno",
-  meta_enter_value: "Unesi vrednost",
   // Subscription limits
   sub_limit_reached: "⚠️ Limit pretplata dostignut",
   sub_limit_your_plan: "Tvoj plan: {plan}",
@@ -517,13 +505,6 @@ Bot koristi AI, ključne reči i semantičku analizu — pronalazi objave sa gre
   group_cant_read: "Bot ne može čitati ovu grupu. Koristi /addgroup i pošalji link za pozivnicu.",
   group_added_to_monitoring: "✅ Grupa \"{title}\" dodata u praćenje.",
   group_add_use_addgroup: "Nije uspelo dodavanje grupe. Koristi /addgroup.",
-
-  // Metadata prompts (short)
-  meta_prompt_country: "Unesi državu (npr: Srbija, Rusija, Crna Gora):",
-  meta_prompt_city: "Unesi grad (npr: Beograd, Moskva):",
-  meta_prompt_currency: "Unesi valutu (npr: dinar, evro, rublja):",
-  meta_answer_yes: "Da",
-  meta_answer_no: "Ne",
 
   // Presets detailed
   preset_title: "🗺️ **Preseti regiona**\n\nPreset je kolekcija svih marketplace grupa u regionu.\nKupi preset i dodaj sve grupe regiona u pretplatu jednim klikom.\n\nIzaberi region:",

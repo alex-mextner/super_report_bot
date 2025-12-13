@@ -186,18 +186,6 @@ What posts to catch? Describe as if you're a user posting in a group.`,
   groups_selected_count: "Selected: {selected} of {total}",
   groups_adding: "Adding group...",
 
-  // Metadata
-  meta_marketplace_prompt: "Are products sold in the group \"{title}\"?",
-  meta_country_label: "Group country:",
-  meta_country_prompt: "What country is the group in? (e.g., Serbia, Russia)",
-  meta_city_label: "Group city:",
-  meta_city_prompt: "What city? (e.g., Belgrade, Moscow)",
-  meta_currency_label: "Group currency:",
-  meta_currency_prompt: "What's the main currency? (e.g., dinars, rubles, euros)",
-  meta_country_error: "Can't recognize the country. Try writing differently (e.g., Serbia, RS)",
-  meta_currency_error: "Can't recognize the currency. Try the code (EUR, RSD) or name (euro, dinar)",
-  meta_confirmed: "Confirmed",
-  meta_enter_value: "Enter value",
   // Subscription limits
   sub_limit_reached: "⚠️ Subscription limit reached",
   sub_limit_your_plan: "Your plan: {plan}",
@@ -517,13 +505,6 @@ The bot uses AI, keywords and semantic analysis — it finds posts with typos, i
   group_cant_read: "Bot can't read this group. Use /addgroup and send an invite link.",
   group_added_to_monitoring: "✅ Group \"{title}\" added to monitoring.",
   group_add_use_addgroup: "Failed to add group. Use /addgroup.",
-
-  // Metadata prompts (short)
-  meta_prompt_country: "Enter country (e.g.: Serbia, Russia, Montenegro):",
-  meta_prompt_city: "Enter city (e.g.: Belgrade, Moscow):",
-  meta_prompt_currency: "Enter currency (e.g.: dinar, euro, ruble):",
-  meta_answer_yes: "Yes",
-  meta_answer_no: "No",
 
   // Presets detailed
   preset_title: "🗺️ **Region Presets**\n\nA preset is a collection of all marketplace groups in a region.\nBuy a preset and add all region groups to your subscription with one click.\n\nChoose a region:",

@@ -311,35 +311,6 @@ export function addGroupKeyboard(chatId: number, title?: string, t: Translator =
   );
 }
 
-// Group metadata keyboards
-export function marketplaceKeyboard(t: Translator = defaultT): InlineKeyboard {
-  return new InlineKeyboard()
-    .text(t("kb_yes"), JSON.stringify({ action: "metadata_marketplace", value: true }))
-    .text(t("kb_no"), JSON.stringify({ action: "metadata_marketplace", value: false }))
-    .row()
-    .text(t("kb_skip_arrow"), JSON.stringify({ action: "metadata_skip" }));
-}
-
-export function metadataSkipKeyboard(t: Translator = defaultT): InlineKeyboard {
-  return new InlineKeyboard().text(t("kb_skip_arrow"), JSON.stringify({ action: "metadata_skip" }));
-}
-
-export function metadataPrefilledKeyboard(value: string, displayLabel: string, t: Translator = defaultT): InlineKeyboard {
-  return new InlineKeyboard()
-    .text(`✓ ${displayLabel}`, JSON.stringify({ action: "metadata_confirm", value }))
-    .row()
-    .text(t("kb_change"), JSON.stringify({ action: "metadata_change" }))
-    .text(t("kb_skip_arrow"), JSON.stringify({ action: "metadata_skip" }));
-}
-
-export function metadataCurrencyKeyboard(currencyCode: string, displayLabel: string, t: Translator = defaultT): InlineKeyboard {
-  return new InlineKeyboard()
-    .text(`✓ ${displayLabel} (${currencyCode})`, JSON.stringify({ action: "metadata_confirm", value: currencyCode }))
-    .row()
-    .text(t("kb_change"), JSON.stringify({ action: "metadata_change" }))
-    .text(t("kb_skip_arrow"), JSON.stringify({ action: "metadata_skip" }));
-}
-
 // Deletion feedback keyboards
 export function feedbackOutcomeKeyboard(subscriptionId: number, t: Translator = defaultT): InlineKeyboard {
   return new InlineKeyboard()

@@ -31,7 +31,6 @@ import type {
   RatingExamplesData,
   ClarificationData,
   PendingOperation,
-  PendingGroupMetadata,
 } from "./context";
 
 /**
@@ -482,79 +481,6 @@ export type BotEvent =
    * Called after the query has been processed or when user cancels.
    */
   | { type: "CLEAR_PENDING_QUERY" }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  //                     GROUP METADATA COLLECTION EVENTS
-  //
-  //         Questions about marketplace, country, city, currency
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Initialize queue of groups for metadata collection.
-   *
-   * Used when multiple groups added via links in one /addgroup command.
-   * After this, START_METADATA_COLLECTION is sent for each group.
-   */
-  | {
-      type: "START_METADATA_QUEUE";
-      groups: Array<{ groupId: number; groupTitle: string }>;
-    }
-
-  /**
-   * Start collecting metadata for a single group.
-   *
-   * Called after successfully adding a group (via picker or link).
-   * Contains pre-filled values if detected from group title.
-   */
-  | {
-      type: "START_METADATA_COLLECTION";
-      groupId: number;
-      groupTitle: string;
-      prefilled?: { country?: string; city?: string };
-    }
-
-  /**
-   * User answered Yes/No to "Is this a marketplace?" question.
-   */
-  | { type: "METADATA_MARKETPLACE"; isMarketplace: boolean }
-
-  /**
-   * User entered text for country/city/currency.
-   *
-   * Handler normalizes the text (e.g., "серб" → "RS") before sending.
-   */
-  | { type: "METADATA_TEXT"; text: string }
-
-  /**
-   * User confirmed pre-filled value (clicked "✓ Сербия (RS)").
-   */
-  | { type: "METADATA_CONFIRM_PREFILLED" }
-
-  /**
-   * User wants to change pre-filled value (clicked "Изменить").
-   *
-   * Switches from confirm button to text input mode.
-   */
-  | { type: "METADATA_CHANGE_PREFILLED" }
-
-  /**
-   * User skipped current metadata question.
-   */
-  | { type: "METADATA_SKIP" }
-
-  /**
-   * Current group's metadata collection is done.
-   *
-   * Triggers save to DB and moves to next group in queue (if any).
-   */
-  | { type: "METADATA_DONE" }
-
-  /**
-   * Move to next group in metadata queue.
-   *
-   * Called after completing metadata for one group when queue has more.
-   */
-  | { type: "METADATA_NEXT_GROUP" }
 
   // ═══════════════════════════════════════════════════════════════════════════
   //                     DELETION FEEDBACK EVENTS
