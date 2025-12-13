@@ -52,18 +52,18 @@ interface ProviderConfig {
 
 // Provider chains for different use cases
 const LIGHT_PROVIDERS: ProviderConfig[] = [
-  { model: MODELS.QWEN_FAST, provider: "nebius", retries: 3 },
+  { model: MODELS.QWEN_FAST, provider: "together", retries: 3 },
   { model: MODELS.QWEN_SMALL, provider: "nscale", retries: 2 },
 ];
 
 const THINK_PROVIDERS: ProviderConfig[] = [
   { model: MODELS.GLM_46, provider: "zai", retries: 3 },
-  { model: MODELS.QWEN_FAST, provider: "nebius", retries: 2 }, // fallback to non-reasoning
+  { model: MODELS.QWEN_FAST, provider: "together", retries: 2 }, // fallback to non-reasoning
 ];
 
 const FAST_PROVIDERS: ProviderConfig[] = [
   { model: MODELS.GLM_46, provider: "zai", retries: 3 },
-  { model: MODELS.QWEN_FAST, provider: "nebius", retries: 2 },
+  { model: MODELS.QWEN_FAST, provider: "together", retries: 2 },
   { model: MODELS.QWEN_SMALL, provider: "nscale", retries: 2 },
 ];
 
@@ -176,7 +176,7 @@ export async function callZAI(
     throw new Error("ZAI_API_KEY not set");
   }
 
-  const response = await fetch(`${ZAI_BASE_URL}/v1/chat/completions`, {
+  const response = await fetch(`${ZAI_BASE_URL}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
