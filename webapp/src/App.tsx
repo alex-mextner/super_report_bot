@@ -9,6 +9,7 @@ import { SubscriptionsPage } from "./pages/SubscriptionsPage";
 import { AdminPage } from "./pages/AdminPage";
 import { AdminUsersPage } from "./pages/AdminUsersPage";
 import { AdminGroupsPage } from "./pages/AdminGroupsPage";
+import { AdminPresetsPage } from "./pages/AdminPresetsPage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import "./App.css";
 
@@ -38,6 +39,7 @@ export function App() {
           <Route path="/admin" element={<AdminPage />} />
           <Route path="/admin/users" element={<AdminUsersPage />} />
           <Route path="/admin/groups" element={<AdminGroupsPage />} />
+          <Route path="/admin/presets" element={<AdminPresetsPage />} />
           <Route path="/analytics/:groupId" element={<AnalyticsPage />} />
         </Routes>
       </BrowserRouter>

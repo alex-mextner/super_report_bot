@@ -129,6 +129,7 @@ export const rs: Translations = {
 
   // AdminGroupsPage
   adminGroups: "Grupe",
+  adminPresets: "Preseti",
   groupTitle: "Naziv",
   groupTitlePlaceholder: "Naziv grupe",
   groupCountry: "Država",

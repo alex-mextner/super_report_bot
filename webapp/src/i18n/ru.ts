@@ -128,6 +128,7 @@ export const ru = {
 
   // AdminGroupsPage
   adminGroups: "Группы",
+  adminPresets: "Пресеты",
   groupTitle: "Название",
   groupTitlePlaceholder: "Название группы",
   groupCountry: "Страна",

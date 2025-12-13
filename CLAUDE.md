@@ -151,3 +151,5 @@ When changing any text in `src/i18n/`, **ALWAYS update ALL language files**:
 - `src/i18n/rs.ts` — Serbian
 
 Never change just one language file.
+
+**WebApp i18n**: The webapp has its own i18n files in `webapp/src/i18n/`. All user-facing text must use `t()` from `useLocale()` hook. Never hardcode text strings in JSX. Keys use camelCase (e.g., `adminPresets`).

@@ -669,6 +669,9 @@ The bot uses AI, keywords and semantic analysis — it finds posts with typos, i
   region_saved_with_presets: "✅ Region saved!\n\nHere are groups for your region. Use /addgroup if you want to add groups the bot doesn't know yet.",
   region_other_addgroup: "✅ Region saved!\n\nUse /addgroup to add groups for monitoring.",
   region_mention_addgroup: "💡 Use /addgroup if you want to add more groups.",
+
+  // Admin webapp
+  adminPresets: "Presets",
 };
 
 export default en;

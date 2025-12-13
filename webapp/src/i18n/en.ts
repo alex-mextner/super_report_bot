@@ -129,6 +129,7 @@ export const en: Translations = {
 
   // AdminGroupsPage
   adminGroups: "Groups",
+  adminPresets: "Presets",
   groupTitle: "Title",
   groupTitlePlaceholder: "Group name",
   groupCountry: "Country",

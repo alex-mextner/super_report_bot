@@ -723,6 +723,193 @@ api.post("/analyze-deep", async (c) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//                          ADMIN PRESETS API
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/admin/presets - list all presets with groups
+api.get("/admin/presets", (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const presets = queries.getAllPresets();
+  const items = presets.map((preset) => {
+    const groups = queries.getPresetGroupsWithTitles(preset.id);
+    return {
+      ...preset,
+      groups: groups.map((g) => ({
+        id: g.group_id,
+        title: g.title,
+        city: g.city,
+      })),
+    };
+  });
+
+  apiLog.debug({ count: items.length }, "GET /api/admin/presets");
+  return c.json({ items });
+});
+
+// GET /api/admin/presets/:id - single preset with groups
+api.get("/admin/presets/:id", (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const presetId = Number(c.req.param("id"));
+  const presets = queries.getAllPresets();
+  const preset = presets.find((p) => p.id === presetId);
+
+  if (!preset) {
+    return c.json({ error: "Preset not found" }, 404);
+  }
+
+  const groups = queries.getPresetGroupsWithTitles(presetId);
+
+  return c.json({
+    ...preset,
+    groups: groups.map((g) => ({
+      id: g.group_id,
+      title: g.title,
+      city: g.city,
+    })),
+  });
+});
+
+// POST /api/admin/presets - create new preset
+api.post("/admin/presets", async (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const body = await c.req.json<{
+    region_code: string;
+    region_name: string;
+    country_code?: string;
+    currency?: string;
+  }>();
+
+  if (!body.region_code || !body.region_name) {
+    return c.json({ error: "region_code and region_name required" }, 400);
+  }
+
+  const id = queries.createPreset({
+    region_code: body.region_code,
+    region_name: body.region_name,
+    country_code: body.country_code,
+    currency: body.currency,
+  });
+
+  apiLog.info({ presetId: id, region_code: body.region_code }, "Admin created preset");
+  return c.json({ id });
+});
+
+// PUT /api/admin/presets/:id - update preset
+api.put("/admin/presets/:id", async (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const presetId = Number(c.req.param("id"));
+  const body = await c.req.json<{
+    region_code?: string;
+    region_name?: string;
+    country_code?: string | null;
+    currency?: string | null;
+  }>();
+
+  queries.updatePreset(presetId, body);
+
+  apiLog.info({ presetId }, "Admin updated preset");
+  return c.json({ success: true });
+});
+
+// DELETE /api/admin/presets/:id - delete preset
+api.delete("/admin/presets/:id", (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const presetId = Number(c.req.param("id"));
+  queries.deletePreset(presetId);
+
+  apiLog.info({ presetId }, "Admin deleted preset");
+  return c.json({ success: true });
+});
+
+// GET /api/admin/presets/:id/available-groups - groups available to add (filtered by city if preset has city)
+api.get("/admin/presets/:id/available-groups", (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const presetId = Number(c.req.param("id"));
+  const cityFilter = c.req.query("city");
+
+  // Get preset to check its region_code (which is city)
+  const preset = queries.getPresetByCode(
+    queries.getAllPresets().find((p) => p.id === presetId)?.region_code ?? ""
+  );
+
+  // Use city filter from query param, or preset's region_code as default city filter
+  const filterCity = cityFilter || preset?.region_code || undefined;
+
+  const groups = queries.getAvailableGroupsForPreset(presetId, filterCity);
+
+  return c.json({
+    items: groups.map((g) => ({
+      id: g.telegram_id,
+      title: g.title,
+      city: g.city,
+    })),
+    cityFilter: filterCity,
+  });
+});
+
+// POST /api/admin/presets/:id/groups - add group to preset
+api.post("/admin/presets/:id/groups", async (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const presetId = Number(c.req.param("id"));
+  const body = await c.req.json<{ group_id: number }>();
+
+  if (!body.group_id) {
+    return c.json({ error: "group_id required" }, 400);
+  }
+
+  queries.addGroupToPreset(presetId, body.group_id);
+
+  apiLog.info({ presetId, groupId: body.group_id }, "Admin added group to preset");
+  return c.json({ success: true });
+});
+
+// DELETE /api/admin/presets/:id/groups/:groupId - remove group from preset
+api.delete("/admin/presets/:id/groups/:groupId", (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const presetId = Number(c.req.param("id"));
+  const groupId = Number(c.req.param("groupId"));
+
+  queries.removeGroupFromPreset(presetId, groupId);
+
+  apiLog.info({ presetId, groupId }, "Admin removed group from preset");
+  return c.json({ success: true });
+});
+
+// GET /api/admin/cities - list unique cities for filtering
+api.get("/admin/cities", (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const cities = queries.getUniqueCities();
+  return c.json({ items: cities.map((c) => c.city) });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //                          PROMOTION ENDPOINTS
 // ═══════════════════════════════════════════════════════════════════════════════
 

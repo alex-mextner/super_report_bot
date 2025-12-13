@@ -1645,6 +1645,179 @@ export const queries = {
   },
 
   /**
+   * Get all presets with group count
+   */
+  getAllPresets(): Array<{
+    id: number;
+    region_code: string;
+    region_name: string;
+    country_code: string | null;
+    currency: string | null;
+    group_count: number;
+  }> {
+    return db
+      .prepare<
+        {
+          id: number;
+          region_code: string;
+          region_name: string;
+          country_code: string | null;
+          currency: string | null;
+          group_count: number;
+        },
+        []
+      >(`
+        SELECT rp.*, COUNT(pg.group_id) as group_count
+        FROM region_presets rp
+        LEFT JOIN preset_groups pg ON pg.preset_id = rp.id
+        GROUP BY rp.id
+        ORDER BY rp.region_name
+      `)
+      .all();
+  },
+
+  /**
+   * Get preset groups with titles
+   */
+  getPresetGroupsWithTitles(presetId: number): Array<{
+    group_id: number;
+    title: string | null;
+    city: string | null;
+  }> {
+    return db
+      .prepare<{ group_id: number; title: string | null; city: string | null }, [number]>(`
+        SELECT pg.group_id, g.title, g.city
+        FROM preset_groups pg
+        LEFT JOIN groups g ON g.telegram_id = pg.group_id
+        WHERE pg.preset_id = ?
+        ORDER BY g.title
+      `)
+      .all(presetId);
+  },
+
+  /**
+   * Create a new preset
+   */
+  createPreset(data: {
+    region_code: string;
+    region_name: string;
+    country_code?: string;
+    currency?: string;
+  }): number {
+    db.prepare(`
+      INSERT INTO region_presets (region_code, region_name, country_code, currency)
+      VALUES (?, ?, ?, ?)
+    `).run(data.region_code, data.region_name, data.country_code ?? null, data.currency ?? null);
+
+    const result = db.prepare<{ id: number }, []>("SELECT last_insert_rowid() as id").get();
+    return result?.id ?? 0;
+  },
+
+  /**
+   * Update preset
+   */
+  updatePreset(
+    presetId: number,
+    data: {
+      region_code?: string;
+      region_name?: string;
+      country_code?: string | null;
+      currency?: string | null;
+    }
+  ): void {
+    const updates: string[] = [];
+    const values: (string | null)[] = [];
+
+    if (data.region_code !== undefined) {
+      updates.push("region_code = ?");
+      values.push(data.region_code);
+    }
+    if (data.region_name !== undefined) {
+      updates.push("region_name = ?");
+      values.push(data.region_name);
+    }
+    if (data.country_code !== undefined) {
+      updates.push("country_code = ?");
+      values.push(data.country_code);
+    }
+    if (data.currency !== undefined) {
+      updates.push("currency = ?");
+      values.push(data.currency);
+    }
+
+    if (updates.length > 0) {
+      values.push(String(presetId));
+      db.prepare(`UPDATE region_presets SET ${updates.join(", ")} WHERE id = ?`).run(...values);
+    }
+  },
+
+  /**
+   * Delete preset and its groups
+   */
+  deletePreset(presetId: number): void {
+    db.prepare("DELETE FROM preset_groups WHERE preset_id = ?").run(presetId);
+    db.prepare("DELETE FROM region_presets WHERE id = ?").run(presetId);
+  },
+
+  /**
+   * Add group to preset
+   */
+  addGroupToPreset(presetId: number, groupId: number): void {
+    db.prepare("INSERT OR IGNORE INTO preset_groups (preset_id, group_id) VALUES (?, ?)").run(
+      presetId,
+      groupId
+    );
+  },
+
+  /**
+   * Remove group from preset
+   */
+  removeGroupFromPreset(presetId: number, groupId: number): void {
+    db.prepare("DELETE FROM preset_groups WHERE preset_id = ? AND group_id = ?").run(
+      presetId,
+      groupId
+    );
+  },
+
+  /**
+   * Get groups available to add to preset (not already in preset, optionally filtered by city)
+   */
+  getAvailableGroupsForPreset(presetId: number, cityFilter?: string): Array<{
+    telegram_id: number;
+    title: string | null;
+    city: string | null;
+  }> {
+    if (cityFilter) {
+      return db
+        .prepare<{ telegram_id: number; title: string | null; city: string | null }, [number, string]>(`
+          SELECT telegram_id, title, city FROM groups
+          WHERE telegram_id NOT IN (SELECT group_id FROM preset_groups WHERE preset_id = ?)
+            AND city = ?
+          ORDER BY title
+        `)
+        .all(presetId, cityFilter);
+    }
+    return db
+      .prepare<{ telegram_id: number; title: string | null; city: string | null }, [number]>(`
+        SELECT telegram_id, title, city FROM groups
+        WHERE telegram_id NOT IN (SELECT group_id FROM preset_groups WHERE preset_id = ?)
+        ORDER BY title
+      `)
+      .all(presetId);
+  },
+
+  /**
+   * Get unique cities from groups table
+   */
+  getUniqueCities(): Array<{ city: string }> {
+    return db
+      .prepare<{ city: string }, []>(
+        "SELECT DISTINCT city FROM groups WHERE city IS NOT NULL AND city != '' ORDER BY city"
+      )
+      .all();
+  },
+
+  /**
    * Get unique countries that have presets
    */
   getUniqueCountries(): Array<{ country_code: string }> {

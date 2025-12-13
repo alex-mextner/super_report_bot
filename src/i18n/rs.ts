@@ -669,6 +669,9 @@ Bot koristi AI, ključne reči i semantičku analizu — pronalazi objave sa gre
   region_saved_with_presets: "✅ Region sačuvan!\n\nEvo grupa za tvoj region. Koristi /addgroup ako želiš da dodaš grupe koje bot još ne poznaje.",
   region_other_addgroup: "✅ Region sačuvan!\n\nKoristi /addgroup da dodaš grupe za praćenje.",
   region_mention_addgroup: "💡 Koristi /addgroup ako želiš da dodaš dodatne grupe.",
+
+  // Admin webapp
+  adminPresets: "Preseti",
 };
 
 export default rs;

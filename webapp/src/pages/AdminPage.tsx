@@ -304,6 +304,7 @@ export function AdminPage() {
           <h1>{t("subscriptions")}</h1>
           <div className="admin-nav-links">
             <Link to="/admin/groups" className="admin-nav-link">{t("adminGroups")}</Link>
+            <Link to="/admin/presets" className="admin-nav-link">{t("adminPresets")}</Link>
             <Link to="/admin/users" className="admin-nav-link">{t("users")}</Link>
           </div>
         </div>
