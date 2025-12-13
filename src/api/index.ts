@@ -836,7 +836,7 @@ api.delete("/admin/presets/:id", (c) => {
   return c.json({ success: true });
 });
 
-// GET /api/admin/presets/:id/available-groups - groups available to add (filtered by city if preset has city)
+// GET /api/admin/presets/:id/available-groups - groups available to add (filtered by city or country)
 api.get("/admin/presets/:id/available-groups", (c) => {
   if (!c.get("isAdmin")) {
     return c.json({ error: "Admin only" }, 403);
@@ -845,10 +845,23 @@ api.get("/admin/presets/:id/available-groups", (c) => {
   const presetId = Number(c.req.param("id"));
   const cityFilter = c.req.query("city");
 
-  // Get preset to check its region_code (which is city)
-  const preset = queries.getPresetByCode(
-    queries.getAllPresets().find((p) => p.id === presetId)?.region_code ?? ""
-  );
+  // Get preset to check its region_code and country_code
+  const preset = queries.getAllPresets().find((p) => p.id === presetId);
+
+  // For country-wide presets (ending with _all), filter by country instead of city
+  const isCountryWide = preset?.region_code?.endsWith("_all");
+
+  if (isCountryWide && preset?.country_code) {
+    const groups = queries.getAvailableGroupsForPresetByCountry(presetId, preset.country_code);
+    return c.json({
+      items: groups.map((g) => ({
+        id: g.telegram_id,
+        title: g.title,
+        city: g.city,
+      })),
+      countryFilter: preset.country_code,
+    });
+  }
 
   // Use city filter from query param, or preset's region_code as default city filter
   const filterCity = cityFilter || preset?.region_code || undefined;

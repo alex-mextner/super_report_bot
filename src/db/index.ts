@@ -1807,6 +1807,24 @@ export const queries = {
   },
 
   /**
+   * Get groups available to add to preset, filtered by country
+   */
+  getAvailableGroupsForPresetByCountry(presetId: number, countryCode: string): Array<{
+    telegram_id: number;
+    title: string | null;
+    city: string | null;
+  }> {
+    return db
+      .prepare<{ telegram_id: number; title: string | null; city: string | null }, [number, string]>(`
+        SELECT telegram_id, title, city FROM groups
+        WHERE telegram_id NOT IN (SELECT group_id FROM preset_groups WHERE preset_id = ?)
+          AND country = ?
+        ORDER BY title
+      `)
+      .all(presetId, countryCode);
+  },
+
+  /**
    * Get unique cities from groups table
    */
   getUniqueCities(): Array<{ city: string }> {
