@@ -405,6 +405,16 @@ export const userMachine = setup({
     CLEAR_PENDING_QUERY: {
       actions: "clearPendingQuery",
     },
+
+    /**
+     * Start collecting feedback after subscription deletion.
+     * Global handler - works from any state so user can disable
+     * a subscription while in the middle of another flow.
+     */
+    START_FEEDBACK: {
+      target: ".collectingFeedbackOutcome",
+      actions: "startFeedback",
+    },
   },
 
   /**
@@ -522,15 +532,6 @@ export const userMachine = setup({
          */
         SET_USER_MODE: {
           actions: "setUserMode",
-        },
-
-        /**
-         * Start collecting feedback after subscription deletion.
-         * Handler sends this after deactivating the subscription.
-         */
-        START_FEEDBACK: {
-          target: "collectingFeedbackOutcome",
-          actions: "startFeedback",
         },
       },
     },
@@ -1064,7 +1065,6 @@ export const userMachine = setup({
           target: "idle",
           actions: "clearAddingGroups",
         },
-
       },
     },
 
