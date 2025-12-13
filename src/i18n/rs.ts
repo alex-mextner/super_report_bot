@@ -657,10 +657,11 @@ Bot koristi AI, ključne reči i semantičku analizu — pronalazi objave sa gre
   bonus_skip: "Ne koristi bonus",
 
   // Tips (shown during LLM processing)
-  tip_referral: "💡 Pozovi prijatelje i zaradi 10% od njihovih kupovina! /referral",
-  tip_plans: "💡 Na Pro planu analiza košta samo 10⭐ umesto 20⭐",
-  tip_usecase_rare: "💡 Bot je odličan za pronalaženje retkih stvari — prati grupe 24/7",
-  tip_usecase_price: "💡 Prati cene: napravi pretplatu za 'iPhone ispod 300€'",
+  tip_header: "💡 Savet dok čekate:",
+  tip_referral: "Pozovi prijatelje i zaradi 10% od njihovih kupovina! /referral",
+  tip_plans: "Na Pro planu analiza košta samo 10⭐ umesto 20⭐",
+  tip_usecase_rare: "Bot je odličan za pronalaženje retkih stvari — prati grupe 24/7",
+  tip_usecase_price: "Prati cene: napravi pretplatu za 'iPhone ispod 300€'",
 
   // Region selection (new users)
   region_select_prompt: "🗺️ Izaberi svoj region:",

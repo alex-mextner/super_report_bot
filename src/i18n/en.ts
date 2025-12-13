@@ -657,10 +657,11 @@ The bot uses AI, keywords and semantic analysis — it finds posts with typos, i
   bonus_skip: "Don't use bonus",
 
   // Tips (shown during LLM processing)
-  tip_referral: "💡 Invite friends and earn 10% from their purchases! /referral",
-  tip_plans: "💡 On Pro plan, analysis costs only 10⭐ instead of 20⭐",
-  tip_usecase_rare: "💡 Bot is great for finding rare items — monitors groups 24/7",
-  tip_usecase_price: "💡 Track prices: create a subscription for 'iPhone under €300'",
+  tip_header: "💡 Tip while you wait:",
+  tip_referral: "Invite friends and earn 10% from their purchases! /referral",
+  tip_plans: "On Pro plan, analysis costs only 10⭐ instead of 20⭐",
+  tip_usecase_rare: "Bot is great for finding rare items — monitors groups 24/7",
+  tip_usecase_price: "Track prices: create a subscription for 'iPhone under €300'",
 
   // Region selection (new users)
   region_select_prompt: "🗺️ Select your region:",

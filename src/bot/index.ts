@@ -268,9 +268,10 @@ async function sendProgressWithPromo(
   if (Math.random() < 0.2) {
     const tipIndex = Math.floor(Math.random() * TIP_KEYS.length);
     const tipKey = TIP_KEYS[tipIndex]!;
+    const tipHeader = tr("tip_header");
     const tip = tr(tipKey);
-    const fullText = `${text}\n\n${tip}`;
-    return context.send(fullText);
+    const fullText = `${text}\n\n_${tipHeader}_\n> ${tip}`;
+    return context.send(fullText, { parse_mode: "Markdown" });
   }
 
   return context.send(text);
