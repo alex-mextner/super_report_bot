@@ -489,6 +489,8 @@ Bot koristi AI, ključne reči i semantičku analizu — pronalazi objave sa gre
   group_adding_count: "Dodajem {count}...",
   group_added_success: "{icon} \"{title}\" dodata!",
   group_add_failed: "Nije uspelo dodavanje \"{title}\": {error}",
+  group_pending_approval: "⏳ Zahtev za pridruživanje \"{title}\" poslat. Čekamo odobrenje admina.",
+  error_no_username_or_invite: "Nema username. Koristi /addgroup invite_link",
 
   // Keyword editing for pending subscription
   kw_pending_positive: "Pozitivne reči: {list}\n\nŠta uraditi?",

@@ -489,6 +489,8 @@ const ru = {
   group_adding_count: "Добавляю {count}...",
   group_added_success: "{icon} \"{title}\" добавлена!",
   group_add_failed: "Не удалось добавить \"{title}\": {error}",
+  group_pending_approval: "⏳ Заявка на вступление в «{title}» отправлена. Ожидаем одобрения админа.",
+  error_no_username_or_invite: "Нет username. Используй /addgroup invite_link",
 
   // Keyword editing for pending subscription
   kw_pending_positive: "Позитивные слова: {list}\n\nЧто сделать?",

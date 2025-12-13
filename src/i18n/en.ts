@@ -489,6 +489,8 @@ The bot uses AI, keywords and semantic analysis — it finds posts with typos, i
   group_adding_count: "Adding {count}...",
   group_added_success: "{icon} \"{title}\" added!",
   group_add_failed: "Failed to add \"{title}\": {error}",
+  group_pending_approval: "⏳ Join request for \"{title}\" sent. Waiting for admin approval.",
+  error_no_username_or_invite: "No username. Use /addgroup invite_link",
 
   // Keyword editing for pending subscription
   kw_pending_positive: "Positive words: {list}\n\nWhat to do?",

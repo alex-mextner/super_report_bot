@@ -1133,6 +1133,26 @@ async function showAddGroupPrompt(
   });
 }
 
+// Send pending group approval request to admin
+async function sendPendingGroupToAdmin(userId: number, group: PendingGroup): Promise<void> {
+  const adminId = process.env.ADMIN_ID;
+  if (!adminId) return;
+
+  const link = group.username ? `https://t.me/${group.username}` : group.inviteLink || "";
+  const title = group.title || "Unknown";
+  const encodedTitle = encodeURIComponent(title);
+
+  await bot.api.sendMessage({
+    chat_id: Number(adminId),
+    text: `⏳ Бот ожидает одобрения в группу:\n${title}\n${link}`,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "✅ Одобрено", callback_data: `pending_approved:${userId}:${group.id}:${encodedTitle}` }],
+      ],
+    },
+  });
+}
+
 // Add group for user (join userbot if needed, save to DB)
 async function addGroupForUser(
   context: { send: (text: string, options?: object) => Promise<unknown> },
@@ -1156,6 +1176,27 @@ async function addGroupForUser(
     return { success: true, groupId: group.id };
   } else {
     const tr = getTranslator(userId);
+
+    // Handle specific error codes
+    if (result.error === "INVITE_REQUEST_SENT") {
+      await context.send(tr("group_pending_approval", { title: group.title || "Unknown" }), {
+        reply_markup: { remove_keyboard: true },
+      });
+      // Notify admin with approval button
+      await sendPendingGroupToAdmin(userId, group);
+      await showAddGroupPrompt(context, userId);
+      return { success: false };
+    }
+
+    if (result.error === "NO_USERNAME_OR_INVITE") {
+      await context.send(tr("error_no_username_or_invite"), {
+        reply_markup: { remove_keyboard: true },
+      });
+      await showAddGroupPrompt(context, userId);
+      return { success: false };
+    }
+
+    // Default error handling
     await context.send(tr("group_add_failed", { title: group.title || "Unknown", error: result.error || "Unknown error" }), {
       reply_markup: { remove_keyboard: true },
     });
@@ -2135,6 +2176,28 @@ ${tr("ai_continue_or_apply")}`,
 bot.on("callback_query", async (context) => {
   const userId = context.from?.id;
   if (!userId) return;
+
+  // Handle pending group approval (admin only)
+  if (context.data?.startsWith("pending_approved:")) {
+    const [, userIdStr, groupIdStr, encodedTitle] = context.data.split(":");
+    const targetUserId = Number(userIdStr);
+    const groupId = Number(groupIdStr);
+    const title = decodeURIComponent(encodedTitle || "");
+
+    // Check if userbot is now member of the group
+    if (await isUserbotMember(groupId)) {
+      queries.addUserGroup(targetUserId, groupId, title, false);
+      const tr = getTranslator(targetUserId);
+      await bot.api.sendMessage({
+        chat_id: targetUserId,
+        text: tr("group_added_success", { icon: "👥", title }),
+      });
+      await context.answer({ text: "✅ Группа добавлена" });
+    } else {
+      await context.answer({ text: "❌ Бот ещё не в группе" });
+    }
+    return;
+  }
 
   let data: { action: string; id?: string | number; type?: string; idx?: number; msgId?: number; grpId?: number; kw?: string; lang?: string };
   try {

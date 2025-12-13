@@ -1515,12 +1515,14 @@ export async function scanFromCache(
   };
 }
 
-// Check if userbot is member of a chat by trying to resolve it
+// Check if userbot is member of a chat via getChatMember
 export async function isUserbotMember(chatId: number): Promise<boolean> {
   try {
-    // Try to get chat info - if it works, we're a member
-    await mtClient.getChat(chatId);
-    return true;
+    const me = await mtClient.getMe();
+    const member = await mtClient.getChatMember({ chatId, userId: me.id });
+    if (!member) return false;
+    // member, admin, creator = participant; left, banned, restricted = not participant
+    return member.status === "member" || member.status === "admin" || member.status === "creator";
   } catch {
     return false;
   }
@@ -1561,7 +1563,7 @@ export async function joinGroupByUserbot(
     }
 
     if (errMsg.includes("INVITE_REQUEST_SENT")) {
-      return { success: false, error: "Запрос отправлен администраторам" };
+      return { success: false, error: "INVITE_REQUEST_SENT" };
     }
 
     if (errMsg.includes("INVITE_HASH_EXPIRED")) {
@@ -1603,7 +1605,7 @@ export async function ensureUserbotInGroup(
     return { success: false, error: result.error };
   }
 
-  return { success: false, error: "Нет username или invite link для присоединения" };
+  return { success: false, error: "NO_USERNAME_OR_INVITE" };
 }
 
 /**
