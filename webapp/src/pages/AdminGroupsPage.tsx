@@ -4,6 +4,7 @@ import { useAdminGroupsWithMetadata, type AdminGroupWithMetadata, type GroupMeta
 import { useTelegram } from "../hooks/useTelegram";
 import { useLocale } from "../context/LocaleContext";
 import type { TranslationKey } from "../i18n";
+import { COUNTRIES, CITIES, CURRENCIES } from "../constants/geo";
 import "./AdminGroupsPage.css";
 
 interface GroupRowProps {
@@ -96,7 +97,13 @@ function GroupRow({ group, onUpdate, t }: GroupRowProps) {
                 onChange={(e) => setCountry(e.target.value.toUpperCase())}
                 placeholder="RS, RU..."
                 maxLength={2}
+                list="countries-list"
               />
+              <datalist id="countries-list">
+                {COUNTRIES.map((c) => (
+                  <option key={c.code} value={c.code}>{c.label}</option>
+                ))}
+              </datalist>
             </div>
 
             <div className="form-field">
@@ -104,9 +111,15 @@ function GroupRow({ group, onUpdate, t }: GroupRowProps) {
               <input
                 type="text"
                 value={city}
-                onChange={(e) => setCity(e.target.value)}
-                placeholder="Belgrade..."
+                onChange={(e) => setCity(e.target.value.toLowerCase().replace(/\s+/g, "_"))}
+                placeholder="rs_belgrade..."
+                list="cities-list"
               />
+              <datalist id="cities-list">
+                {CITIES.map((c) => (
+                  <option key={c.code} value={c.code}>{c.label} ({c.country})</option>
+                ))}
+              </datalist>
             </div>
 
             <div className="form-field">
@@ -117,7 +130,13 @@ function GroupRow({ group, onUpdate, t }: GroupRowProps) {
                 onChange={(e) => setCurrency(e.target.value.toUpperCase())}
                 placeholder="RSD, EUR..."
                 maxLength={3}
+                list="currencies-list"
               />
+              <datalist id="currencies-list">
+                {CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>{c.label}</option>
+                ))}
+              </datalist>
             </div>
           </div>
 
