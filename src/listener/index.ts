@@ -3,6 +3,7 @@ import { tl } from "@mtcute/bun";
 import { queries } from "../db/index.ts";
 import { matchMessageAgainstAll, getPassedMatches } from "../matcher/index.ts";
 import { verifyMatch, verifyMatchBatch, verifyMatchWithItems } from "../llm/verify.ts";
+import { getLLMLanguage } from "../i18n/index.ts";
 import { semanticSearch, isSemanticSearchAvailable } from "../embeddings/search.ts";
 import { notifyUser } from "../bot/index.ts";
 import {
@@ -558,7 +559,8 @@ async function processMessage(msg: Message): Promise<void> {
 
     try {
       // Use multi-item verification - splits message and verifies each item
-      const verification = await verifyMatchWithItems(incomingMsg, subscription);
+      const language = getLLMLanguage(subscription.user_id);
+      const verification = await verifyMatchWithItems(incomingMsg, subscription, language);
 
       if (verification.isMatch) {
         listenerLog.info(
@@ -1168,7 +1170,8 @@ export async function scanGroupHistory(
         }
 
         try {
-          const verification = await verifyMatch(incomingMsg, subscription);
+          const language = getLLMLanguage(subscription.user_id);
+          const verification = await verifyMatch(incomingMsg, subscription, language);
 
           if (verification.isMatch) {
             matchCount++;
@@ -1390,6 +1393,8 @@ export async function scanFromCache(
   const allMatches: HistoryScanMatch[] = [];
 
   if (candidates.length > 0) {
+    const language = getLLMLanguage(subscription.user_id);
+
     // Prepare batch input
     const batchInput = candidates.map((c, index) => ({
       index,
@@ -1405,7 +1410,7 @@ export async function scanFromCache(
     }));
 
     try {
-      const batchResults = await verifyMatchBatch(batchInput, subscription);
+      const batchResults = await verifyMatchBatch(batchInput, subscription, language);
 
       for (const [index, result] of batchResults) {
         const candidate = candidates[index];
@@ -1441,7 +1446,7 @@ export async function scanFromCache(
             timestamp: new Date(),
           };
 
-          const verification = await verifyMatch(incomingMsg, subscription);
+          const verification = await verifyMatch(incomingMsg, subscription, language);
           if (verification.isMatch) {
             allMatches.push({
               messageId: candidate.messageId,

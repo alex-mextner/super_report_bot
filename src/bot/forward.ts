@@ -9,7 +9,7 @@ import { formatRejectionReason, formatDate } from "./rejection-texts.ts";
 import { forwardActionsKeyboard, addGroupKeyboard, analyzeForwardKeyboard } from "./keyboards.ts";
 import { matchMessage } from "../matcher/index.ts";
 import { verifyMatch } from "../llm/verify.ts";
-import { getTranslator, getTranslatorForLocale } from "../i18n/index.ts";
+import { getTranslator, getTranslatorForLocale, getLLMLanguage } from "../i18n/index.ts";
 
 /**
  * Extract forward info from a gramio message
@@ -245,7 +245,7 @@ export async function analyzeForwardedMessage(
     if (matchAnalysis.passed) {
       // Run LLM verification
       try {
-        const verification = await verifyMatch(incomingMsg, subscription);
+        const verification = await verifyMatch(incomingMsg, subscription, getLLMLanguage(userId));
 
         analysisResult = {
           id: 0,

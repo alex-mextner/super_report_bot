@@ -23,7 +23,8 @@ const VISION_CONFIDENCE_THRESHOLD = 0.75;
  */
 export async function verifyMatch(
   message: IncomingMessage,
-  subscription: Subscription
+  subscription: Subscription,
+  language: string = "English"
 ): Promise<VerificationResult> {
   const text = message.text;
   const description = subscription.llm_description;
@@ -36,7 +37,7 @@ export async function verifyMatch(
   if (hasPhoto) {
     try {
       const firstPhoto = message.media!.find((m) => m.type === "photo")!;
-      const visionResult = await verifyWithVision(firstPhoto.buffer, description, text);
+      const visionResult = await verifyWithVision(firstPhoto.buffer, description, text, language);
 
       llmLog.debug(
         {
@@ -76,7 +77,7 @@ export async function verifyMatch(
   // Text-based verification with DeepSeek
   // Pass hasPhoto flag so DeepSeek doesn't guess about photo content from emojis
   try {
-    const result = await verifyMessage(text, description, hasPhoto);
+    const result = await verifyMessage(text, description, hasPhoto, language);
 
     const isMatch = result.isMatch && result.confidence >= DEEPSEEK_CONFIDENCE_THRESHOLD;
 
@@ -141,14 +142,15 @@ export async function verifyMatch(
  */
 export async function verifyMatches(
   message: IncomingMessage,
-  subscriptions: Subscription[]
+  subscriptions: Subscription[],
+  language: string = "English"
 ): Promise<Map<number, VerificationResult>> {
   const results = new Map<number, VerificationResult>();
 
   // Process sequentially to avoid rate limits
   for (const subscription of subscriptions) {
     try {
-      const result = await verifyMatch(message, subscription);
+      const result = await verifyMatch(message, subscription, language);
       results.set(subscription.id, result);
     } catch (error) {
       llmLog.error({ err: error, subscriptionId: subscription.id }, "Failed to verify match");
@@ -179,7 +181,8 @@ export interface BatchMessageInput {
  */
 export async function verifyMatchBatch(
   messages: BatchMessageInput[],
-  subscription: Subscription
+  subscription: Subscription,
+  language: string = "English"
 ): Promise<Map<number, VerificationResult>> {
   const results = new Map<number, VerificationResult>();
 
@@ -220,7 +223,8 @@ export async function verifyMatchBatch(
 
       const batchResults = await verifyMessageBatch(
         batchInput,
-        subscription.llm_description
+        subscription.llm_description,
+        language
       );
 
       for (const result of batchResults) {
@@ -237,7 +241,7 @@ export async function verifyMatchBatch(
       // Fallback: process sequentially
       for (const item of textOnly) {
         try {
-          const result = await verifyMatch(item.message, subscription);
+          const result = await verifyMatch(item.message, subscription, language);
           results.set(item.index, result);
         } catch {
           results.set(item.index, {
@@ -253,7 +257,7 @@ export async function verifyMatchBatch(
   // Process messages with photos individually (need Vision API)
   for (const item of withPhoto) {
     try {
-      const result = await verifyMatch(item.message, subscription);
+      const result = await verifyMatch(item.message, subscription, language);
       results.set(item.index, result);
     } catch (error) {
       llmLog.error({ error, index: item.index }, "Vision verification failed");
@@ -287,7 +291,8 @@ export async function verifyMatchBatch(
  */
 export async function verifyMatchWithItems(
   message: IncomingMessage,
-  subscription: Subscription
+  subscription: Subscription,
+  language: string = "English"
 ): Promise<ItemVerificationResult> {
   const description = subscription.llm_description;
 
@@ -305,7 +310,7 @@ export async function verifyMatchWithItems(
 
   // If single item, use existing verifyMatch for backward compatibility
   if (splitResult.isSingleItem) {
-    const result = await verifyMatch(message, subscription);
+    const result = await verifyMatch(message, subscription, language);
     return {
       ...result,
       matchedItems: result.isMatch ? [message.text] : [],
@@ -325,11 +330,11 @@ export async function verifyMatchWithItems(
 
   let batchResults;
   try {
-    batchResults = await verifyMessageBatch(batchInput, description);
+    batchResults = await verifyMessageBatch(batchInput, description, language);
   } catch (error) {
     llmLog.error({ error, subscriptionId: subscription.id }, "Batch item verification failed");
     // Fallback to single-item logic
-    const result = await verifyMatch(message, subscription);
+    const result = await verifyMatch(message, subscription, language);
     return {
       ...result,
       matchedItems: result.isMatch ? [message.text] : [],

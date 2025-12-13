@@ -8,7 +8,8 @@ export interface AnalysisResult {
   contacts: string[];
 }
 
-const SYSTEM_PROMPT = `Analyze this marketplace message and extract:
+function getSystemPrompt(language: string) {
+  return `Analyze this marketplace message and extract:
 1. Category (what is being sold/offered)
 2. Price (if mentioned)
 3. Currency (RSD, EUR, USD, etc.)
@@ -16,11 +17,12 @@ const SYSTEM_PROMPT = `Analyze this marketplace message and extract:
 
 Respond in JSON format only:
 {
-  "category": "short category name in Russian",
+  "category": "short category name in ${language}",
   "price": "number or null",
   "currency": "currency code or null",
   "contacts": ["array of contacts found"]
 }`;
+}
 
 export interface BatchItem {
   id: number;
@@ -35,7 +37,10 @@ export interface BatchResult {
 /**
  * Analyze multiple messages in one LLM call
  */
-export async function analyzeMessagesBatch(items: BatchItem[]): Promise<BatchResult[]> {
+export async function analyzeMessagesBatch(
+  items: BatchItem[],
+  language: string = "English"
+): Promise<BatchResult[]> {
   if (!process.env.HF_TOKEN) {
     throw new Error("HF_TOKEN not configured");
   }
@@ -50,7 +55,7 @@ export async function analyzeMessagesBatch(items: BatchItem[]): Promise<BatchRes
     const result = await hf.chatCompletion({
       model: MODELS.DEEPSEEK_R1,
       messages: [
-        { role: "system", content: BATCH_SYSTEM_PROMPT },
+        { role: "system", content: getBatchSystemPrompt(language) },
         { role: "user", content: batchPrompt },
       ],
       max_tokens: 3000,
@@ -65,8 +70,9 @@ export async function analyzeMessagesBatch(items: BatchItem[]): Promise<BatchRes
   return parseBatchResponse(response, items);
 }
 
-const BATCH_SYSTEM_PROMPT = `Analyze these marketplace messages and extract for EACH:
-1. Category (what is being sold)
+function getBatchSystemPrompt(language: string) {
+  return `Analyze these marketplace messages and extract for EACH:
+1. Category (what is being sold) - write in ${language}
 2. Price (if mentioned)
 3. Currency (RSD, EUR, USD, etc.)
 4. Contacts (phones, usernames, links)
@@ -76,6 +82,7 @@ Respond with JSON array. Each item must have the original ID:
   {"id": 123, "category": "...", "price": "...", "currency": "...", "contacts": [...]},
   ...
 ]`;
+}
 
 function parseBatchResponse(response: string, items: BatchItem[]): BatchResult[] {
   try {
@@ -122,7 +129,10 @@ function parseBatchResponse(response: string, items: BatchItem[]): BatchResult[]
   }
 }
 
-export async function analyzeMessage(text: string): Promise<AnalysisResult> {
+export async function analyzeMessage(
+  text: string,
+  language: string = "English"
+): Promise<AnalysisResult> {
   if (!process.env.HF_TOKEN) {
     throw new Error("HF_TOKEN not configured");
   }
@@ -131,7 +141,7 @@ export async function analyzeMessage(text: string): Promise<AnalysisResult> {
     const result = await hf.chatCompletion({
       model: MODELS.DEEPSEEK_R1,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: getSystemPrompt(language) },
         { role: "user", content: text },
       ],
       max_tokens: 500,

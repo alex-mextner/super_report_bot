@@ -175,7 +175,7 @@ export async function interpretEditCommand(
   command: string,
   current: CurrentParams,
   conversationHistory: Array<{ role: "user" | "assistant"; content: string }>,
-  language: string = "Russian"
+  language: string = "English"
 ): Promise<EditInterpretationResult> {
   // Build system prompt with current values
   const systemPrompt = EDIT_SYSTEM_PROMPT

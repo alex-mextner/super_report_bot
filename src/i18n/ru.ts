@@ -92,6 +92,11 @@ const ru = {
   kb_analyze_price: "🔍 Анализ — {n}⭐",
   kb_miss: "👎 Мимо",
 
+  // Keyboards - premium plans
+  kb_plan_basic: "Basic — 50⭐/мес",
+  kb_plan_pro: "Pro — 150⭐/мес",
+  kb_plan_business: "Business — 500⭐/мес",
+
   // Keyboards - promotion
   kb_promote_admin: "🚀 Продвинуть (админ)",
   kb_promote_price: "🚀 Продвинуть — {n}⭐",

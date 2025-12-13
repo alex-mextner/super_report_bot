@@ -92,6 +92,11 @@ Koje objave hvatati? Opiši kao da si korisnik koji objavljuje u grupi.`,
   kb_analyze_price: "🔍 Analiza — {n}⭐",
   kb_miss: "👎 Promašaj",
 
+  // Keyboards - premium plans
+  kb_plan_basic: "Basic — 50⭐/mes",
+  kb_plan_pro: "Pro — 150⭐/mes",
+  kb_plan_business: "Business — 500⭐/mes",
+
   // Keyboards - promotion
   kb_promote_admin: "🚀 Promoviši (admin)",
   kb_promote_price: "🚀 Promoviši — {n}⭐",

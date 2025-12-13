@@ -158,6 +158,7 @@ async function retryGenerateKeywords(
     : undefined;
 
   const ratings = ctx.ratingExamples?.ratings || [];
+  const language = getLLMLanguage(userId);
 
   let result;
   try {
@@ -165,10 +166,11 @@ async function retryGenerateKeywords(
       result = await generateKeywordsWithRatings(
         query,
         ratings.map((r) => ({ text: r.text, rating: r.rating })),
-        clarificationContext
+        clarificationContext,
+        language
       );
     } else {
-      result = await generateKeywords(query, clarificationContext);
+      result = await generateKeywords(query, clarificationContext, language);
     }
   } catch (error) {
     botLog.error({ err: error, userId }, "Recovery: LLM keyword generation failed");
@@ -481,7 +483,7 @@ async function retryGenerateExamples(
 
   let result;
   try {
-    result = await generateKeywords(query, clarificationContext);
+    result = await generateKeywords(query, clarificationContext, getLLMLanguage(userId));
   } catch (error) {
     botLog.error({ err: error, userId }, "Recovery: keyword generation failed");
     result = generateKeywordsFallback(query);

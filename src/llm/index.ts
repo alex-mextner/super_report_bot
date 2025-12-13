@@ -270,7 +270,7 @@ export async function verifyMessage(
   messageText: string,
   subscriptionDescription: string,
   hasPhoto?: boolean,
-  language: string = "Russian"
+  language: string = "English"
 ): Promise<VerificationResult> {
   const photoWarning = hasPhoto
     ? "\n\nIMPORTANT: This message contains photo(s) that you CANNOT see. Do NOT guess about photo content based on emojis or text descriptions. Focus ONLY on analyzing the text content itself."
@@ -356,7 +356,7 @@ function parseVerificationResponse(content: string): VerificationResult {
 export async function verifyMessageBatch(
   messages: BatchVerificationInput[],
   subscriptionDescription: string,
-  language: string = "Russian"
+  language: string = "English"
 ): Promise<BatchVerificationResult[]> {
   if (messages.length === 0) {
     return [];

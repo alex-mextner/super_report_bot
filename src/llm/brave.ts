@@ -79,7 +79,8 @@ interface GeneratedExample {
  */
 export async function generateExamplesFromBrave(
   query: string,
-  braveResults: BraveResult[]
+  braveResults: BraveResult[],
+  language: string = "English"
 ): Promise<RatingExample[]> {
   if (braveResults.length === 0) return [];
 
@@ -93,7 +94,8 @@ export async function generateExamplesFromBrave(
 Found information:
 ${searchContext}
 
-Generate 3 example listings.`;
+Generate 3 example listings.
+IMPORTANT: Write all listings in ${language}.`;
 
   try {
     const response = await withRetry(async () => {

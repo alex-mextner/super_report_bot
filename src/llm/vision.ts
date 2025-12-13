@@ -27,7 +27,7 @@ export async function verifyWithVision(
   imageBuffer: Uint8Array,
   subscriptionDescription: string,
   listingText?: string,
-  language: string = "Russian"
+  language: string = "English"
 ): Promise<VisionVerificationResult> {
   const base64Image = Buffer.from(imageBuffer).toString("base64");
   const imageDataUrl = `data:image/jpeg;base64,${base64Image}`;
@@ -173,7 +173,7 @@ export interface ListingImageAnalysis {
 export async function analyzeListingImage(
   imageBuffer: Uint8Array,
   listingText?: string,
-  language: string = "Russian"
+  language: string = "English"
 ): Promise<ListingImageAnalysis> {
   const base64Image = Buffer.from(imageBuffer).toString("base64");
   const imageDataUrl = `data:image/jpeg;base64,${base64Image}`;

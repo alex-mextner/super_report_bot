@@ -1,13 +1,6 @@
 import { InlineKeyboard, Keyboard } from "gramio";
 import type { PendingGroup, UserMode } from "../types";
-import {
-  type Locale,
-  type Translator,
-  getTranslatorForLocale,
-} from "../i18n/index.ts";
-
-// Default translator (Russian) for backwards compatibility
-const defaultT = getTranslatorForLocale("ru");
+import { type Locale, type Translator } from "../i18n/index.ts";
 
 // Language selection keyboard (no translation needed - shows all languages)
 export function languageKeyboard(currentLang?: Locale): InlineKeyboard {
@@ -30,7 +23,7 @@ export function nextRequestId(): number {
 }
 
 // Reply keyboard with requestChat buttons for native Telegram picker
-export function groupPickerKeyboard(requestId: number, t: Translator = defaultT): Keyboard {
+export function groupPickerKeyboard(requestId: number, t: Translator): Keyboard {
   return new Keyboard()
     .requestChat(t("kb_select_group"), requestId, {
       chat_is_channel: false,
@@ -50,7 +43,7 @@ export function groupPickerKeyboard(requestId: number, t: Translator = defaultT)
 }
 
 // Inline keyboard for invite link prompt
-export function inviteLinkKeyboard(t: Translator = defaultT): InlineKeyboard {
+export function inviteLinkKeyboard(t: Translator): InlineKeyboard {
   return new InlineKeyboard()
     .text(t("kb_skip"), JSON.stringify({ action: "skip_invite_link" }))
     .row()
@@ -72,7 +65,7 @@ export function pendingGroupsKeyboard(groups: PendingGroup[]): InlineKeyboard {
 }
 
 // Basic confirmation keyboard for subscription creation
-export const confirmKeyboard = (queryId: string, t: Translator = defaultT) => {
+export const confirmKeyboard = (queryId: string, t: Translator) => {
   return new InlineKeyboard()
     .text(t("kb_confirm"), JSON.stringify({ action: "confirm", id: queryId }))
     .text(t("kb_adjust_ai"), JSON.stringify({ action: "correct_pending", id: queryId }))
@@ -81,7 +74,7 @@ export const confirmKeyboard = (queryId: string, t: Translator = defaultT) => {
 };
 
 // Confirmation keyboard with keyword editing buttons (for advanced mode)
-export const keywordEditConfirmKeyboard = (queryId: string, t: Translator = defaultT) => {
+export const keywordEditConfirmKeyboard = (queryId: string, t: Translator) => {
   return new InlineKeyboard()
     .text(t("kb_confirm"), JSON.stringify({ action: "confirm", id: queryId }))
     .text(t("kb_adjust_ai"), JSON.stringify({ action: "correct_pending", id: queryId }))
@@ -96,9 +89,9 @@ export const subscriptionKeyboard = (
   subscriptionId: number,
   hasNegativeKeywords: boolean,
   hasDisabledNegative: boolean,
-  mode: UserMode = "advanced",
-  isPaused: boolean = false,
-  t: Translator = defaultT
+  mode: UserMode,
+  isPaused: boolean,
+  t: Translator
 ) => {
   const kb = new InlineKeyboard();
 
@@ -131,15 +124,15 @@ export const subscriptionKeyboard = (
   return kb;
 };
 
-export const backKeyboard = (t: Translator = defaultT) =>
+export const backKeyboard = (t: Translator) =>
   new InlineKeyboard().text(t("kb_back"), JSON.stringify({ action: "back" }));
 
 // Groups selection keyboard (for subscription creation)
 export function groupsKeyboard(
   groups: { id: number; title: string }[],
   selectedIds: Set<number>,
-  regionPresets?: Array<{ id: number; region_name: string; groupIds: number[] }>,
-  t: Translator = defaultT
+  regionPresets: Array<{ id: number; region_name: string; groupIds: number[] }> | undefined,
+  t: Translator
 ): InlineKeyboard {
   const kb = new InlineKeyboard();
 
@@ -179,12 +172,12 @@ export function groupsKeyboard(
 }
 
 // Keyboard for clarification questions
-export function skipQuestionKeyboard(t: Translator = defaultT): InlineKeyboard {
+export function skipQuestionKeyboard(t: Translator): InlineKeyboard {
   return new InlineKeyboard().text(t("kb_skip_arrow"), JSON.stringify({ action: "skip_question" }));
 }
 
 // Keyboard for AI editing flow (after proposed changes shown)
-export function aiEditKeyboard(subscriptionId: number, t: Translator = defaultT): InlineKeyboard {
+export function aiEditKeyboard(subscriptionId: number, t: Translator): InlineKeyboard {
   return new InlineKeyboard()
     .text(t("kb_apply"), JSON.stringify({ action: "apply_ai_edit", id: subscriptionId }))
     .text(t("kb_cancel"), JSON.stringify({ action: "cancel_ai_edit", id: subscriptionId }))
@@ -193,24 +186,24 @@ export function aiEditKeyboard(subscriptionId: number, t: Translator = defaultT)
 }
 
 // Keyboard for initial AI editing prompt
-export function aiEditStartKeyboard(subscriptionId: number, t: Translator = defaultT): InlineKeyboard {
+export function aiEditStartKeyboard(subscriptionId: number, t: Translator): InlineKeyboard {
   return new InlineKeyboard().text(`↩️ ${t("kb_back")}`, JSON.stringify({ action: "cancel_ai_edit", id: subscriptionId }));
 }
 
 // Keyboard for initial AI correction prompt
-export function pendingAiCorrectionStartKeyboard(t: Translator = defaultT): InlineKeyboard {
+export function pendingAiCorrectionStartKeyboard(t: Translator): InlineKeyboard {
   return new InlineKeyboard().text(`↩️ ${t("kb_back")}`, JSON.stringify({ action: "cancel_pending_ai" }));
 }
 
 // Keyboard for AI correction of pending subscription (after AI response)
-export function pendingAiEditKeyboard(t: Translator = defaultT): InlineKeyboard {
+export function pendingAiEditKeyboard(t: Translator): InlineKeyboard {
   return new InlineKeyboard()
     .text(t("kb_apply_check"), JSON.stringify({ action: "apply_pending_ai" }))
     .text(`↩️ ${t("kb_back")}`, JSON.stringify({ action: "cancel_pending_ai" }));
 }
 
 // Submenu for editing positive/negative keywords (add/remove choice)
-export function keywordEditSubmenu(type: "positive" | "negative", subscriptionId: number, t: Translator = defaultT): InlineKeyboard {
+export function keywordEditSubmenu(type: "positive" | "negative", subscriptionId: number, t: Translator): InlineKeyboard {
   return new InlineKeyboard()
     .text(t("kb_add"), JSON.stringify({ action: `add_${type}`, id: subscriptionId }))
     .text(t("kb_remove"), JSON.stringify({ action: `remove_${type}`, id: subscriptionId }))
@@ -219,7 +212,7 @@ export function keywordEditSubmenu(type: "positive" | "negative", subscriptionId
 }
 
 // Submenu for editing keywords during confirmation (pending subscription)
-export function keywordEditSubmenuPending(type: "positive" | "negative", t: Translator = defaultT): InlineKeyboard {
+export function keywordEditSubmenuPending(type: "positive" | "negative", t: Translator): InlineKeyboard {
   return new InlineKeyboard()
     .text(t("kb_add"), JSON.stringify({ action: `add_${type}_pending` }))
     .text(t("kb_remove"), JSON.stringify({ action: `remove_${type}_pending` }))
@@ -232,7 +225,7 @@ export function removeKeywordsKeyboard(
   keywords: string[],
   type: "positive" | "negative",
   subscriptionId: number | null,
-  t: Translator = defaultT
+  t: Translator
 ): InlineKeyboard {
   const kb = new InlineKeyboard();
   const isPending = subscriptionId === null;
@@ -256,7 +249,7 @@ export function removeKeywordsKeyboard(
 }
 
 // Rating examples keyboard
-export function ratingKeyboard(exampleIndex: number, totalExamples: number, t: Translator = defaultT): InlineKeyboard {
+export function ratingKeyboard(exampleIndex: number, totalExamples: number, t: Translator): InlineKeyboard {
   return new InlineKeyboard()
     .text(t("kb_rate_hot"), JSON.stringify({ action: "rate_hot", idx: exampleIndex }))
     .text(t("kb_rate_warm"), JSON.stringify({ action: "rate_warm", idx: exampleIndex }))
@@ -266,7 +259,7 @@ export function ratingKeyboard(exampleIndex: number, totalExamples: number, t: T
 }
 
 // Settings keyboard
-export function settingsKeyboard(currentMode: UserMode, t: Translator = defaultT): InlineKeyboard {
+export function settingsKeyboard(currentMode: UserMode, t: Translator): InlineKeyboard {
   const kb = new InlineKeyboard();
 
   if (currentMode === "normal") {
@@ -285,8 +278,8 @@ export function forwardActionsKeyboard(
   subscriptionId: number,
   messageId: number,
   groupId: number,
-  rejectionKeyword?: string | null,
-  t: Translator = defaultT
+  rejectionKeyword: string | null | undefined,
+  t: Translator
 ): InlineKeyboard {
   if (rejectionKeyword) {
     return new InlineKeyboard().text(
@@ -300,11 +293,11 @@ export function forwardActionsKeyboard(
     .text(t("kb_with_ai"), JSON.stringify({ a: "ai_fwd", s: subscriptionId }));
 }
 
-export function analyzeForwardKeyboard(t: Translator = defaultT): InlineKeyboard {
+export function analyzeForwardKeyboard(t: Translator): InlineKeyboard {
   return new InlineKeyboard().text(t("kb_analyze"), JSON.stringify({ action: "analyze_forward" }));
 }
 
-export function addGroupKeyboard(chatId: number, title?: string, t: Translator = defaultT): InlineKeyboard {
+export function addGroupKeyboard(chatId: number, title: string | undefined, t: Translator): InlineKeyboard {
   return new InlineKeyboard().text(
     `➕ ${t("kb_add_group")}`,
     JSON.stringify({ action: "add_group_quick", id: chatId, title: title || "Unknown" })
@@ -312,33 +305,33 @@ export function addGroupKeyboard(chatId: number, title?: string, t: Translator =
 }
 
 // Deletion feedback keyboards
-export function feedbackOutcomeKeyboard(subscriptionId: number, t: Translator = defaultT): InlineKeyboard {
+export function feedbackOutcomeKeyboard(subscriptionId: number, t: Translator): InlineKeyboard {
   return new InlineKeyboard()
     .text(`✅ ${t("kb_yes")}`, JSON.stringify({ action: "feedback_outcome", id: subscriptionId, outcome: "bought" }))
     .text(`❌ ${t("kb_no")}`, JSON.stringify({ action: "feedback_outcome", id: subscriptionId, outcome: "not_bought" }))
     .text("🤷", JSON.stringify({ action: "feedback_outcome", id: subscriptionId, outcome: "complicated" }));
 }
 
-export function feedbackReviewKeyboard(subscriptionId: number, t: Translator = defaultT): InlineKeyboard {
+export function feedbackReviewKeyboard(subscriptionId: number, t: Translator): InlineKeyboard {
   return new InlineKeyboard().text(t("kb_not_this_time"), JSON.stringify({ action: "skip_feedback", id: subscriptionId }));
 }
 
 // Premium / monetization keyboards
-export function premiumKeyboard(currentPlan: string): InlineKeyboard {
+export function premiumKeyboard(currentPlan: string, t: Translator): InlineKeyboard {
   const kb = new InlineKeyboard();
 
   if (currentPlan === "free") {
-    kb.text("Basic — 50⭐/мес", JSON.stringify({ action: "upgrade", plan: "basic" }));
+    kb.text(t("kb_plan_basic"), JSON.stringify({ action: "upgrade", plan: "basic" }));
     kb.row();
-    kb.text("Pro — 150⭐/мес", JSON.stringify({ action: "upgrade", plan: "pro" }));
+    kb.text(t("kb_plan_pro"), JSON.stringify({ action: "upgrade", plan: "pro" }));
     kb.row();
-    kb.text("Business — 500⭐/мес", JSON.stringify({ action: "upgrade", plan: "business" }));
+    kb.text(t("kb_plan_business"), JSON.stringify({ action: "upgrade", plan: "business" }));
   } else if (currentPlan === "basic") {
-    kb.text("Pro — 150⭐/мес", JSON.stringify({ action: "upgrade", plan: "pro" }));
+    kb.text(t("kb_plan_pro"), JSON.stringify({ action: "upgrade", plan: "pro" }));
     kb.row();
-    kb.text("Business — 500⭐/мес", JSON.stringify({ action: "upgrade", plan: "business" }));
+    kb.text(t("kb_plan_business"), JSON.stringify({ action: "upgrade", plan: "business" }));
   } else if (currentPlan === "pro") {
-    kb.text("Business — 500⭐/мес", JSON.stringify({ action: "upgrade", plan: "business" }));
+    kb.text(t("kb_plan_business"), JSON.stringify({ action: "upgrade", plan: "business" }));
   }
 
   return kb;
@@ -348,8 +341,8 @@ export function analyzeButtonKeyboard(
   messageId: number,
   groupId: number,
   price: number,
-  subscriptionId?: number,
-  t: Translator = defaultT
+  subscriptionId: number | undefined,
+  t: Translator
 ): InlineKeyboard {
   const kb = new InlineKeyboard();
   const priceLabel = price === 0 ? t("kb_analyze_free") : t("kb_analyze_price", { n: price });
@@ -361,13 +354,13 @@ export function notificationFeedbackKeyboard(
   messageId: number,
   groupId: number,
   subscriptionId: number,
-  t: Translator = defaultT
+  t: Translator
 ): InlineKeyboard {
   return new InlineKeyboard().text(t("kb_miss"), JSON.stringify({ action: "miss_feedback", m: messageId, g: groupId, s: subscriptionId }));
 }
 
 // Promotion keyboards
-export function promoteProductKeyboard(messageId: number, groupId: number, isAdmin: boolean = false, t: Translator = defaultT): InlineKeyboard {
+export function promoteProductKeyboard(messageId: number, groupId: number, isAdmin: boolean, t: Translator): InlineKeyboard {
   const kb = new InlineKeyboard();
   if (isAdmin) {
     kb.text(t("kb_promote_admin"), JSON.stringify({ action: "promote_product_admin", m: messageId, g: groupId }));
@@ -377,7 +370,7 @@ export function promoteProductKeyboard(messageId: number, groupId: number, isAdm
   return kb;
 }
 
-export function promoteGroupKeyboard(groupId: number, isAdmin: boolean = false, t: Translator = defaultT): InlineKeyboard {
+export function promoteGroupKeyboard(groupId: number, isAdmin: boolean, t: Translator): InlineKeyboard {
   const kb = new InlineKeyboard();
   if (isAdmin) {
     kb.text(t("kb_promote_group_admin"), JSON.stringify({ action: "promote_group_admin", g: groupId }));
@@ -390,9 +383,9 @@ export function promoteGroupKeyboard(groupId: number, isAdmin: boolean = false, 
 export function promotionDurationKeyboard(
   type: "product" | "group",
   targetId: number,
-  groupId?: number,
-  isAdmin: boolean = false,
-  t: Translator = defaultT
+  groupId: number | undefined,
+  isAdmin: boolean,
+  t: Translator
 ): InlineKeyboard {
   const kb = new InlineKeyboard();
   const prices = type === "product" ? { d3: 100, d7: 200, d30: 500 } : { d3: 300, d7: 600, d30: 1500 };
@@ -417,7 +410,7 @@ export function promotionDurationKeyboard(
 // Region Presets keyboards
 export function presetsListKeyboard(
   presets: Array<{ id: number; region_code: string; region_name: string; group_count: number; hasAccess: boolean }>,
-  t: Translator = defaultT
+  t: Translator
 ): InlineKeyboard {
   const kb = new InlineKeyboard();
 
@@ -431,7 +424,7 @@ export function presetsListKeyboard(
   return kb;
 }
 
-export function presetBuyKeyboard(presetId: number, hasAccess: boolean, t: Translator = defaultT): InlineKeyboard {
+export function presetBuyKeyboard(presetId: number, hasAccess: boolean, t: Translator): InlineKeyboard {
   const kb = new InlineKeyboard();
 
   if (hasAccess) {
@@ -448,7 +441,7 @@ export function presetBuyKeyboard(presetId: number, hasAccess: boolean, t: Trans
   return kb;
 }
 
-export function regionSelectionKeyboard(countries: Array<{ country_code: string; country_name: string }>, t: Translator = defaultT): InlineKeyboard {
+export function regionSelectionKeyboard(countries: Array<{ country_code: string; country_name: string }>, t: Translator): InlineKeyboard {
   const kb = new InlineKeyboard();
 
   for (const country of countries) {
@@ -462,7 +455,7 @@ export function regionSelectionKeyboard(countries: Array<{ country_code: string;
 }
 
 // Simple region keyboard: Belgrade / Novi Sad / Other (for new users)
-export function simpleRegionKeyboard(t: Translator = defaultT): InlineKeyboard {
+export function simpleRegionKeyboard(t: Translator): InlineKeyboard {
   return new InlineKeyboard()
     .text(t("region_belgrade"), JSON.stringify({ action: "select_region", code: "rs_belgrade" }))
     .row()
@@ -473,7 +466,7 @@ export function simpleRegionKeyboard(t: Translator = defaultT): InlineKeyboard {
 
 export function presetSelectionKeyboard(
   presets: Array<{ id: number; region_name: string; group_count: number; hasAccess: boolean }>,
-  t: Translator = defaultT
+  t: Translator
 ): InlineKeyboard {
   const kb = new InlineKeyboard();
 
@@ -490,7 +483,7 @@ export function presetSelectionKeyboard(
 }
 
 // Publication keyboards
-export function publishMenuKeyboard(hasSession: boolean, t: Translator = defaultT): InlineKeyboard {
+export function publishMenuKeyboard(hasSession: boolean, t: Translator): InlineKeyboard {
   const kb = new InlineKeyboard();
 
   if (hasSession) {
@@ -508,7 +501,7 @@ export function publishMenuKeyboard(hasSession: boolean, t: Translator = default
 
 export function publishPresetKeyboard(
   presets: Array<{ id: number; region_name: string; group_count: number }>,
-  t: Translator = defaultT
+  t: Translator
 ): InlineKeyboard {
   const kb = new InlineKeyboard();
 
@@ -522,7 +515,7 @@ export function publishPresetKeyboard(
   return kb;
 }
 
-export function publishConfirmKeyboard(publicationId: number, hasCredit: boolean = false, t: Translator = defaultT): InlineKeyboard {
+export function publishConfirmKeyboard(publicationId: number, hasCredit: boolean, t: Translator): InlineKeyboard {
   const keyboard = new InlineKeyboard();
 
   if (hasCredit) {
@@ -537,11 +530,11 @@ export function publishConfirmKeyboard(publicationId: number, hasCredit: boolean
   return keyboard;
 }
 
-export function cancelAuthKeyboard(t: Translator = defaultT): InlineKeyboard {
+export function cancelAuthKeyboard(t: Translator): InlineKeyboard {
   return new InlineKeyboard().text(`❌ ${t("kb_cancel")}`, JSON.stringify({ action: "cancel_auth" }));
 }
 
-export function contentInputKeyboard(hasContent: boolean = false, t: Translator = defaultT): InlineKeyboard {
+export function contentInputKeyboard(hasContent: boolean, t: Translator): InlineKeyboard {
   const kb = new InlineKeyboard();
   if (hasContent) {
     kb.text(`✅ ${t("kb_done")}`, JSON.stringify({ action: "content_done" }));

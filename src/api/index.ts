@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { queries } from "../db/index.ts";
 import { validateInitData, parseInitDataUser, parseInitDataLanguage } from "./auth.ts";
-import { getUserLocale, getIntlLocale, detectLocale, isValidLocale } from "../i18n/index.ts";
+import { getUserLocale, getIntlLocale, detectLocale, isValidLocale, getLLMLanguage } from "../i18n/index.ts";
 import { apiLog } from "../logger.ts";
 import { getMessages, getAllCachedMessages, getCachedGroups, getCachedMessageById, getTopicsByGroup } from "../cache/messages.ts";
 import { analyzeMessage, analyzeMessagesBatch, type BatchItem } from "../llm/analyze.ts";
@@ -173,7 +173,9 @@ api.post("/analyze", async (c) => {
   }
 
   try {
-    const result = await analyzeMessage(body.text);
+    const userId = c.get("userId");
+    const language = userId ? getLLMLanguage(userId) : "English";
+    const result = await analyzeMessage(body.text, language);
     return c.json(result);
   } catch (error) {
     apiLog.error({ err: error }, "AI analysis failed");
@@ -212,8 +214,10 @@ api.post("/analyze-batch", async (c) => {
   }));
 
   try {
+    const userId = c.get("userId");
+    const language = userId ? getLLMLanguage(userId) : "English";
     apiLog.info({ count: items.length, groupId }, "Starting batch analysis");
-    const results = await analyzeMessagesBatch(items);
+    const results = await analyzeMessagesBatch(items, language);
     return c.json({ results });
   } catch (error) {
     apiLog.error({ err: error }, "Batch AI analysis failed");

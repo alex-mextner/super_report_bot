@@ -92,6 +92,11 @@ What posts to catch? Describe as if you're a user posting in a group.`,
   kb_analyze_price: "🔍 Analyze — {n}⭐",
   kb_miss: "👎 Miss",
 
+  // Keyboards - premium plans
+  kb_plan_basic: "Basic — 50⭐/mo",
+  kb_plan_pro: "Pro — 150⭐/mo",
+  kb_plan_business: "Business — 500⭐/mo",
+
   // Keyboards - promotion
   kb_promote_admin: "🚀 Promote (admin)",
   kb_promote_price: "🚀 Promote — {n}⭐",

@@ -290,7 +290,7 @@ ${example.text.slice(0, 500)}${example.text.length > 500 ? "..." : ""}
 
 ${tr("rating_is_this_match")}`,
     {
-      reply_markup: ratingKeyboard(index, total),
+      reply_markup: ratingKeyboard(index, total, tr),
     }
   );
 }
@@ -388,7 +388,7 @@ async function startRatingFlow(
     const braveResults = await searchBrave(query);
     if (braveResults.length > 0) {
       try {
-        const braveExamples = await generateExamplesFromBrave(query, braveResults);
+        const braveExamples = await generateExamplesFromBrave(query, braveResults, getLLMLanguage(userId));
         // AI filter Brave examples too
         const filteredBrave = await filterExamplesWithAI(braveExamples, query);
         examples = [...examples, ...filteredBrave].slice(0, 3);
@@ -407,7 +407,7 @@ async function startRatingFlow(
         userId,
         "GENERATE_EXAMPLES",
         undefined,
-        () => generateExampleMessages(query)
+        () => generateExampleMessages(query, getLLMLanguage(userId))
       );
       const synthetic = generatedToRatingExamples(generated);
       examples = [...examples, ...synthetic].slice(0, 3);
@@ -429,7 +429,7 @@ async function startRatingFlow(
       messageId,
       async (): Promise<KeywordGenerationResult> => {
         try {
-          return await generateKeywords(query, clarificationContext);
+          return await generateKeywords(query, clarificationContext, getLLMLanguage(userId));
         } catch (error) {
           botLog.error({ err: error, userId }, "LLM keyword generation failed");
           return generateKeywordsFallback(query);
@@ -506,19 +506,21 @@ async function finishRatingAndGenerateKeywords(
     "GENERATE_KEYWORDS",
     messageId,
     async (): Promise<KeywordGenerationResult> => {
+      const language = getLLMLanguage(userId);
       if (ratings.length > 0) {
         // Generate with ratings feedback
         try {
           return await generateKeywordsWithRatings(
             query,
             ratings.map((r) => ({ text: r.text, rating: r.rating })),
-            clarificationContext
+            clarificationContext,
+            language
           );
         } catch (error) {
           botLog.error({ err: error, userId }, "LLM generation with ratings failed");
           // Fallback to regular generation
           try {
-            return await generateKeywords(query, clarificationContext);
+            return await generateKeywords(query, clarificationContext, language);
           } catch {
             return generateKeywordsFallback(query);
           }
@@ -526,7 +528,7 @@ async function finishRatingAndGenerateKeywords(
       } else {
         // No ratings, use regular generation
         try {
-          return await generateKeywords(query, clarificationContext);
+          return await generateKeywords(query, clarificationContext, language);
         } catch (error) {
           botLog.error({ err: error, userId }, "LLM keyword generation failed");
           return generateKeywordsFallback(query);
@@ -557,7 +559,7 @@ async function generateKeywordsAndShowResult(
     messageId,
     async (): Promise<KeywordGenerationResult> => {
       try {
-        return await generateKeywords(query, clarificationContext);
+        return await generateKeywords(query, clarificationContext, getLLMLanguage(userId));
       } catch (error) {
         botLog.error({ err: error, userId }, "LLM keyword generation failed");
         return generateKeywordsFallback(query);
@@ -855,12 +857,13 @@ bot.command("premium", async (context) => {
   if (!userId) return;
 
   queries.getOrCreateUser(userId, context.from?.firstName, context.from?.username);
+  const tr = getTranslator(userId);
 
   const planInfo = formatPlanInfo(userId);
   const { plan } = queries.getUserPlan(userId);
 
   await context.send(planInfo, {
-    reply_markup: premiumKeyboard(plan),
+    reply_markup: premiumKeyboard(plan, tr),
   });
 });
 
@@ -1367,7 +1370,7 @@ async function processForwardedMessage(
       await context.send(
         reasonText,
         {
-          reply_markup: analyzeForwardKeyboard(),
+          reply_markup: analyzeForwardKeyboard(tr),
           reply_parameters: { message_id: context.id! },
         }
       );
@@ -1386,7 +1389,8 @@ async function processForwardedMessage(
               analysis.subscription_id,
               result.forwardInfo.messageId ?? 0,
               result.forwardInfo.chatId,
-              analysis.rejection_keyword
+              analysis.rejection_keyword,
+              tr
             ),
           });
         } else {
@@ -1701,7 +1705,7 @@ ${code(c.pendingSub.positiveKeywords.join(", "))}
 ${bold(tr("kw_negative"))}
 ${code(unique.join(", "))}
         `,
-        { reply_markup: keywordEditConfirmKeyboard(queryId) }
+        { reply_markup: keywordEditConfirmKeyboard(queryId, tr) }
       );
       return;
     }
@@ -1787,7 +1791,7 @@ ${code(updatedC.pendingSub?.positiveKeywords.join(", ") || "")}
 ${bold(tr("kw_negative"))}
 ${code(updatedC.pendingSub?.negativeKeywords.join(", ") || tr("analysis_none"))}
         `,
-        { reply_markup: keywordEditConfirmKeyboard(queryId) }
+        { reply_markup: keywordEditConfirmKeyboard(queryId, tr) }
       );
       return;
     }
@@ -1988,13 +1992,15 @@ ${tr("ai_continue_or_apply")}`,
           "AI_CORRECT",
           undefined, // MessageContext.send() doesn't return message_id
           async () => {
+            const language = getLLMLanguage(userId);
             const descResult = await correctDescription(
               c.pendingSub!.originalQuery,
               currentSnake.llm_description,
-              text
+              text,
+              language
             );
             // Regenerate keywords based on new description
-            const keywordsResult = await generateKeywords(descResult.description);
+            const keywordsResult = await generateKeywords(descResult.description, undefined, language);
             return { descResult, keywordsResult };
           }
         );
@@ -2221,7 +2227,7 @@ ${groups.length}
       await context.answer({ text: tr("cb_select_action") });
       await context.editText(
         tr("kw_pending_positive", { list: c.pendingSub.positiveKeywords.join(", ") }),
-        { reply_markup: keywordEditSubmenuPending("positive") }
+        { reply_markup: keywordEditSubmenuPending("positive", tr) }
       );
       break;
     }
@@ -2235,7 +2241,7 @@ ${groups.length}
       await context.answer({ text: tr("cb_select_action") });
       await context.editText(
         tr("kw_pending_positive", { list: c.pendingSub.positiveKeywords.join(", ") }),
-        { reply_markup: keywordEditSubmenuPending("positive") }
+        { reply_markup: keywordEditSubmenuPending("positive", tr) }
       );
       break;
     }
@@ -2249,7 +2255,7 @@ ${groups.length}
       await context.answer({ text: tr("cb_select_action") });
       await context.editText(
         tr("kw_pending_negative", { list: c.pendingSub.negativeKeywords.join(", ") || tr("analysis_none") }),
-        { reply_markup: keywordEditSubmenuPending("negative") }
+        { reply_markup: keywordEditSubmenuPending("negative", tr) }
       );
       break;
     }
@@ -2298,7 +2304,7 @@ ${groups.length}
       await context.answer({ text: tr("kw_select_words") });
       await context.editText(
         tr("kw_select_words_numbered", { label: tr("kw_positive_label"), list }),
-        { reply_markup: removeKeywordsKeyboard(keywords, "positive", null) }
+        { reply_markup: removeKeywordsKeyboard(keywords, "positive", null, tr) }
       );
       break;
     }
@@ -2319,7 +2325,7 @@ ${groups.length}
       await context.answer({ text: tr("kw_select_words") });
       await context.editText(
         tr("kw_select_words_numbered", { label: tr("kw_negative_label"), list }),
-        { reply_markup: removeKeywordsKeyboard(keywords, "negative", null) }
+        { reply_markup: removeKeywordsKeyboard(keywords, "negative", null, tr) }
       );
       break;
     }
@@ -2375,14 +2381,14 @@ ${code(updatedC.pendingSub?.negativeKeywords.join(", ") || tr("analysis_none"))}
 ${bold(tr("list_llm_description"))}
 ${updatedC.pendingSub?.llmDescription ?? ""}
           `,
-          { reply_markup: keywordEditConfirmKeyboard(queryId) }
+          { reply_markup: keywordEditConfirmKeyboard(queryId, tr) }
         );
       } else {
         const list = keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
         const label = type === "positive" ? tr("kw_positive_label") : tr("kw_negative_label");
         await context.editText(
           tr("kw_words_list", { label, list }),
-          { reply_markup: removeKeywordsKeyboard(keywords, type, null) }
+          { reply_markup: removeKeywordsKeyboard(keywords, type, null, tr) }
         );
       }
       break;
@@ -2410,7 +2416,7 @@ ${code(c.pendingSub.negativeKeywords.join(", ") || tr("analysis_none"))}
 ${bold(tr("list_llm_description"))}
 ${c.pendingSub.llmDescription}
         `,
-        { reply_markup: keywordEditConfirmKeyboard(queryId) }
+        { reply_markup: keywordEditConfirmKeyboard(queryId, tr) }
       );
       break;
     }
@@ -2441,7 +2447,7 @@ ${c.pendingSub.llmDescription}
         const questionNumber = `(${nextIndex + 1}/${questions.length})`;
         await context.answer({ text: tr("clarify_skipped") });
         await context.editText(format`${bold(tr("clarify_question"))} ${questionNumber}\n\n${nextQuestion}`, {
-          reply_markup: skipQuestionKeyboard(),
+          reply_markup: skipQuestionKeyboard(tr),
         });
       } else {
         // All questions done — start rating flow (semantic search by query)
@@ -2466,7 +2472,7 @@ ${c.pendingSub.llmDescription}
 
       // Ask for feedback
       await context.editText(tr("sub_disabled_ask_feedback"), {
-        reply_markup: feedbackOutcomeKeyboard(subscriptionId),
+        reply_markup: feedbackOutcomeKeyboard(subscriptionId, tr),
       });
 
       // Transition FSM to collect feedback
@@ -2513,7 +2519,7 @@ ${bold(tr("list_query"))} ${sub.original_query}
         }
 
         await context.editText(messageText);
-        await context.editReplyMarkup(subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg, mode, true));
+        await context.editReplyMarkup(subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg, mode, true, tr));
       }
       break;
     }
@@ -2553,7 +2559,7 @@ ${bold(tr("list_query"))} ${sub.original_query}
         }
 
         await context.editText(messageText);
-        await context.editReplyMarkup(subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg, mode, false));
+        await context.editReplyMarkup(subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg, mode, false, tr));
       }
       break;
     }
@@ -2595,7 +2601,7 @@ ${bold(tr("list_query"))} ${sub.original_query}
       await context.answer({ text: tr("cb_select_action") });
       await context.editText(
         tr("kw_pending_positive", { list: sub.positive_keywords.join(", ") }),
-        { reply_markup: keywordEditSubmenu("positive", subscriptionId) }
+        { reply_markup: keywordEditSubmenu("positive", subscriptionId, tr) }
       );
       break;
     }
@@ -2612,7 +2618,7 @@ ${bold(tr("list_query"))} ${sub.original_query}
       await context.answer({ text: tr("cb_select_action") });
       await context.editText(
         tr("kw_pending_negative", { list: sub.negative_keywords.join(", ") || tr("analysis_none") }),
-        { reply_markup: keywordEditSubmenu("negative", subscriptionId) }
+        { reply_markup: keywordEditSubmenu("negative", subscriptionId, tr) }
       );
       break;
     }
@@ -2660,6 +2666,7 @@ ${bold(tr("list_query"))} ${sub.original_query}
       await context.answer({
         text: hasNeg ? tr("list_exclusions_disabled") : tr("list_exclusions_enabled"),
       });
+      const mode = queries.getUserMode(userId);
       await context.editText(
         format`
 ${bold(tr("list_sub_header", { id: updated.id, pause: "" }))}
@@ -2668,7 +2675,7 @@ ${bold(tr("list_keywords"))} ${code(updated.positive_keywords.join(", "))}
 ${bold(tr("list_exclusions"))} ${code(exclusionsText)}
         `,
         {
-          reply_markup: subscriptionKeyboard(subscriptionId, newHasNeg, newHasDisabled),
+          reply_markup: subscriptionKeyboard(subscriptionId, newHasNeg, newHasDisabled, mode, false, tr),
         }
       );
       break;
@@ -2689,7 +2696,7 @@ ${bold(tr("list_exclusions"))} ${code(exclusionsText)}
         undefined, // callback query doesn't have message_id for progress
         async (): Promise<KeywordGenerationResult> => {
           try {
-            return await generateKeywords(c.pendingSub!.originalQuery);
+            return await generateKeywords(c.pendingSub!.originalQuery, undefined, getLLMLanguage(userId));
           } catch (error) {
             botLog.error({ err: error, userId }, "LLM regeneration failed");
             throw error;
@@ -2731,8 +2738,8 @@ ${tr("ai_confirm_or_change")}
         `,
         {
           reply_markup: queries.getUserMode(userId) === "advanced"
-            ? keywordEditConfirmKeyboard(queryId)
-            : confirmKeyboard(queryId),
+            ? keywordEditConfirmKeyboard(queryId, tr)
+            : confirmKeyboard(queryId, tr),
         }
       );
       break;
@@ -2776,7 +2783,7 @@ ${bold(tr("list_description"))} ${sub.llm_description}
 
 ${tr("ai_edit_examples")}`,
         {
-          reply_markup: aiEditStartKeyboard(subscriptionId),
+          reply_markup: aiEditStartKeyboard(subscriptionId, tr),
         }
       );
       break;
@@ -2834,7 +2841,7 @@ ${bold(tr("ai_words"))} ${code(current.negativeKeywords.join(", ") || tr("analys
 ${bold(tr("list_description"))} ${current.llmDescription}
 
 ${tr("ai_edit_short_examples")}`,
-        { reply_markup: aiEditStartKeyboard(subscriptionId) }
+        { reply_markup: aiEditStartKeyboard(subscriptionId, tr) }
       );
       break;
     }
@@ -2874,7 +2881,7 @@ ${pending.llmDescription}
 
 ${tr("ai_clarify_examples")}`,
           {
-            reply_markup: pendingAiCorrectionStartKeyboard(),
+            reply_markup: pendingAiCorrectionStartKeyboard(tr),
           }
         );
       } else {
@@ -2892,7 +2899,7 @@ ${bold(tr("list_description"))} ${pending.llmDescription}
 
 ${tr("ai_edit_short_examples")}`,
           {
-            reply_markup: pendingAiCorrectionStartKeyboard(),
+            reply_markup: pendingAiCorrectionStartKeyboard(tr),
           }
         );
       }
@@ -2931,11 +2938,11 @@ ${proposed.llmDescription}
 
 ${tr("ai_confirm_or_change")}
           `,
-          { reply_markup: keywordEditConfirmKeyboard(queryId) }
+          { reply_markup: keywordEditConfirmKeyboard(queryId, tr) }
         );
       } else {
         await context.editText(tr("ai_confirm_or_change"), {
-          reply_markup: confirmKeyboard(queryId),
+          reply_markup: confirmKeyboard(queryId, tr),
         });
       }
       break;
@@ -2972,8 +2979,8 @@ ${tr("ai_confirm_or_change")}
         `,
         {
           reply_markup: queries.getUserMode(userId) === "advanced"
-            ? keywordEditConfirmKeyboard(queryId)
-            : confirmKeyboard(queryId),
+            ? keywordEditConfirmKeyboard(queryId, tr)
+            : confirmKeyboard(queryId, tr),
         }
       );
       break;
@@ -3004,6 +3011,7 @@ ${tr("ai_confirm_or_change")}
       }
 
       await context.answer({ text: "OK" });
+      const mode = queries.getUserMode(userId);
       await context.editText(
         format`
 ${bold(tr("list_sub_header", { id: sub.id, pause: "" }))}
@@ -3015,7 +3023,10 @@ ${bold(tr("list_exclusions"))} ${code(exclusionsText)}
           reply_markup: subscriptionKeyboard(
             sub.id,
             sub.negative_keywords.length > 0,
-            (sub.disabled_negative_keywords?.length ?? 0) > 0
+            (sub.disabled_negative_keywords?.length ?? 0) > 0,
+            mode,
+            false,
+            tr
           ),
         }
       );
@@ -3076,7 +3087,7 @@ ${bold(tr("list_exclusions"))} ${code(exclusionsText)}
       await context.answer({ text: tr("kw_select_words") });
       await context.editText(
         tr("kw_select_words_numbered", { label: tr("kw_positive_label"), list }),
-        { reply_markup: removeKeywordsKeyboard(sub.positive_keywords, "positive", subscriptionId) }
+        { reply_markup: removeKeywordsKeyboard(sub.positive_keywords, "positive", subscriptionId, tr) }
       );
       break;
     }
@@ -3101,7 +3112,7 @@ ${bold(tr("list_exclusions"))} ${code(exclusionsText)}
       await context.answer({ text: tr("kw_select_words") });
       await context.editText(
         tr("kw_select_words_numbered", { label: tr("kw_negative_label"), list }),
-        { reply_markup: removeKeywordsKeyboard(sub.negative_keywords, "negative", subscriptionId) }
+        { reply_markup: removeKeywordsKeyboard(sub.negative_keywords, "negative", subscriptionId, tr) }
       );
       break;
     }
@@ -3143,6 +3154,7 @@ ${bold(tr("list_exclusions"))} ${code(exclusionsText)}
       if (keywords.length === 0) {
         // No more keywords to remove, go back to subscription
         const updated = queries.getSubscriptionById(subscriptionId, userId)!;
+        const mode = queries.getUserMode(userId);
         let exclusionsText = tr("analysis_none");
         if (updated.negative_keywords.length > 0) {
           exclusionsText = updated.negative_keywords.join(", ");
@@ -3158,7 +3170,10 @@ ${bold(tr("list_exclusions"))} ${code(exclusionsText)}
             reply_markup: subscriptionKeyboard(
               updated.id,
               updated.negative_keywords.length > 0,
-              (updated.disabled_negative_keywords?.length ?? 0) > 0
+              (updated.disabled_negative_keywords?.length ?? 0) > 0,
+              mode,
+              false,
+              tr
             ),
           }
         );
@@ -3169,7 +3184,7 @@ ${bold(tr("list_exclusions"))} ${code(exclusionsText)}
         const label = type === "positive" ? tr("kw_positive_label") : tr("kw_negative_label");
         await context.editText(
           tr("kw_words_list", { label, list }),
-          { reply_markup: removeKeywordsKeyboard(keywords, type, subscriptionId) }
+          { reply_markup: removeKeywordsKeyboard(keywords, type, subscriptionId, tr) }
         );
       }
       break;
@@ -3226,7 +3241,7 @@ ${bold(tr("groups_select_for_monitoring"))}
 ${tr("groups_selected_count", { selected: updatedC.selectedGroups.length, total: updatedC.availableGroups.length })}
         `,
         {
-          reply_markup: groupsKeyboard(updatedC.availableGroups, selectedIds, regionPresets),
+          reply_markup: groupsKeyboard(updatedC.availableGroups, selectedIds, regionPresets, tr),
         }
       );
       break;
@@ -3289,7 +3304,7 @@ ${bold(tr("groups_select_for_monitoring"))}
 ${tr("groups_selected_count", { selected: updatedCtx.selectedGroups.length, total: updatedCtx.availableGroups.length })}
         `,
         {
-          reply_markup: groupsKeyboard(updatedCtx.availableGroups, selectedIdsSet, regionPresets2),
+          reply_markup: groupsKeyboard(updatedCtx.availableGroups, selectedIdsSet, regionPresets2, tr),
         }
       );
       break;
@@ -3314,7 +3329,7 @@ ${bold(tr("groups_select_for_monitoring"))}
 ${tr("groups_selected_count", { selected: updatedC.availableGroups.length, total: updatedC.availableGroups.length })}
         `,
         {
-          reply_markup: groupsKeyboard(updatedC.availableGroups, selectedIds, regionPresets),
+          reply_markup: groupsKeyboard(updatedC.availableGroups, selectedIds, regionPresets, tr),
         }
       );
       break;
@@ -3337,7 +3352,7 @@ ${bold(tr("groups_select_for_monitoring"))}
 ${tr("groups_selected_count", { selected: 0, total: c.availableGroups.length })}
         `,
         {
-          reply_markup: groupsKeyboard(c.availableGroups, new Set(), regionPresets),
+          reply_markup: groupsKeyboard(c.availableGroups, new Set(), regionPresets, tr),
         }
       );
       break;
@@ -3547,7 +3562,7 @@ ${bold(tr("settings_current_mode"))} ${tr("settings_mode_normal")}
 
 ${tr("settings_normal_desc")}`,
         {
-          reply_markup: settingsKeyboard("normal"),
+          reply_markup: settingsKeyboard("normal", tr),
         }
       );
       break;
@@ -3563,7 +3578,7 @@ ${bold(tr("settings_current_mode"))} ${tr("settings_mode_advanced")}
 
 ${tr("settings_advanced_desc")}`,
         {
-          reply_markup: settingsKeyboard("advanced"),
+          reply_markup: settingsKeyboard("advanced", tr),
         }
       );
       break;
@@ -3627,7 +3642,8 @@ ${tr("settings_advanced_desc")}`,
               analysis.subscription_id,
               forwardInfo.messageId ?? 0,
               forwardInfo.chatId,
-              analysis.rejection_keyword
+              analysis.rejection_keyword,
+              tr
             ),
           });
         } else {
@@ -3730,7 +3746,7 @@ ${tr("settings_advanced_desc")}`,
       await context.answer({ text: tr("forward_ai_correction") });
       await context.editText(
         tr("ai_edit_existing_prompt", { query: subscription.original_query }),
-        { reply_markup: aiEditStartKeyboard(subscriptionId) }
+        { reply_markup: aiEditStartKeyboard(subscriptionId, tr) }
       );
       break;
     }
@@ -3863,13 +3879,13 @@ ${diffText || tr("miss_no_changes")}
 ${bold(tr("ai_comment"))} ${result.summary}
 
 ${tr("miss_clarify_or_apply")}`,
-          { reply_markup: aiEditKeyboard(subscriptionId) }
+          { reply_markup: aiEditKeyboard(subscriptionId, tr) }
         );
       } catch (error) {
         botLog.error({ err: error, userId, subscriptionId }, "Miss analysis failed");
         await context.editText(
           tr("miss_error_describe", { query: subscription.original_query }),
-          { reply_markup: aiEditStartKeyboard(subscriptionId) }
+          { reply_markup: aiEditStartKeyboard(subscriptionId, tr) }
         );
       }
       break;
@@ -3929,7 +3945,7 @@ ${tr("miss_clarify_or_apply")}`,
       // Ask for review
       await context.editText(
         tr("feedback_review_prompt"),
-        { reply_markup: feedbackReviewKeyboard(subscriptionId) }
+        { reply_markup: feedbackReviewKeyboard(subscriptionId, tr) }
       );
       break;
     }
@@ -4025,7 +4041,7 @@ ${tr("miss_clarify_or_apply")}`,
 
       await context.answer();
       await context.editText(planInfo, {
-        reply_markup: premiumKeyboard(plan),
+        reply_markup: premiumKeyboard(plan, tr),
       });
       break;
     }
@@ -4046,7 +4062,7 @@ ${tr("miss_clarify_or_apply")}`,
         tr("preset_title"),
         {
           parse_mode: "Markdown",
-          reply_markup: presetsListKeyboard(presetsWithAccess),
+          reply_markup: presetsListKeyboard(presetsWithAccess, tr),
         }
       );
       break;
@@ -4086,7 +4102,7 @@ ${tr("miss_clarify_or_apply")}`,
       await context.answer();
       await context.editText(text, {
         parse_mode: "Markdown",
-        reply_markup: presetBuyKeyboard(presetId, hasAccess),
+        reply_markup: presetBuyKeyboard(presetId, hasAccess, tr),
       });
       break;
     }
@@ -4365,7 +4381,7 @@ ${tr("miss_clarify_or_apply")}`,
       await context.answer();
       await context.editText(tr("promo_product_full"), {
         parse_mode: "Markdown",
-        reply_markup: promotionDurationKeyboard("product", messageId, groupId, false),
+        reply_markup: promotionDurationKeyboard("product", messageId, groupId, false, tr),
       });
       break;
     }
@@ -4406,7 +4422,7 @@ ${tr("miss_clarify_or_apply")}`,
       await context.answer();
       await context.editText(tr("promo_group_full"), {
         parse_mode: "Markdown",
-        reply_markup: promotionDurationKeyboard("group", groupId, undefined, false),
+        reply_markup: promotionDurationKeyboard("group", groupId, undefined, false, tr),
       });
       break;
     }

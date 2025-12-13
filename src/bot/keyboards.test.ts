@@ -24,11 +24,15 @@ import {
   nextRequestId,
 } from "./keyboards.ts";
 import type { PendingGroup } from "../types.ts";
+import { getTranslatorForLocale } from "../i18n/index.ts";
+
+// Use Russian translator for tests
+const tr = getTranslatorForLocale("ru");
 
 describe("confirmKeyboard", () => {
   test("has all required actions for subscription confirmation flow", () => {
     const queryId = "user123_1234567890";
-    const keyboard = confirmKeyboard(queryId);
+    const keyboard = confirmKeyboard(queryId, tr);
     const json = keyboard.toJSON();
 
     // Extract all callback actions from keyboard
@@ -46,7 +50,7 @@ describe("confirmKeyboard", () => {
   });
 
   test("keywordEditConfirmKeyboard includes manual keyword editing actions", () => {
-    const keyboard = keywordEditConfirmKeyboard("test_id");
+    const keyboard = keywordEditConfirmKeyboard("test_id", tr);
     const json = keyboard.toJSON();
 
     const allButtons = json.inline_keyboard.flat();
@@ -60,7 +64,7 @@ describe("confirmKeyboard", () => {
   });
 
   test("basic confirmKeyboard excludes manual keyword editing", () => {
-    const keyboard = confirmKeyboard("test_id");
+    const keyboard = confirmKeyboard("test_id", tr);
     const json = keyboard.toJSON();
 
     const allButtons = json.inline_keyboard.flat();
@@ -74,7 +78,7 @@ describe("confirmKeyboard", () => {
   });
 
   test("all buttons have valid JSON callback data", () => {
-    const keyboard = confirmKeyboard("test_id");
+    const keyboard = confirmKeyboard("test_id", tr);
     const json = keyboard.toJSON();
 
     for (const row of json.inline_keyboard) {
@@ -96,12 +100,12 @@ describe("subscriptionKeyboard", () => {
   };
 
   test("always has disable action with subscription ID", () => {
-    const actions = getActions(subscriptionKeyboard(42, false, false));
+    const actions = getActions(subscriptionKeyboard(42, false, false, "advanced", false, tr));
     expect(actions).toContainEqual({ action: "disable", id: 42 });
   });
 
   test("advanced mode has edit and regenerate actions", () => {
-    const actions = getActions(subscriptionKeyboard(42, false, false, "advanced"));
+    const actions = getActions(subscriptionKeyboard(42, false, false, "advanced", false, tr));
 
     expect(actions).toContainEqual({ action: "edit_positive", id: 42 });
     expect(actions).toContainEqual({ action: "edit_negative", id: 42 });
@@ -110,31 +114,31 @@ describe("subscriptionKeyboard", () => {
   });
 
   test("normal mode has no edit actions", () => {
-    const actions = getActions(subscriptionKeyboard(42, false, false, "normal"));
+    const actions = getActions(subscriptionKeyboard(42, false, false, "normal", false, tr));
 
     expect(actions).not.toContainEqual(expect.objectContaining({ action: "edit_positive" }));
     expect(actions).not.toContainEqual(expect.objectContaining({ action: "edit_negative" }));
   });
 
   test("toggle_negative action appears when has active negative keywords", () => {
-    const actions = getActions(subscriptionKeyboard(42, true, false, "advanced"));
+    const actions = getActions(subscriptionKeyboard(42, true, false, "advanced", false, tr));
     expect(actions).toContainEqual({ action: "toggle_negative", id: 42 });
   });
 
   test("toggle_negative action appears when has disabled negative keywords", () => {
-    const actions = getActions(subscriptionKeyboard(42, false, true, "advanced"));
+    const actions = getActions(subscriptionKeyboard(42, false, true, "advanced", false, tr));
     expect(actions).toContainEqual({ action: "toggle_negative", id: 42 });
   });
 
   test("toggle_negative action hidden when no negative keywords at all", () => {
-    const actions = getActions(subscriptionKeyboard(42, false, false, "advanced"));
+    const actions = getActions(subscriptionKeyboard(42, false, false, "advanced", false, tr));
     expect(actions).not.toContainEqual(expect.objectContaining({ action: "toggle_negative" }));
   });
 });
 
 describe("backKeyboard", () => {
   test("has back action", () => {
-    const keyboard = backKeyboard();
+    const keyboard = backKeyboard(tr);
     const json = keyboard.toJSON();
 
     const allButtons = json.inline_keyboard.flat();
@@ -163,7 +167,7 @@ describe("nextRequestId", () => {
 
 describe("groupPickerKeyboard", () => {
   test("creates reply keyboard with requestChat buttons", () => {
-    const keyboard = groupPickerKeyboard(1);
+    const keyboard = groupPickerKeyboard(1, tr);
     const json = keyboard.toJSON();
 
     expect(json.keyboard).toBeDefined();
@@ -172,7 +176,7 @@ describe("groupPickerKeyboard", () => {
   });
 
   test("has group and channel selection buttons", () => {
-    const keyboard = groupPickerKeyboard(1);
+    const keyboard = groupPickerKeyboard(1, tr);
     const json = keyboard.toJSON();
 
     // First row: group button
@@ -187,7 +191,7 @@ describe("groupPickerKeyboard", () => {
   });
 
   test("has Готово button", () => {
-    const keyboard = groupPickerKeyboard(1);
+    const keyboard = groupPickerKeyboard(1, tr);
     const json = keyboard.toJSON();
 
     // Third row: Готово
@@ -196,7 +200,7 @@ describe("groupPickerKeyboard", () => {
 
   test("uses provided requestId for group and requestId+1 for channel", () => {
     const requestId = 42;
-    const keyboard = groupPickerKeyboard(requestId);
+    const keyboard = groupPickerKeyboard(requestId, tr);
     const json = keyboard.toJSON();
 
     expect(json.keyboard[0]![0]!.request_chat!.request_id).toBe(requestId);
@@ -206,7 +210,7 @@ describe("groupPickerKeyboard", () => {
 
 describe("inviteLinkKeyboard", () => {
   test("creates inline keyboard with skip and cancel buttons", () => {
-    const keyboard = inviteLinkKeyboard();
+    const keyboard = inviteLinkKeyboard(tr);
     const json = keyboard.toJSON();
 
     expect(json.inline_keyboard).toBeDefined();
@@ -214,7 +218,7 @@ describe("inviteLinkKeyboard", () => {
   });
 
   test("has skip_invite_link action", () => {
-    const keyboard = inviteLinkKeyboard();
+    const keyboard = inviteLinkKeyboard(tr);
     const json = keyboard.toJSON();
 
     const skipButton = json.inline_keyboard[0]![0]!;
@@ -225,7 +229,7 @@ describe("inviteLinkKeyboard", () => {
   });
 
   test("has cancel action", () => {
-    const keyboard = inviteLinkKeyboard();
+    const keyboard = inviteLinkKeyboard(tr);
     const json = keyboard.toJSON();
 
     const cancelButton = json.inline_keyboard[1]![0]!;

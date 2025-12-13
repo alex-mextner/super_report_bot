@@ -107,10 +107,12 @@ Respond ONLY with JSON, no additional text:
  */
 export async function generateKeywords(
   query: string,
-  clarificationContext?: string
+  clarificationContext?: string,
+  language: string = "English"
 ): Promise<KeywordGenerationResult> {
   // Build user message with optional clarification context
-  const userMessage = clarificationContext ? `${query}${clarificationContext}` : query;
+  const languageInstruction = `\n\nIMPORTANT: Write the "description" field in ${language}.`;
+  const userMessage = (clarificationContext ? `${query}${clarificationContext}` : query) + languageInstruction;
 
   const response = await withRetry(async () => {
     const result = await hf.chatCompletion({
@@ -270,16 +272,18 @@ export interface GeneratedExample {
  * Returns 3 synthetic examples for user to rate
  */
 export async function generateExampleMessages(
-  query: string
+  query: string,
+  language: string = "English"
 ): Promise<GeneratedExample[]> {
   try {
+    const languageInstruction = `\n\nIMPORTANT: Write all example texts in ${language}.`;
     const response = await withRetry(async () => {
       const result = await hf.chatCompletion({
         model: MODELS.DEEPSEEK_R1,
         provider: "novita",
         messages: [
           { role: "system", content: EXAMPLE_MESSAGES_PROMPT },
-          { role: "user", content: query },
+          { role: "user", content: query + languageInstruction },
         ],
         max_tokens: 1000,
         temperature: 0.7,
@@ -401,7 +405,8 @@ ONLY JSON:
 export async function generateKeywordsWithRatings(
   query: string,
   ratings: RatingFeedback[],
-  clarificationContext?: string
+  clarificationContext?: string,
+  language: string = "English"
 ): Promise<KeywordGenerationResult> {
   // Build feedback section
   const feedbackLines: string[] = [];
@@ -429,9 +434,10 @@ export async function generateKeywordsWithRatings(
     ? `\n\nUser ratings:\n${feedbackLines.join("\n")}`
     : "";
 
+  const languageInstruction = `\n\nIMPORTANT: Write the "description" field in ${language}.`;
   const userMessage = clarificationContext
-    ? `Query: ${query}${clarificationContext}${feedbackSection}`
-    : `Query: ${query}${feedbackSection}`;
+    ? `Query: ${query}${clarificationContext}${feedbackSection}${languageInstruction}`
+    : `Query: ${query}${feedbackSection}${languageInstruction}`;
 
   const response = await withRetry(async () => {
     const result = await hf.chatCompletion({
@@ -588,13 +594,16 @@ export async function extractKeywordsFromText(text: string): Promise<string[]> {
 export async function correctDescription(
   originalQuery: string,
   currentDescription: string,
-  userInstruction: string
+  userInstruction: string,
+  language: string = "English"
 ): Promise<DescriptionCorrectionResult> {
   const userMessage = `Original user query: "${originalQuery}"
 
 Current description: "${currentDescription}"
 
-What user wants to change: ${userInstruction}`;
+What user wants to change: ${userInstruction}
+
+IMPORTANT: Write "description" and "summary" fields in ${language}.`;
 
   const response = await withRetry(async () => {
     const result = await hf.chatCompletion({
