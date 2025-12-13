@@ -1,27 +1,21 @@
 /**
  * Unified LLM Client
  *
- * Primary: Z.AI GLM models with HuggingFace fallbacks.
- * Models are grouped by use case:
+ * Cost-optimized pipeline using HuggingFace Inference providers:
  * - llmLight: Fast simple tasks (Qwen 72B → Qwen 4B fallback)
- * - llmThink: Reasoning tasks (GLM-4.6 → Qwen 72B fallback)
- * - llmFast: Classification/verification (GLM-4.6 → Qwen fallbacks)
- * - llmVision: Image analysis (GLM-4.6V)
+ * - llmThink: Reasoning tasks (DeepSeek R1 → Qwen 72B fallback)
+ * - llmFast: Classification/verification (Qwen 7B → Qwen 72B → Qwen 4B)
+ * - llmVision: Image analysis (Qwen3-VL 32B via together)
+ * - classifyZeroShot: Free XLM-RoBERTa-XNLI for pre-filtering
  */
 
 import { InferenceClient } from "@huggingface/inference";
 import { llmLog } from "../logger.ts";
 
 const HF_TOKEN = process.env.HF_TOKEN;
-const ZAI_API_KEY = process.env.ZAI_API_KEY;
-const ZAI_BASE_URL = process.env.ZAI_BASE_URL || "https://api.z.ai/api/paas/v4";
 
 if (!HF_TOKEN) {
-  llmLog.warn("HF_TOKEN not set. HuggingFace fallback will not work.");
-}
-
-if (!ZAI_API_KEY) {
-  llmLog.warn("ZAI_API_KEY not set. Primary LLM (GLM) will not work.");
+  llmLog.warn("HF_TOKEN not set. LLM features will not work.");
 }
 
 export const hf = new InferenceClient(HF_TOKEN);
@@ -31,22 +25,24 @@ export const hf = new InferenceClient(HF_TOKEN);
 // =====================================================
 
 export const MODELS = {
-  // Z.AI models (primary) - $5/$10 per 1M
-  GLM_46: "glm-4.6",
-  GLM_46V: "glm-4.6v",
-  // HuggingFace fallbacks
+  // DeepSeek for reasoning (keywords - rare, expensive OK)
+  DEEPSEEK_R1: "deepseek-ai/DeepSeek-R1",
+  // Cheap LLM for verification ($0.05/M input)
+  QWEN_7B: "Qwen/Qwen2.5-7B-Instruct",
+  // Fallbacks
   QWEN_FAST: "Qwen/Qwen2.5-72B-Instruct",
   QWEN_SMALL: "Qwen/Qwen3-4B-Instruct-2507",
-  // Zero-shot classification
-  BART_MNLI: "facebook/bart-large-mnli",
+  // Vision model ($0.15/M input)
+  QWEN_VL: "Qwen/Qwen2.5-VL-32B-Instruct",
+  // Zero-shot classification (free, multilingual incl. Russian)
+  XLM_ROBERTA_XNLI: "joeddav/xlm-roberta-large-xnli",
 } as const;
 
 type HFProvider = "nebius" | "nscale" | "novita" | "fireworks-ai" | "together" | "groq" | "sambanova";
-type Provider = HFProvider | "zai";
 
 interface ProviderConfig {
   model: string;
-  provider: Provider;
+  provider: HFProvider;
   retries: number;
 }
 
@@ -57,18 +53,18 @@ const LIGHT_PROVIDERS: ProviderConfig[] = [
 ];
 
 const THINK_PROVIDERS: ProviderConfig[] = [
-  { model: MODELS.GLM_46, provider: "zai", retries: 3 },
+  { model: MODELS.DEEPSEEK_R1, provider: "together", retries: 3 },
   { model: MODELS.QWEN_FAST, provider: "together", retries: 2 }, // fallback to non-reasoning
 ];
 
 const FAST_PROVIDERS: ProviderConfig[] = [
-  { model: MODELS.GLM_46, provider: "zai", retries: 3 },
+  { model: MODELS.QWEN_7B, provider: "together", retries: 3 },
   { model: MODELS.QWEN_FAST, provider: "together", retries: 2 },
   { model: MODELS.QWEN_SMALL, provider: "nscale", retries: 2 },
 ];
 
 const VISION_PROVIDERS: ProviderConfig[] = [
-  { model: MODELS.GLM_46V, provider: "zai", retries: 3 },
+  { model: MODELS.QWEN_VL, provider: "together", retries: 3 },
 ];
 
 // =====================================================
@@ -155,52 +151,6 @@ export interface LLMOptions {
 }
 
 // =====================================================
-// Z.AI Client
-// =====================================================
-
-interface ZAIResponse {
-  choices: Array<{
-    message: {
-      content: string;
-    };
-  }>;
-}
-
-export async function callZAI(
-  model: string,
-  messages: LLMMessage[],
-  maxTokens: number,
-  temperature: number
-): Promise<string> {
-  if (!ZAI_API_KEY) {
-    throw new Error("ZAI_API_KEY not set");
-  }
-
-  const response = await fetch(`${ZAI_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${ZAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      max_tokens: maxTokens,
-      temperature,
-    }),
-    signal: AbortSignal.timeout(60000), // 60s timeout
-  });
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Z.AI error ${response.status}: ${text.slice(0, 200)}`);
-  }
-
-  const data = (await response.json()) as ZAIResponse;
-  return data.choices[0]?.message?.content || "";
-}
-
-// =====================================================
 // Core LLM Functions
 // =====================================================
 
@@ -217,20 +167,14 @@ async function callWithFallback(
     try {
       const result = await withRetry(
         async () => {
-          if (config.provider === "zai") {
-            // Z.AI direct call
-            return await callZAI(config.model, messages, maxTokens, temperature);
-          } else {
-            // HuggingFace provider call
-            const response = await hf.chatCompletion({
-              model: config.model,
-              provider: config.provider as HFProvider,
-              messages: messages as Parameters<typeof hf.chatCompletion>[0]["messages"],
-              max_tokens: maxTokens,
-              temperature,
-            });
-            return response.choices[0]?.message?.content || "";
-          }
+          const response = await hf.chatCompletion({
+            model: config.model,
+            provider: config.provider,
+            messages: messages as Parameters<typeof hf.chatCompletion>[0]["messages"],
+            max_tokens: maxTokens,
+            temperature,
+          });
+          return response.choices[0]?.message?.content || "";
         },
         config.retries,
         1000
@@ -265,7 +209,7 @@ export async function llmLight(options: LLMOptions): Promise<string> {
 /**
  * Think tasks: reasoning with chain-of-thought
  * Best for: keyword generation, complex analysis, planning
- * Models: GLM-4.6 → Qwen 72B
+ * Models: DeepSeek R1 → Qwen 72B
  */
 export async function llmThink(options: LLMOptions): Promise<string> {
   const { messages, maxTokens = 2500, temperature = 0.6 } = options;
@@ -277,25 +221,83 @@ export async function llmThink(options: LLMOptions): Promise<string> {
 /**
  * Fast tasks: quick classification/verification
  * Best for: message verification, yes/no decisions, simple classification
- * Models: GLM-4.6 → Qwen 72B → Qwen 4B
+ * Models: Qwen 7B ($0.05/M) → Qwen 72B → Qwen 4B
  */
 export async function llmFast(options: LLMOptions): Promise<string> {
   const { messages, maxTokens = 500, temperature = 0.1 } = options;
   const response = await callWithFallback(FAST_PROVIDERS, messages, maxTokens, temperature, "fast");
-  // Strip <think>...</think> blocks (GLM may include them)
+  // Strip <think>...</think> blocks (some models include them)
   return response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 }
 
 /**
  * Vision tasks: image analysis
  * Best for: photo verification, image description
- * Models: GLM-4.6V
+ * Models: Qwen3-VL 32B ($0.15/M input)
  */
 export async function llmVision(options: LLMOptions): Promise<string> {
   const { messages, maxTokens = 1000, temperature = 0.3 } = options;
   const response = await callWithFallback(VISION_PROVIDERS, messages, maxTokens, temperature, "vision");
-  // Strip <think>...</think> blocks (GLM-V may include them)
+  // Strip <think>...</think> blocks (some models include them)
   return response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+}
+
+// =====================================================
+// Zero-Shot Classification (XLM-RoBERTa-XNLI)
+// =====================================================
+
+export interface ZeroShotResult {
+  label: string;
+  score: number;
+}
+
+/**
+ * Zero-shot classification using XLM-RoBERTa-XNLI
+ * Free via HuggingFace Inference API, supports Russian
+ *
+ * @param text - Text to classify
+ * @param labels - Candidate labels (English recommended)
+ * @returns Array of {label, score} sorted by score descending
+ */
+export async function classifyZeroShot(
+  text: string,
+  labels: string[]
+): Promise<ZeroShotResult[]> {
+  try {
+    const result = await withRetry(
+      async () => {
+        const response = await hf.zeroShotClassification({
+          model: MODELS.XLM_ROBERTA_XNLI,
+          inputs: text.slice(0, 1000), // Limit text length
+          parameters: { candidate_labels: labels },
+        });
+        return response;
+      },
+      3,
+      1000
+    );
+
+    // HF returns array of {label: string, score: number} or {labels: string[], scores: number[]}
+    // Handle both formats for robustness
+    if (Array.isArray(result)) {
+      // Array of ZeroShotResult directly
+      return result.map((r) => ({
+        label: (r as { label: string; score: number }).label,
+        score: (r as { label: string; score: number }).score,
+      }));
+    }
+
+    // Object with labels/scores arrays
+    const res = result as { labels: string[]; scores: number[] };
+    return res.labels.map((label: string, i: number) => ({
+      label,
+      score: res.scores[i] ?? 0,
+    }));
+  } catch (error) {
+    llmLog.warn({ error: (error as Error).message?.slice(0, 100) }, "Zero-shot classification failed");
+    // Return neutral scores on error
+    return labels.map((label) => ({ label, score: 1 / labels.length }));
+  }
 }
 
 // =====================================================

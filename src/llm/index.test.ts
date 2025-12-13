@@ -3,11 +3,12 @@ import { withRateLimit, withRetry, MODELS } from "./index.ts";
 
 describe("MODELS", () => {
   test("exports expected model constants", () => {
-    expect(MODELS.GLM_46).toBe("glm-4.6");
-    expect(MODELS.GLM_46V).toBe("glm-4.6v");
+    expect(MODELS.DEEPSEEK_R1).toBe("deepseek-ai/DeepSeek-R1");
+    expect(MODELS.QWEN_7B).toBe("Qwen/Qwen2.5-7B-Instruct");
     expect(MODELS.QWEN_FAST).toBe("Qwen/Qwen2.5-72B-Instruct");
     expect(MODELS.QWEN_SMALL).toBe("Qwen/Qwen3-4B-Instruct-2507");
-    expect(MODELS.BART_MNLI).toBe("facebook/bart-large-mnli");
+    expect(MODELS.QWEN_VL).toBe("Qwen/Qwen2.5-VL-32B-Instruct");
+    expect(MODELS.XLM_ROBERTA_XNLI).toBe("joeddav/xlm-roberta-large-xnli");
   });
 });
 

@@ -1,11 +1,11 @@
 /**
- * Vision LLM verification using GLM-4.6V via Z.AI
+ * Vision LLM verification using Qwen3-VL via Together AI
  *
  * Uses the image to verify if product matches subscription description
  */
 
 import { llmLog } from "../logger.ts";
-import { callZAI, withRetry, MODELS, type LLMMessage } from "./index.ts";
+import { llmVision, type LLMMessage } from "./index.ts";
 
 export interface VisionVerificationResult {
   isMatch: boolean;
@@ -60,11 +60,11 @@ ${listingContext}`;
       },
     ];
 
-    const content = await withRetry(
-      () => callZAI(MODELS.GLM_46V, messages, 300, 0.1),
-      3,
-      1000
-    );
+    const content = await llmVision({
+      messages,
+      maxTokens: 300,
+      temperature: 0.1,
+    });
 
     if (!content) {
       throw new Error("Empty response from vision model");
@@ -134,8 +134,11 @@ function parseVisionResponse(content: string): VisionVerificationResult {
 export async function checkVisionHealth(): Promise<boolean> {
   try {
     // Quick test with minimal request
-    const messages: LLMMessage[] = [{ role: "user", content: "ping" }];
-    const content = await callZAI(MODELS.GLM_46V, messages, 1, 0.1);
+    const content = await llmVision({
+      messages: [{ role: "user", content: "ping" }],
+      maxTokens: 1,
+      temperature: 0.1,
+    });
     return !!content;
   } catch {
     return false;
@@ -213,11 +216,11 @@ Respond ONLY with JSON:
       },
     ];
 
-    const content = await withRetry(
-      () => callZAI(MODELS.GLM_46V, messages, 400, 0.1),
-      3,
-      1000
-    );
+    const content = await llmVision({
+      messages,
+      maxTokens: 400,
+      temperature: 0.1,
+    });
 
     if (!content) {
       throw new Error("Empty response from vision model");
@@ -308,11 +311,11 @@ Respond ONLY with JSON: {"item": number (1-${itemDescriptions.length}) or 0, "co
       },
     ];
 
-    const content = await withRetry(
-      () => callZAI(MODELS.GLM_46V, messages, 100, 0.1),
-      3,
-      1000
-    );
+    const content = await llmVision({
+      messages,
+      maxTokens: 100,
+      temperature: 0.1,
+    });
 
     if (!content) {
       return { itemIndex: null, confidence: 0 };
