@@ -100,12 +100,12 @@ describe("subscriptionKeyboard", () => {
   };
 
   test("always has disable action with subscription ID", () => {
-    const actions = getActions(subscriptionKeyboard(42, false, false, "advanced", false, tr));
+    const actions = getActions(subscriptionKeyboard(42, false, false, "advanced", false, 5, tr));
     expect(actions).toContainEqual({ action: "disable", id: 42 });
   });
 
   test("advanced mode has edit and regenerate actions", () => {
-    const actions = getActions(subscriptionKeyboard(42, false, false, "advanced", false, tr));
+    const actions = getActions(subscriptionKeyboard(42, false, false, "advanced", false, 5, tr));
 
     expect(actions).toContainEqual({ action: "edit_positive", id: 42 });
     expect(actions).toContainEqual({ action: "edit_negative", id: 42 });
@@ -114,24 +114,24 @@ describe("subscriptionKeyboard", () => {
   });
 
   test("normal mode has no edit actions", () => {
-    const actions = getActions(subscriptionKeyboard(42, false, false, "normal", false, tr));
+    const actions = getActions(subscriptionKeyboard(42, false, false, "normal", false, 5, tr));
 
     expect(actions).not.toContainEqual(expect.objectContaining({ action: "edit_positive" }));
     expect(actions).not.toContainEqual(expect.objectContaining({ action: "edit_negative" }));
   });
 
   test("toggle_negative action appears when has active negative keywords", () => {
-    const actions = getActions(subscriptionKeyboard(42, true, false, "advanced", false, tr));
+    const actions = getActions(subscriptionKeyboard(42, true, false, "advanced", false, 5, tr));
     expect(actions).toContainEqual({ action: "toggle_negative", id: 42 });
   });
 
   test("toggle_negative action appears when has disabled negative keywords", () => {
-    const actions = getActions(subscriptionKeyboard(42, false, true, "advanced", false, tr));
+    const actions = getActions(subscriptionKeyboard(42, false, true, "advanced", false, 5, tr));
     expect(actions).toContainEqual({ action: "toggle_negative", id: 42 });
   });
 
   test("toggle_negative action hidden when no negative keywords at all", () => {
-    const actions = getActions(subscriptionKeyboard(42, false, false, "advanced", false, tr));
+    const actions = getActions(subscriptionKeyboard(42, false, false, "advanced", false, 5, tr));
     expect(actions).not.toContainEqual(expect.objectContaining({ action: "toggle_negative" }));
   });
 });

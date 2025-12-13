@@ -91,6 +91,7 @@ export const subscriptionKeyboard = (
   hasDisabledNegative: boolean,
   mode: UserMode,
   isPaused: boolean,
+  positiveKeywordsCount: number,
   t: Translator
 ) => {
   const kb = new InlineKeyboard();
@@ -110,16 +111,15 @@ export const subscriptionKeyboard = (
       kb.row();
     }
   } else {
-    kb.text(t("kb_show_keywords"), JSON.stringify({ action: "show_keywords", id: subscriptionId })).row();
+    kb.text(`${t("kb_show_keywords")} (${positiveKeywordsCount})`, JSON.stringify({ action: "show_keywords", id: subscriptionId })).row();
   }
+
+  kb.text(t("kb_adjust_ai_full"), JSON.stringify({ action: "regenerate_sub", id: subscriptionId })).row();
 
   kb.text(
     isPaused ? t("kb_resume") : t("kb_pause"),
     JSON.stringify({ action: isPaused ? "resume" : "pause", id: subscriptionId })
-  ).row();
-
-  kb.text(t("kb_adjust_ai_full"), JSON.stringify({ action: "regenerate_sub", id: subscriptionId }))
-    .text(t("kb_delete"), JSON.stringify({ action: "disable", id: subscriptionId }));
+  ).text(t("kb_delete"), JSON.stringify({ action: "disable", id: subscriptionId }));
 
   return kb;
 };

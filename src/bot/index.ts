@@ -798,7 +798,7 @@ ${bold(tr("list_query"))} ${sub.original_query}
     }
 
     await context.send(messageText, {
-      reply_markup: subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg, mode, isPaused, tr),
+      reply_markup: subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg, mode, isPaused, sub.positive_keywords.length, tr),
     });
   }
 });
@@ -2565,7 +2565,7 @@ ${bold(tr("list_query"))} ${sub.original_query}
         }
 
         await context.editText(messageText);
-        await context.editReplyMarkup(subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg, mode, true, tr));
+        await context.editReplyMarkup(subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg, mode, true, sub.positive_keywords.length, tr));
       }
       break;
     }
@@ -2605,7 +2605,7 @@ ${bold(tr("list_query"))} ${sub.original_query}
         }
 
         await context.editText(messageText);
-        await context.editReplyMarkup(subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg, mode, false, tr));
+        await context.editReplyMarkup(subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg, mode, false, sub.positive_keywords.length, tr));
       }
       break;
     }
@@ -2631,7 +2631,8 @@ ${bold(tr("list_query"))} ${sub.original_query}
         text += `\n− ${sub.negative_keywords.join(", ")}`;
       }
 
-      await context.answer({ text, show_alert: true });
+      await context.answer();
+      await bot.api.sendMessage({ chat_id: userId, text });
       break;
     }
 
@@ -2721,7 +2722,7 @@ ${bold(tr("list_keywords"))} ${code(updated.positive_keywords.join(", "))}
 ${bold(tr("list_exclusions"))} ${code(exclusionsText)}
         `,
         {
-          reply_markup: subscriptionKeyboard(subscriptionId, newHasNeg, newHasDisabled, mode, false, tr),
+          reply_markup: subscriptionKeyboard(subscriptionId, newHasNeg, newHasDisabled, mode, false, updated.positive_keywords.length, tr),
         }
       );
       break;
@@ -3072,6 +3073,7 @@ ${bold(tr("list_exclusions"))} ${code(exclusionsText)}
             (sub.disabled_negative_keywords?.length ?? 0) > 0,
             mode,
             false,
+            sub.positive_keywords.length,
             tr
           ),
         }
@@ -3219,6 +3221,7 @@ ${bold(tr("list_exclusions"))} ${code(exclusionsText)}
               (updated.disabled_negative_keywords?.length ?? 0) > 0,
               mode,
               false,
+              updated.positive_keywords.length,
               tr
             ),
           }
