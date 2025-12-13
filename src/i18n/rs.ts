@@ -8,7 +8,7 @@ const rs: Translations = {
   // Commands
   cmd_start_welcome: `Zdravo! Pomoći ću ti da pronađeš oglase u Telegram grupama.
 
-Opiši šta tražiš — generisaću ključne reči i pratiti grupe.`,
+Koje objave hvatati? Opiši kao da si korisnik koji objavljuje u grupi.`,
   cmd_help: `Komande:
 /start — početak
 /list — moje pretplate
