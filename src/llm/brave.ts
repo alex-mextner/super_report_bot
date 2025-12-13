@@ -20,7 +20,7 @@ export async function searchBrave(query: string, count = 5): Promise<BraveResult
   }
 
   try {
-    const searchQuery = `${query} купить цена`;
+    const searchQuery = `${query} buy price`;
     const response = await fetch(
       `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(searchQuery)}&count=${count}`,
       {
@@ -47,28 +47,28 @@ export async function searchBrave(query: string, count = 5): Promise<BraveResult
   }
 }
 
-const BRAVE_EXAMPLES_PROMPT = `Ты генерируешь примеры объявлений для Telegram-групп на основе информации из поиска.
+const BRAVE_EXAMPLES_PROMPT = `You generate example listings for Telegram groups based on search results.
 
-## Задача
-На основе найденных товаров/услуг сгенерируй реалистичные примеры объявлений как в Telegram-барахолках.
+## Task
+Based on found products/services, generate realistic listing examples as in Telegram marketplaces.
 
-## Требования к каждому примеру
-- Реалистичная цена (исследуй диапазон цен из поиска)
-- Город или район
-- Контакт (в ЛС, @username, +7...)
-- Состояние (б/у, новый, торг уместен)
-- Эмодзи как в реальных объявлениях
-- 2-4 предложения
+## Requirements for each example
+- Realistic price (research price range from search results)
+- City or district
+- Contact (DM, @username, phone...)
+- Condition (used, new, negotiable)
+- Emojis like in real listings
+- 2-4 sentences
 
-## Формат ответа
-JSON массив из 3 объектов:
+## Response format
+JSON array of 3 objects:
 [
-  {"text": "текст объявления"},
-  {"text": "текст объявления"},
-  {"text": "текст объявления"}
+  {"text": "listing text"},
+  {"text": "listing text"},
+  {"text": "listing text"}
 ]
 
-ТОЛЬКО JSON, без комментариев.`;
+ONLY JSON, no comments.`;
 
 interface GeneratedExample {
   text: string;
@@ -88,12 +88,12 @@ export async function generateExamplesFromBrave(
     .map((r) => `- ${r.title}: ${r.description}`)
     .join("\n");
 
-  const userMessage = `Запрос: ${query}
+  const userMessage = `Query: ${query}
 
-Найденная информация:
+Found information:
 ${searchContext}
 
-Сгенерируй 3 примера объявлений.`;
+Generate 3 example listings.`;
 
   try {
     const response = await withRetry(async () => {
@@ -128,7 +128,7 @@ ${searchContext}
       id: -(index + 1), // negative IDs for generated examples
       text: item.text,
       groupId: 0,
-      groupTitle: "🌐 На основе поиска",
+      groupTitle: "🌐 Based on search",
       isGenerated: true,
     }));
   } catch (error) {

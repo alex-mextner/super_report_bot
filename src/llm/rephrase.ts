@@ -39,65 +39,65 @@ export async function rephraseAdText(
     const parts: string[] = [];
 
     if (styleContext.styleHints) {
-      parts.push(`В этой группе ${styleContext.styleHints}.`);
+      parts.push(`In this group ${styleContext.styleHints}.`);
     }
 
     if (styleContext.avgLength) {
       if (styleContext.avgLength < 200) {
-        parts.push("Сделай текст короче и лаконичнее.");
+        parts.push("Make the text shorter and more concise.");
       } else if (styleContext.avgLength > 500) {
-        parts.push("Можно сделать текст подробнее.");
+        parts.push("You can make the text more detailed.");
       }
     }
 
     if (styleContext.hasEmojis === false) {
-      parts.push("НЕ используй эмодзи — в этой группе их не любят.");
+      parts.push("DO NOT use emojis — this group doesn't like them.");
     } else if (styleContext.hasEmojis === true) {
-      parts.push("Можно использовать эмодзи умеренно.");
+      parts.push("You can use emojis moderately.");
     }
 
     if (styleContext.hasHashtags) {
-      parts.push("Можно добавить релевантные хэштеги.");
+      parts.push("You can add relevant hashtags.");
     }
 
     if (parts.length > 0) {
-      styleGuidance = `\n\nСТИЛЬ ГРУППЫ "${styleContext.groupName}":\n${parts.join("\n")}`;
+      styleGuidance = `\n\nGROUP STYLE "${styleContext.groupName}":\n${parts.join("\n")}`;
     }
 
     // Add sample messages if available
     if (styleContext.sampleMessages && styleContext.sampleMessages.length > 0) {
-      styleGuidance += `\n\nПРИМЕРЫ ОБЪЯВЛЕНИЙ ИЗ ЭТОЙ ГРУППЫ (для понимания стиля):\n${styleContext.sampleMessages.slice(0, 3).map((m, i) => `${i + 1}. ${m.slice(0, 300)}${m.length > 300 ? "..." : ""}`).join("\n\n")}`;
+      styleGuidance += `\n\nSAMPLE LISTINGS FROM THIS GROUP (for style reference):\n${styleContext.sampleMessages.slice(0, 3).map((m, i) => `${i + 1}. ${m.slice(0, 300)}${m.length > 300 ? "..." : ""}`).join("\n\n")}`;
     }
   }
 
   const messages: LLMMessage[] = [
     {
       role: "system",
-      content: `Ты помощник для перефразирования объявлений о продаже.
+      content: `You are an assistant for rephrasing sales listings.
 
-Твоя задача: переписать текст объявления так, чтобы он:
-1. Выглядел уникальным и естественным
-2. Соответствовал стилю группы (если указан)
-3. Сохранял ВСЕ важные данные
+Your task: rewrite the listing text so that it:
+1. Looks unique and natural
+2. Matches group style (if specified)
+3. Preserves ALL important data
 
-ОБЯЗАТЕЛЬНО СОХРАНЯЙ:
-- Все контактные данные (телефоны, ссылки, @username)
-- Все цены и числа
-- Размеры, характеристики, адреса
-- Суть предложения
+MUST PRESERVE:
+- All contact info (phones, links, @username)
+- All prices and numbers
+- Sizes, characteristics, addresses
+- The essence of the offer
 
-ПРАВИЛА ПЕРЕФРАЗИРОВАНИЯ:
-1. НЕ меняй контакты, цены, размеры — копируй как есть
-2. Перефразируй описательную часть своими словами
-3. Можно менять порядок предложений
-4. Адаптируй стиль под группу (эмодзи, длина, тон)
-5. Пиши на том же языке что и оригинал${styleGuidance}
+REPHRASING RULES:
+1. DO NOT change contacts, prices, sizes — copy as-is
+2. Rephrase the descriptive part in your own words
+3. You can change the order of sentences
+4. Adapt style to the group (emojis, length, tone)
+5. Write in the same language as the original${styleGuidance}
 
-Отвечай ТОЛЬКО перефразированным текстом, без комментариев и пояснений.`,
+Respond ONLY with the rephrased text, no comments or explanations.`,
     },
     {
       role: "user",
-      content: `Перефразируй это объявление${styleContext?.groupName ? ` для группы "${styleContext.groupName}"` : ""}:
+      content: `Rephrase this listing${styleContext?.groupName ? ` for group "${styleContext.groupName}"` : ""}:
 
 ${originalText}`,
     },

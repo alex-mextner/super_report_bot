@@ -58,7 +58,7 @@ export async function verifyMatch(
       }
 
       // Vision uncertain — save reasoning with disclaimer
-      visionReasoning = `📷 Фото не удалось уверенно распознать: ${visionResult.reasoning || "нет описания"}`;
+      visionReasoning = `📷 Could not confidently recognize photo: ${visionResult.reasoning || "no description"}`;
       llmLog.debug(
         { subscriptionId: subscription.id },
         "Vision uncertain, falling back to text"
@@ -107,7 +107,7 @@ export async function verifyMatch(
       finalReasoning = visionReasoning;
     } else if (visionFailed && hasPhoto) {
       // Vision failed completely — add disclaimer to DeepSeek reasoning
-      finalReasoning = `📷 Не удалось проанализировать фото. ${result.reasoning || ""}`.trim();
+      finalReasoning = `📷 Could not analyze photo. ${result.reasoning || ""}`.trim();
     } else {
       // No photo or Vision wasn't attempted
       finalReasoning = result.reasoning;
@@ -130,7 +130,7 @@ export async function verifyMatch(
       isMatch: false,
       confidence: 0,
       label: "error",
-      reasoning: hasPhoto ? "📷 Не удалось проанализировать сообщение" : undefined,
+      reasoning: hasPhoto ? "📷 Could not analyze message" : undefined,
     };
   }
 }
@@ -261,7 +261,7 @@ export async function verifyMatchBatch(
         isMatch: false,
         confidence: 0,
         label: "error",
-        reasoning: "📷 Не удалось проанализировать фото",
+        reasoning: "📷 Could not analyze photo",
       });
     }
   }

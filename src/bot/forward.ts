@@ -9,6 +9,7 @@ import { formatRejectionReason, formatDate } from "./rejection-texts.ts";
 import { forwardActionsKeyboard, addGroupKeyboard, analyzeForwardKeyboard } from "./keyboards.ts";
 import { matchMessage } from "../matcher/index.ts";
 import { verifyMatch } from "../llm/verify.ts";
+import { getTranslator, getTranslatorForLocale } from "../i18n/index.ts";
 
 /**
  * Extract forward info from a gramio message
@@ -80,8 +81,9 @@ export function handleForward(
   }
 
   const forwardInfo = extractForwardInfo(context.message);
+  const tr = getTranslator(userId);
   if (!forwardInfo) {
-    return { type: "error", message: "Не могу определить источник сообщения." };
+    return { type: "error", message: tr("forward_cant_determine_source") };
   }
 
   const text = messageText ?? context.message.text ?? context.message.caption ?? "";
@@ -222,12 +224,13 @@ export async function analyzeForwardedMessage(
   }
 
   // Create a minimal IncomingMessage for matching
+  const tr = getTranslator(userId);
   const incomingMsg = {
     id: forwardInfo.messageId ?? 0,
     group_id: forwardInfo.chatId ?? 0,
-    group_title: forwardInfo.chatTitle || "Неизвестная группа",
+    group_title: forwardInfo.chatTitle || tr("forward_unknown_group"),
     text: messageText,
-    sender_name: "Неизвестно",
+    sender_name: tr("forward_unknown_sender"),
     timestamp: new Date(),
   };
 
@@ -324,8 +327,10 @@ export async function analyzeForwardedMessage(
  * Format a single analysis result for display
  */
 export function formatAnalysisResult(
-  analysis: FoundPostAnalysis & { original_query: string }
+  analysis: FoundPostAnalysis & { original_query: string },
+  userId?: number
 ): string {
+  const tr = userId ? getTranslator(userId) : getTranslatorForLocale("ru");
   const isMatched = analysis.result === "matched";
   const icon = isMatched ? "✅" : "❌";
 
@@ -333,12 +338,12 @@ export function formatAnalysisResult(
 
   if (isMatched) {
     if (analysis.notified_at) {
-      text += `Отправлено ${formatDate(analysis.notified_at)}`;
+      text += tr("forward_sent_at", { date: formatDate(analysis.notified_at) });
     } else {
-      text += "Совпадение найдено";
+      text += tr("forward_match_found");
     }
   } else {
-    text += formatRejectionReason(analysis);
+    text += formatRejectionReason(analysis, userId);
   }
 
   return text;

@@ -8,53 +8,55 @@ export interface EditInterpretationResult {
   summary: string; // Human-readable summary of changes
 }
 
-const EDIT_SYSTEM_PROMPT = `Ты помощник для редактирования подписок на мониторинг Telegram-групп.
-Пользователь отправляет команды на изменение параметров подписки в свободной форме.
+// System prompt template for edit command interpretation
+// {language} placeholder for response language
+const EDIT_SYSTEM_PROMPT = `You are an assistant for editing Telegram group monitoring subscriptions.
+User sends free-form commands to modify subscription parameters.
 
-## Текущие параметры подписки
-- Позитивные слова: {positive_keywords}
-- Негативные слова: {negative_keywords}
-- Описание: {llm_description}
+## Current subscription parameters
+- Positive keywords: {positive_keywords}
+- Negative keywords: {negative_keywords}
+- Description: {llm_description}
 
-## Твоя задача
+## Your task
 
-Интерпретируй команду пользователя и верни ПОЛНЫЙ обновлённый список параметров.
+Interpret user command and return the COMPLETE updated list of parameters.
 
-### Типы команд
+### Command types
 
-1. **Добавить слово**: "добавь аренда", "ещё добавь квартира", "+ слово"
-   → Добавить в positive_keywords
+1. **Add keyword**: "добавь аренда", "add rental", "+ word"
+   → Add to positive_keywords
 
-2. **Убрать слово**: "убери продажа", "удали слово дом", "- слово"
-   → Убрать из positive_keywords
+2. **Remove keyword**: "убери продажа", "remove sale", "- word"
+   → Remove from positive_keywords
 
-3. **Добавить исключение**: "исключи коммерческая", "добавь в негативные офис", "минус офис"
-   → Добавить в negative_keywords
+3. **Add exclusion**: "исключи коммерческая", "exclude commercial", "minus office"
+   → Add to negative_keywords
 
-4. **Убрать исключение**: "убери из исключений посуточно", "верни посуточно"
-   → Убрать из negative_keywords
+4. **Remove exclusion**: "убери из исключений посуточно", "remove from exclusions"
+   → Remove from negative_keywords
 
-5. **Изменить описание**: "измени описание на ...", "сделай описание про ...", "описание: ..."
-   → Обновить llm_description
+5. **Change description**: "измени описание на ...", "change description to ...", "description: ..."
+   → Update llm_description
 
-6. **Комбинированные**: "добавь аренда и убери продажа"
-   → Применить все изменения
+6. **Combined**: "добавь аренда и убери продажа", "add rental and remove sale"
+   → Apply all changes
 
-### Правила
+### Rules
 
-- Сохраняй ВСЕ существующие слова которые не нужно удалять
-- При добавлении слова проверь что его нет в списке (не дублируй)
-- Генерируй summary на русском: что именно изменилось
-- Если команда непонятна, верни текущие значения без изменений и summary с уточняющим вопросом
+- Keep ALL existing keywords that don't need to be removed
+- When adding a keyword, check it's not already in the list (no duplicates)
+- Generate summary in {language}: what exactly changed
+- If command is unclear, return current values unchanged and summary with clarifying question
 
-## Формат ответа
+## Response format
 
-Ответь ТОЛЬКО JSON без дополнительного текста:
+Respond ONLY with JSON, no additional text:
 {
   "positive_keywords": [...],
   "negative_keywords": [...],
   "llm_description": "...",
-  "summary": "Добавлено: аренда. Удалено: продажа."
+  "summary": "Added: rental. Removed: sale."
 }`;
 
 interface CurrentParams {
@@ -75,7 +77,7 @@ function parseEditResponse(
     llmLog.warn({ response: response.slice(0, 200) }, "Failed to parse edit response");
     return {
       ...current,
-      summary: "Не удалось интерпретировать команду. Попробуй переформулировать.",
+      summary: "Could not interpret command. Try rephrasing.",
     };
   }
 
@@ -85,20 +87,20 @@ function parseEditResponse(
       positive_keywords: parsed.positive_keywords || current.positive_keywords,
       negative_keywords: parsed.negative_keywords || current.negative_keywords,
       llm_description: parsed.llm_description || parsed.description || current.llm_description,
-      summary: parsed.summary || "Изменения применены",
+      summary: parsed.summary || "Changes applied",
     };
   } catch {
     llmLog.warn({ json: jsonMatch[0].slice(0, 200) }, "Invalid JSON in edit response");
     return {
       ...current,
-      summary: "Ошибка парсинга ответа. Попробуй ещё раз.",
+      summary: "Response parsing error. Try again.",
     };
   }
 }
 
 /**
  * Simple command parser for basic operations when all LLMs fail
- * Supports: "+ слово", "- слово", "добавь слово", "убери слово", "исключи слово"
+ * Supports Russian patterns: "+ word", "- word", "добавь word", "убери word", "исключи word"
  */
 function trySimpleParser(
   command: string,
@@ -106,7 +108,7 @@ function trySimpleParser(
 ): EditInterpretationResult | null {
   const cmd = command.toLowerCase().trim();
 
-  // Pattern: "+ слово" or "добавь слово"
+  // Pattern: "+ word" or "добавь word" (Russian: "add word")
   const addMatch = cmd.match(/^(?:\+|добавь|добавить)\s+(.+)$/);
   if (addMatch?.[1]) {
     const word = addMatch[1].trim();
@@ -115,16 +117,16 @@ function trySimpleParser(
         positive_keywords: [...current.positive_keywords, word],
         negative_keywords: current.negative_keywords,
         llm_description: current.llm_description,
-        summary: `Добавлено: ${word}`,
+        summary: `Added: ${word}`,
       };
     }
     return {
       ...current,
-      summary: `«${word}» уже есть в списке`,
+      summary: `"${word}" already in list`,
     };
   }
 
-  // Pattern: "- слово" or "убери слово" or "удали слово"
+  // Pattern: "- word" or "убери/удали word" (Russian: "remove word")
   const removeMatch = cmd.match(/^(?:-|убери|убрать|удали|удалить)\s+(.+)$/);
   if (removeMatch?.[1]) {
     const word = removeMatch[1].trim();
@@ -133,16 +135,16 @@ function trySimpleParser(
         positive_keywords: current.positive_keywords.filter((w) => w !== word),
         negative_keywords: current.negative_keywords,
         llm_description: current.llm_description,
-        summary: `Удалено: ${word}`,
+        summary: `Removed: ${word}`,
       };
     }
     return {
       ...current,
-      summary: `«${word}» не найдено в списке`,
+      summary: `"${word}" not found in list`,
     };
   }
 
-  // Pattern: "исключи слово" or "минус слово" (add to negative)
+  // Pattern: "исключи word" or "минус word" (Russian: "exclude word" - adds to negative list)
   const excludeMatch = cmd.match(/^(?:исключи|исключить|минус)\s+(.+)$/);
   if (excludeMatch?.[1]) {
     const word = excludeMatch[1].trim();
@@ -151,12 +153,12 @@ function trySimpleParser(
         positive_keywords: current.positive_keywords,
         negative_keywords: [...current.negative_keywords, word],
         llm_description: current.llm_description,
-        summary: `Исключено: ${word}`,
+        summary: `Excluded: ${word}`,
       };
     }
     return {
       ...current,
-      summary: `«${word}» уже в исключениях`,
+      summary: `"${word}" already in exclusions`,
     };
   }
 
@@ -167,17 +169,20 @@ function trySimpleParser(
 /**
  * Interpret user's free-form edit command and return updated subscription parameters
  * Uses llmLight with automatic fallbacks (Qwen 72B → Qwen 4B)
+ * @param language - language for the summary response (default: Russian)
  */
 export async function interpretEditCommand(
   command: string,
   current: CurrentParams,
-  conversationHistory: Array<{ role: "user" | "assistant"; content: string }>
+  conversationHistory: Array<{ role: "user" | "assistant"; content: string }>,
+  language: string = "Russian"
 ): Promise<EditInterpretationResult> {
   // Build system prompt with current values
   const systemPrompt = EDIT_SYSTEM_PROMPT
-    .replace("{positive_keywords}", current.positive_keywords.join(", ") || "нет")
-    .replace("{negative_keywords}", current.negative_keywords.join(", ") || "нет")
-    .replace("{llm_description}", current.llm_description || "нет");
+    .replace("{positive_keywords}", current.positive_keywords.join(", ") || "none")
+    .replace("{negative_keywords}", current.negative_keywords.join(", ") || "none")
+    .replace("{llm_description}", current.llm_description || "none")
+    .replace("{language}", language);
 
   // Limit conversation history to last 6 messages to avoid token overflow
   const recentHistory = conversationHistory.slice(-6);
@@ -215,6 +220,6 @@ export async function interpretEditCommand(
   llmLog.error("All LLM providers failed for edit, returning unchanged params");
   return {
     ...current,
-    summary: "Не смог обработать команду. Попробуй написать проще, например: «+ слово» или «убери слово»",
+    summary: "Could not process command. Try simpler: \"+ word\" or \"- word\"",
   };
 }

@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
   plan TEXT DEFAULT 'free' CHECK (plan IN ('free', 'basic', 'pro', 'business')),
   plan_expires_at TEXT,             -- ISO timestamp, NULL for free
   telegram_subscription_id TEXT,    -- Telegram's subscription charge ID
+  language TEXT DEFAULT 'ru' CHECK (language IN ('ru', 'en', 'rs')),
   region_code TEXT,                 -- 'belgrade', 'novi_sad', etc.
   free_pub_credits INTEGER DEFAULT 0, -- free publication credits (given when all posts fail)
   created_at TEXT DEFAULT CURRENT_TIMESTAMP

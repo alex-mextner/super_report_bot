@@ -46,7 +46,21 @@ import {
   presetSelectionKeyboard,
   regionSelectionKeyboard,
   promotionDurationKeyboard,
+  languageKeyboard,
 } from "./keyboards.ts";
+import {
+  t,
+  getTranslator,
+  getTranslatorForLocale,
+  getUserLocale,
+  setUserLanguage,
+  localeNames,
+  isValidLocale,
+  detectLocale,
+  getLLMLanguage,
+  type Locale,
+  type Translator,
+} from "../i18n/index.ts";
 import {
   formatPlanInfo,
   createSubscriptionLink,
@@ -63,7 +77,7 @@ import {
 import { runWithRecovery } from "./operations.ts";
 import { interpretEditCommand } from "../llm/edit.ts";
 import { generateKeywordEmbeddings, checkBgeHealth } from "../llm/embeddings.ts";
-import { groups, messages } from "../utils/pluralize.ts";
+import { plural } from "../i18n/index.ts";
 import {
   parseGroupTitle,
   matchCountry,
@@ -216,6 +230,7 @@ async function sendProgressWithPromo(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Promise<any> {
   const promo = queries.getUnseenProductPromotion(userId);
+  const tr = getTranslator(userId);
 
   if (promo) {
     // Mark as viewed immediately
@@ -229,7 +244,7 @@ async function sendProgressWithPromo(
 
     const fullText = `${text}\n\n` +
       `━━━━━━━━━━━━━━━━━━━━\n` +
-      `📢 Пока ждём:\n\n` +
+      `${tr("waiting_promo")}` +
       `${promoText}\n\n` +
       `👉 ${link}`;
 
@@ -248,17 +263,18 @@ async function showExampleForRating(
   index: number,
   total: number
 ): Promise<void> {
-  const deletedLabel = example.isDeleted ? " (удалено)" : "";
+  const tr = getTranslator(userId);
+  const deletedLabel = example.isDeleted ? tr("example_deleted") : "";
   const sourceLabel = example.isGenerated
-    ? "🤖 Сгенерированный пример"
+    ? tr("example_generated")
     : `📍 ${example.groupTitle}${deletedLabel}`;
 
   await context.send(
-    format`${bold(`Пример ${index + 1}/${total}`)} ${sourceLabel}
+    format`${bold(tr("rating_example_title", { index: index + 1, total }))} ${sourceLabel}
 
 ${example.text.slice(0, 500)}${example.text.length > 500 ? "..." : ""}
 
-Это похоже на то, что ты ищешь?`,
+${tr("rating_is_this_match")}`,
     {
       reply_markup: ratingKeyboard(index, total),
     }
@@ -274,6 +290,7 @@ async function showConfirmation(
   query: string,
   mode: UserMode
 ): Promise<void> {
+  const tr = getTranslator(userId);
   const queryId = `${userId}_${Date.now()}`;
 
   send(userId, {
@@ -289,33 +306,33 @@ async function showConfirmation(
   if (mode === "normal") {
     // Simplified view for normal mode - only description
     await context.send(
-      format`${bold("Результат анализа:")}
+      format`${bold(tr("analysis_result"))}
 
-${bold("Что будем искать:")}
+${bold(tr("analysis_what_looking"))}
 ${result.llm_description}
 
-Подтверди или отмени:`,
+${tr("sub_confirm_or_cancel")}`,
       {
-        reply_markup: confirmKeyboard(queryId),
+        reply_markup: confirmKeyboard(queryId, tr),
       }
     );
   } else {
     // Full view for advanced mode
     await context.send(
-      format`${bold("Результат анализа:")}
+      format`${bold(tr("analysis_result"))}
 
-${bold("Позитивные ключевые слова:")}
+${bold(tr("analysis_positive_kw"))}
 ${code(result.positive_keywords.join(", "))}
 
-${bold("Негативные ключевые слова:")}
-${code(result.negative_keywords.join(", ") || "нет")}
+${bold(tr("analysis_negative_kw"))}
+${code(result.negative_keywords.join(", ") || tr("analysis_none"))}
 
-${bold("Описание для проверки:")}
+${bold(tr("analysis_description"))}
 ${result.llm_description}
 
-Подтверди или измени параметры:`,
+${tr("sub_confirm_or_adjust")}`,
       {
-        reply_markup: keywordEditConfirmKeyboard(queryId),
+        reply_markup: keywordEditConfirmKeyboard(queryId, tr),
       }
     );
   }
@@ -329,6 +346,7 @@ async function startRatingFlow(
   query: string,
   clarificationContext?: string
 ): Promise<void> {
+  const tr = getTranslator(userId);
   // Get user's groups
   const userGroups = queries.getUserGroups(userId);
   const groupIds = userGroups.map((g) => g.id);
@@ -388,7 +406,7 @@ async function startRatingFlow(
     // No examples at all, skip to keyword generation
     botLog.debug({ userId }, "No examples available, skipping rating flow");
     const mode = queries.getUserMode(userId);
-    const progressMsg = await context.send("Примеры не найдены, генерирую ключевые слова...");
+    const progressMsg = await context.send(tr("sub_no_examples"));
     const messageId = progressMsg?.message?.message_id;
 
     const result = await runWithRecovery(
@@ -433,9 +451,7 @@ async function startRatingFlow(
   });
 
   // Explain what examples are for
-  await context.send(`📝 Покажу примеры — оцени их, чтобы я лучше понял что искать.
-
-Бот использует ИИ, ключевые слова и семантический анализ — находит посты с опечатками, на разных языках, сформулированные по-разному, и даже анализирует картинки если из текста мало что понятно.`);
+  await context.send(tr("rating_intro"));
 
   await showExampleForRating(context, userId, examples[0]!, 0, examples.length);
 }
@@ -448,9 +464,10 @@ async function finishRatingAndGenerateKeywords(
 ): Promise<void> {
   const c = ctx(userId);
   const mode = queries.getUserMode(userId);
+  const tr = getTranslator(userId);
 
   if (!c.ratingExamples || !c.pendingSub) {
-    await context.send("Сессия истекла. Отправь новый запрос.");
+    await context.send(tr("sub_session_expired"));
     send(userId, { type: "CANCEL" });
     return;
   }
@@ -464,7 +481,7 @@ async function finishRatingAndGenerateKeywords(
   const progressMsg = await sendProgressWithPromo(
     context,
     userId,
-    "Генерирую ключевые слова с учётом твоих оценок...",
+    tr("analysis_generating_with_ratings"),
     "bot_keywords"
   );
   const messageId = progressMsg?.message?.message_id;
@@ -515,8 +532,9 @@ async function generateKeywordsAndShowResult(
   query: string,
   clarificationContext?: string
 ): Promise<void> {
+  const tr = getTranslator(userId);
   const mode = queries.getUserMode(userId);
-  const progressMsg = await context.send("Генерирую ключевые слова...");
+  const progressMsg = await context.send(tr("sub_generating_keywords"));
   const messageId = progressMsg?.message?.message_id;
 
   const result = await runWithRecovery(
@@ -654,24 +672,8 @@ bot.command("start", async (context) => {
   queries.getOrCreateUser(userId, context.from?.firstName, context.from?.username);
   ensureIdle(userId);
 
-  await context.send(format`
-Привет! Я бот для мониторинга сообщений в группах.
-
-${bold("Примеры использования:")}
-• Поиск объявлений в барахолках — "iPhone 14 до 50к в Москве"
-• Поиск клиентов для бизнеса — "ищу мастера по ремонту техники"
-• Мониторинг новостей — "вакансии frontend разработчик"
-
-${bold("Как начать:")}
-1. Добавь группы: /addgroup
-2. Опиши что ищешь
-3. Получай уведомления
-
-${bold("Команды:")}
-/addgroup - добавить группу
-/list - мои подписки
-/settings - настройки
-  `);
+  const tr = getTranslator(userId);
+  await context.send(tr("cmd_start_welcome"));
 });
 
 // /list command - show user subscriptions
@@ -679,11 +681,12 @@ bot.command("list", async (context) => {
   const userId = context.from?.id;
   if (!userId) return;
 
+  const tr = getTranslator(userId);
   const mode = queries.getUserMode(userId);
   const subscriptions = queries.getUserSubscriptions(userId);
 
   if (subscriptions.length === 0) {
-    await context.send("У тебя пока нет подписок. Отправь описание того, что хочешь найти.");
+    await context.send(tr("list_no_subscriptions"));
     return;
   }
 
@@ -695,50 +698,53 @@ bot.command("list", async (context) => {
 
     let messageText;
     if (mode === "advanced") {
-      let exclusionsText = "нет";
+      let exclusionsText = tr("analysis_none");
       if (hasNeg) {
         exclusionsText = sub.negative_keywords.join(", ");
       } else if (hasDisabledNeg) {
-        exclusionsText = `(отключены: ${sub.disabled_negative_keywords!.join(", ")})`;
+        exclusionsText = `(${sub.disabled_negative_keywords!.join(", ")})`;
       }
 
       messageText = format`
-${bold("Подписка #" + sub.id + pauseLabel)}
-${bold("Запрос:")} ${sub.original_query}
-${bold("Ключевые слова:")} ${code(sub.positive_keywords.join(", "))}
-${bold("Исключения:")} ${code(exclusionsText)}
+${bold(tr("list_sub_header", { id: sub.id, pause: pauseLabel }))}
+${bold(tr("list_query"))} ${sub.original_query}
+${bold(tr("list_keywords"))} ${code(sub.positive_keywords.join(", "))}
+${bold(tr("list_exclusions"))} ${code(exclusionsText)}
       `;
     } else {
       messageText = format`
-${bold("Подписка #" + sub.id + pauseLabel)}
-${bold("Запрос:")} ${sub.original_query}
+${bold(tr("list_sub_header", { id: sub.id, pause: pauseLabel }))}
+${bold(tr("list_query"))} ${sub.original_query}
       `;
     }
 
     await context.send(messageText, {
-      reply_markup: subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg, mode, isPaused),
+      reply_markup: subscriptionKeyboard(sub.id, hasNeg, hasDisabledNeg, mode, isPaused, tr),
     });
   }
 });
 
 // /help command
 bot.command("help", async (context) => {
-  await context.send(format`
-${bold("Как работает бот:")}
+  const userId = context.from?.id;
+  if (!userId) return;
 
-1. Добавь группы для мониторинга: /addgroup
-2. Отправь описание того, что ищешь
-3. Выбери группы и получай уведомления
+  const tr = getTranslator(userId);
+  await context.send(tr("cmd_help"));
+});
 
-${bold("Команды:")}
-/addgroup - добавить группу/канал
-/groups - список добавленных групп
-/list - мои подписки
-/settings - настройки режима
-/catalog - каталог товаров
-/premium - 💎 план и лимиты
-/presets - 🗺️ пресеты регионов
-  `);
+// /lang command - change language
+bot.command("lang", async (context) => {
+  const userId = context.from?.id;
+  if (!userId) return;
+
+  queries.getOrCreateUser(userId, context.from?.firstName, context.from?.username);
+  const currentLocale = getUserLocale(userId);
+  const tr = getTranslator(userId);
+
+  await context.send(tr("lang_select"), {
+    reply_markup: languageKeyboard(currentLocale),
+  });
 });
 
 // /settings command - configure user mode
@@ -747,21 +753,20 @@ bot.command("settings", async (context) => {
   if (!userId) return;
 
   queries.getOrCreateUser(userId, context.from?.firstName, context.from?.username);
+  const tr = getTranslator(userId);
   const currentMode = queries.getUserMode(userId);
 
-  const modeDescription =
-    currentMode === "normal"
-      ? "В обычном режиме бот не показывает ключевые слова и не задаёт уточняющих вопросов."
-      : "В продвинутом режиме ты видишь ключевые слова, можешь их редактировать и отвечаешь на уточняющие вопросы.";
+  const modeDescription = currentMode === "normal" ? tr("settings_normal_desc") : tr("settings_advanced_desc");
+  const modeLabel = currentMode === "normal" ? tr("settings_mode_normal") : tr("settings_mode_advanced");
 
   await context.send(
-    format`${bold("Настройки")}
+    format`${bold(tr("settings_title"))}
 
-${bold("Текущий режим:")} ${currentMode === "normal" ? "📊 Обычный" : "🔬 Продвинутый"}
+${bold(tr("settings_current_mode"))} ${modeLabel}
 
 ${modeDescription}`,
     {
-      reply_markup: settingsKeyboard(currentMode),
+      reply_markup: settingsKeyboard(currentMode, tr),
     }
   );
 });
@@ -787,6 +792,7 @@ bot.command("presets", async (context) => {
   if (!userId) return;
 
   queries.getOrCreateUser(userId, context.from?.firstName, context.from?.username);
+  const tr = getTranslator(userId);
 
   const presets = queries.getRegionPresets();
   const presetsWithAccess = presets.map((p) => ({
@@ -795,37 +801,35 @@ bot.command("presets", async (context) => {
   }));
 
   if (presets.length === 0) {
-    await context.send("Пресеты регионов пока не настроены.");
+    await context.send(tr("presets_not_configured"));
     return;
   }
 
-  await context.send(
-    "🗺️ **Пресеты регионов**\n\n" +
-    "Пресет — это набор всех барахолок региона.\n" +
-    "Купи пресет и добавляй все группы региона в подписку одним кликом.\n\n" +
-    "Выбери регион:",
-    {
-      parse_mode: "Markdown",
-      reply_markup: presetsListKeyboard(presetsWithAccess),
-    }
-  );
+  await context.send("🗺️ **" + tr("presets_select_region") + "**\n\n" + tr("presets_intro"), {
+    parse_mode: "Markdown",
+    reply_markup: presetsListKeyboard(presetsWithAccess, tr),
+  });
 });
 
 // /catalog command - open webapp
 bot.command("catalog", async (context) => {
+  const userId = context.from?.id;
+  if (!userId) return;
+
+  const tr = getTranslator(userId);
   const webappUrl = process.env.WEBAPP_URL;
 
   if (!webappUrl) {
-    await context.send("WebApp не настроен. Добавь WEBAPP_URL в .env");
+    await context.send("WebApp not configured");
     return;
   }
 
-  await context.send("Открой каталог товаров:", {
+  await context.send(tr("catalog_open"), {
     reply_markup: {
       inline_keyboard: [
         [
           {
-            text: "Открыть каталог",
+            text: tr("catalog_button"),
             web_app: { url: webappUrl },
           },
         ],
@@ -841,6 +845,7 @@ bot.command("addgroup", async (context) => {
 
   queries.getOrCreateUser(userId, context.from?.firstName, context.from?.username);
   ensureIdle(userId);
+  const tr = getTranslator(userId);
 
   // Check for links in command arguments
   const args = context.text?.replace(/^\/addgroup(@\w+)?\s*/i, "").trim() || "";
@@ -849,14 +854,14 @@ bot.command("addgroup", async (context) => {
   if (links.length === 0) {
     // No links provided — show interactive picker
     send(userId, { type: "ADDGROUP" });
-    await context.send("Выбери группу или канал для добавления:", {
-      reply_markup: groupPickerKeyboard(nextRequestId()),
+    await context.send(tr("groups_select_add"), {
+      reply_markup: groupPickerKeyboard(nextRequestId(), tr),
     });
     return;
   }
 
   // Process links
-  await context.send(`Добавляю ${groups(links.length)}...`);
+  await context.send(tr("group_adding_count", { count: plural(userId, "groups_count", links.length) }));
 
   const results: string[] = [];
   const addedGroups: Array<{ groupId: number; groupTitle: string }> = [];
@@ -903,10 +908,11 @@ bot.command("groups", async (context) => {
   const userId = context.from?.id;
   if (!userId) return;
 
+  const tr = getTranslator(userId);
   const groups = queries.getUserGroups(userId);
 
   if (groups.length === 0) {
-    await context.send("У тебя нет добавленных групп. Используй /addgroup для добавления.");
+    await context.send(tr("groups_none"));
     return;
   }
 
@@ -918,11 +924,9 @@ bot.command("groups", async (context) => {
     .join("\n");
 
   await context.send(format`
-${bold("Твои группы для мониторинга:")}
+${bold(tr("groups_list_header"))}
 
 ${list}
-
-Используй /addgroup чтобы добавить ещё.
   `);
 });
 
@@ -940,6 +944,8 @@ bot.on("chat_shared", async (context) => {
   const userId = context.from?.id;
   if (!userId) return;
 
+  const tr = getTranslator(userId);
+
   if (fsmState(userId) !== "addingGroup") return;
 
   const chatShared = context.chatShared;
@@ -956,7 +962,7 @@ bot.on("chat_shared", async (context) => {
 
   // Check if already added by user
   if (queries.hasUserGroup(userId, chatId)) {
-    await context.send("Эта группа уже добавлена!");
+    await context.send(tr("groups_already_added"));
     await showAddGroupPrompt(context, userId);
     return;
   }
@@ -978,10 +984,8 @@ bot.on("chat_shared", async (context) => {
     send(userId, { type: "CHAT_SHARED", group: newGroup });
 
     await context.send(
-      `Приватная группа "${title}".\n\n` +
-        "Бот не может присоединиться без invite link.\n" +
-        "Отправь ссылку вида t.me/+XXX или нажми Пропустить.",
-      { reply_markup: inviteLinkKeyboard() }
+      tr("groups_private_need_link", { title }),
+      { reply_markup: inviteLinkKeyboard(tr) }
     );
     return;
   }
@@ -1043,7 +1047,8 @@ async function addGroupByLink(
 
   // Check if already added
   if (queries.hasUserGroup(userId, joinResult.chatId)) {
-    return { success: false, error: "Уже добавлена" };
+    // Note: error message returned here, translation happens in caller
+    return { success: false, error: "already_added" };
   }
 
   // Save to DB (isChannel = false by default, we can't easily detect this from link)
@@ -1057,9 +1062,10 @@ async function showAddGroupPrompt(
   context: { send: (text: string, options?: object) => Promise<unknown> },
   userId: number
 ): Promise<void> {
+  const tr = getTranslator(userId);
   send(userId, { type: "ADDGROUP" });
-  await context.send('Выбери ещё группу или нажми "Готово":', {
-    reply_markup: groupPickerKeyboard(nextRequestId()),
+  await context.send(tr("groups_select_more"), {
+    reply_markup: groupPickerKeyboard(nextRequestId(), tr),
   });
 }
 
@@ -1077,9 +1083,10 @@ async function addGroupForUser(
   const result = await ensureUserbotInGroup(group.id, group.username, group.inviteLink);
 
   if (result.success) {
+    const tr = getTranslator(userId);
     // Save to DB
     queries.addUserGroup(userId, group.id, group.title || "Unknown", group.isChannel);
-    await context.send(`${icon} "${group.title}" добавлена!`, {
+    await context.send(tr("group_added_success", { icon, title: group.title || "Unknown" }), {
       reply_markup: { remove_keyboard: true },
     });
 
@@ -1100,7 +1107,8 @@ async function addGroupForUser(
     await askNextMetadataQuestion(context, userId);
     return { success: true, groupId: group.id };
   } else {
-    await context.send(`Не удалось добавить "${group.title}": ${result.error}`, {
+    const tr = getTranslator(userId);
+    await context.send(tr("group_add_failed", { title: group.title || "Unknown", error: result.error || "Unknown error" }), {
       reply_markup: { remove_keyboard: true },
     });
     await showAddGroupPrompt(context, userId);
@@ -1113,6 +1121,7 @@ async function askNextMetadataQuestion(
   context: { send: (text: string, options?: object) => Promise<unknown> },
   userId: number
 ): Promise<void> {
+  const tr = getTranslator(userId);
   const userCtx = ctx(userId);
   const meta = userCtx.pendingGroupMetadata;
 
@@ -1124,8 +1133,8 @@ async function askNextMetadataQuestion(
 
   switch (meta.step) {
     case "marketplace":
-      await context.send(`Продают ли товары в группе "${meta.groupTitle}"?`, {
-        reply_markup: marketplaceKeyboard(),
+      await context.send(tr("meta_marketplace_prompt", { title: meta.groupTitle }), {
+        reply_markup: marketplaceKeyboard(tr),
       });
       break;
 
@@ -1133,24 +1142,24 @@ async function askNextMetadataQuestion(
       if (meta.prefilled.country && !meta.awaitingTextInput) {
         // Has prefilled country — show confirm button
         const countryName = getCountryName(meta.prefilled.country);
-        await context.send("Страна группы:", {
-          reply_markup: metadataPrefilledKeyboard(meta.prefilled.country, `${countryName} (${meta.prefilled.country})`),
+        await context.send(tr("meta_country_label"), {
+          reply_markup: metadataPrefilledKeyboard(meta.prefilled.country, `${countryName} (${meta.prefilled.country})`, tr),
         });
       } else {
-        await context.send("В какой стране находится группа? (например: Сербия, Россия)", {
-          reply_markup: metadataSkipKeyboard(),
+        await context.send(tr("meta_country_prompt"), {
+          reply_markup: metadataSkipKeyboard(tr),
         });
       }
       break;
 
     case "city":
       if (meta.prefilled.city && !meta.awaitingTextInput) {
-        await context.send("Город группы:", {
-          reply_markup: metadataPrefilledKeyboard(meta.prefilled.city, meta.prefilled.city),
+        await context.send(tr("meta_city_label"), {
+          reply_markup: metadataPrefilledKeyboard(meta.prefilled.city, meta.prefilled.city, tr),
         });
       } else {
-        await context.send("Какой город? (например: Белград, Москва)", {
-          reply_markup: metadataSkipKeyboard(),
+        await context.send(tr("meta_city_prompt"), {
+          reply_markup: metadataSkipKeyboard(tr),
         });
       }
       break;
@@ -1160,12 +1169,12 @@ async function askNextMetadataQuestion(
       const defaultCurrency = meta.country ? getDefaultCurrency(meta.country) : null;
       if (defaultCurrency && !meta.awaitingTextInput) {
         const currencyName = getCurrencyName(defaultCurrency);
-        await context.send("Валюта группы:", {
-          reply_markup: metadataCurrencyKeyboard(defaultCurrency, currencyName),
+        await context.send(tr("meta_currency_label"), {
+          reply_markup: metadataCurrencyKeyboard(defaultCurrency, currencyName, tr),
         });
       } else {
-        await context.send("Какая основная валюта? (например: динары, рубли, евро)", {
-          reply_markup: metadataSkipKeyboard(),
+        await context.send(tr("meta_currency_prompt"), {
+          reply_markup: metadataSkipKeyboard(tr),
         });
       }
       break;
@@ -1216,6 +1225,8 @@ async function finishMetadataCollection(
 // Helper: process new subscription query
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function processSubscriptionQuery(context: any, userId: number, query: string): Promise<void> {
+  const tr = getTranslator(userId);
+
   // Check subscription limits before processing
   const limits = checkSubscriptionLimits(userId);
   if (!limits.canCreate) {
@@ -1226,16 +1237,16 @@ async function processSubscriptionQuery(context: any, userId: number, query: str
     const price = PLAN_PRICES[nextPlan];
 
     await context.send(
-      format`⚠️ ${bold("Лимит подписок исчерпан")}
+      format`${bold(tr("sub_limit_reached"))}
 
-Твой план: ${currentPlanName}
-Подписок: ${limits.current}/${limits.max}
+${tr("sub_limit_your_plan", { plan: currentPlanName })}
+${tr("sub_limit_subs_count", { current: limits.current, max: limits.max })}
 
-Чтобы создать больше подписок, перейди на следующий план.`,
+${tr("sub_limit_upgrade_prompt")}`,
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: `Upgrade to ${nextPlanName} — ${price}⭐/мес`, callback_data: JSON.stringify({ action: "upgrade", plan: nextPlan }) }],
+            [{ text: tr("sub_limit_upgrade_button", { plan: nextPlanName, price }), callback_data: JSON.stringify({ action: "upgrade", plan: nextPlan }) }],
           ],
         },
       }
@@ -1258,10 +1269,10 @@ async function processSubscriptionQuery(context: any, userId: number, query: str
       }));
 
       await context.send(
-        format`${bold("Выбери регион")}
+        format`${bold(tr("presets_select_region"))}
 
-Это нужно для показа пресетов групп при создании подписки.`,
-        { reply_markup: regionSelectionKeyboard(countryOptions) }
+${tr("presets_region_explanation")}`,
+        { reply_markup: regionSelectionKeyboard(countryOptions, tr) }
       );
       return;
     }
@@ -1274,7 +1285,7 @@ async function processSubscriptionQuery(context: any, userId: number, query: str
     // Save query for recovery before starting LLM call
     send(userId, { type: "SAVE_QUERY", query });
 
-    await sendProgressWithPromo(context, userId, "Анализирую запрос...", "bot_analyzing");
+    await sendProgressWithPromo(context, userId, tr("analysis_analyzing"), "bot_analyzing");
 
     try {
       const analysis = await runWithRecovery(
@@ -1308,8 +1319,8 @@ async function processSubscriptionQuery(context: any, userId: number, query: str
 
         const firstQuestion = analysis.questions[0]!;
         const questionNumber = `(1/${analysis.questions.length})`;
-        await context.send(format`${bold("Уточняющий вопрос")} ${questionNumber}\n\n${firstQuestion}`, {
-          reply_markup: skipQuestionKeyboard(),
+        await context.send(format`${bold(tr("clarify_question"))} ${questionNumber}\n\n${firstQuestion}`, {
+          reply_markup: skipQuestionKeyboard(tr),
         });
         return;
       }
@@ -1325,7 +1336,7 @@ async function processSubscriptionQuery(context: any, userId: number, query: str
     // Save query for recovery before starting LLM call
     send(userId, { type: "SAVE_QUERY", query });
 
-    await context.send("Генерирую уточняющие вопросы...");
+    await context.send(tr("clarify_generating"));
 
     let questions: string[];
     try {
@@ -1338,7 +1349,7 @@ async function processSubscriptionQuery(context: any, userId: number, query: str
     } catch (error) {
       botLog.error({ err: error, userId }, "LLM clarification generation failed");
       // Fallback: skip clarification, go directly to rating (semantic search by query)
-      await context.send("Не удалось сгенерировать вопросы, перехожу к примерам...");
+      await context.send(tr("clarify_failed"));
       await startRatingFlow(context, userId, query);
       return;
     }
@@ -1355,29 +1366,33 @@ async function processSubscriptionQuery(context: any, userId: number, query: str
     });
 
     // Send first question
-    const firstQuestion = questions[0] ?? "Какие конкретные характеристики важны?";
+    const firstQuestion = questions[0] ?? tr("clarify_default");
     const questionNumber = `(1/${questions.length})`;
-    await context.send(format`${bold("Уточняющий вопрос")} ${questionNumber}\n\n${firstQuestion}`, {
-      reply_markup: skipQuestionKeyboard(),
+    await context.send(format`${bold(tr("clarify_question"))} ${questionNumber}\n\n${firstQuestion}`, {
+      reply_markup: skipQuestionKeyboard(tr),
     });
   }
 }
 
 // Format not_found reason for user
-function formatNotFoundReason(reason: import("./forward.ts").NotFoundReason, groupTitle?: string): string {
+function formatNotFoundReason(
+  reason: import("./forward.ts").NotFoundReason,
+  groupTitle: string | undefined,
+  tr: Translator
+): string {
   switch (reason) {
     case "no_text":
-      return "Сообщение не содержит текста.";
+      return tr("forward_no_text");
     case "text_not_in_db":
-      return "Бот не видел это сообщение в мониторируемых группах.";
+      return tr("forward_not_seen");
     case "no_analyses_for_user":
       return groupTitle
-        ? `Сообщение из "${groupTitle}" ещё не было проанализировано.`
-        : "Сообщение ещё не было проанализировано.";
+        ? tr("forward_not_analyzed_group", { title: groupTitle })
+        : tr("forward_not_analyzed");
     case "group_not_monitored_by_user":
       return groupTitle
-        ? `Группа "${groupTitle}" не добавлена в твой мониторинг.`
-        : "Группа этого сообщения не добавлена в твой мониторинг.";
+        ? tr("forward_group_not_added", { title: groupTitle })
+        : tr("forward_group_not_monitored");
   }
 }
 
@@ -1387,6 +1402,7 @@ async function processForwardedMessage(
   userId: number,
   messageText: string
 ) {
+  const tr = getTranslator(userId);
   const result = handleForward(
     {
       message: context as unknown as import("gramio").Message,
@@ -1406,13 +1422,13 @@ async function processForwardedMessage(
 
     case "not_monitored":
       await context.send(
-        `Группа "${result.chatTitle || "Неизвестная"}" не добавлена в мониторинг.`,
-        { reply_markup: addGroupKeyboard(result.chatId, result.chatTitle) }
+        tr("forward_group_not_added", { title: result.chatTitle || tr("forward_group_unknown") }),
+        { reply_markup: addGroupKeyboard(result.chatId, result.chatTitle, tr) }
       );
       break;
 
     case "not_found": {
-      const reasonText = formatNotFoundReason(result.reason, result.groupTitle);
+      const reasonText = formatNotFoundReason(result.reason, result.groupTitle, tr);
 
       // If no text or group not monitored - just show message, no analyze button
       if (result.reason === "no_text" || result.reason === "group_not_monitored_by_user") {
@@ -1434,7 +1450,7 @@ async function processForwardedMessage(
     case "found":
       // Show each analysis as separate message with actions
       for (const analysis of result.analyses) {
-        const text = formatAnalysisResult(analysis);
+        const text = formatAnalysisResult(analysis, userId);
         const isRejected = analysis.result !== "matched";
 
         if (isRejected && result.forwardInfo.chatId !== undefined) {
@@ -1458,6 +1474,8 @@ async function processForwardedMessage(
 bot.on("message", async (context) => {
   const userId = context.from?.id;
   if (!userId) return;
+
+  const tr = getTranslator(userId);
 
   // Handle forwarded messages FIRST - before text check
   // (forwards can be media without text)
@@ -1549,8 +1567,9 @@ bot.on("message", async (context) => {
     "Message handler: state check"
   );
 
-  // Handle "Готово" button in adding_group state
-  if (text === "Готово" && currentState === "addingGroup") {
+  // Handle "Done" button in adding_group state (check all locales)
+  const isDoneButton = text === "Готово" || text === "Done" || text === "Gotovo";
+  if (isDoneButton && currentState === "addingGroup") {
     const pendingQuery = c.pendingQuery;
     send(userId, { type: "DONE_ADDING_GROUPS" });
 
@@ -1563,17 +1582,17 @@ bot.on("message", async (context) => {
     if (groups.length > 0) {
       // If there was a pending query, process it automatically
       if (pendingQuery) {
-        await context.send(`Добавлено групп: ${groups.length}. Обрабатываю твой запрос...`, {
+        await context.send(tr("groups_added_processing", { n: groups.length }), {
           reply_markup: { remove_keyboard: true },
         });
         await processSubscriptionQuery(context, userId, pendingQuery);
       } else {
-        await context.send(`Добавлено групп: ${groups.length}. Теперь отправь описание того, что ищешь.`, {
+        await context.send(tr("groups_added_ready", { n: groups.length }), {
           reply_markup: { remove_keyboard: true },
         });
       }
     } else {
-      await context.send("Группы не добавлены. Используй /addgroup когда будешь готов.", {
+      await context.send(tr("groups_not_added"), {
         reply_markup: { remove_keyboard: true },
       });
     }
@@ -1590,12 +1609,12 @@ bot.on("message", async (context) => {
         needsInviteLink: false,
       };
       send(userId, { type: "INVITE_LINK", link: text.trim() });
-      await context.send("Ссылка получена, пробую присоединиться...", {
+      await context.send(tr("groups_joining"), {
         reply_markup: { remove_keyboard: true },
       });
       await addGroupForUser(context, userId, group);
     } else {
-      await context.send("Неверный формат. Отправь ссылку вида t.me/+XXX или нажми Пропустить.");
+      await context.send(tr("groups_invalid_format"));
     }
     return;
   }
@@ -1679,13 +1698,13 @@ bot.on("message", async (context) => {
       let hint = "";
       switch (step) {
         case "country":
-          hint = "Не могу распознать страну. Попробуй написать по-другому (например: Сербия, Serbia, RS)";
+          hint = tr("meta_country_error");
           break;
         case "currency":
-          hint = "Не могу распознать валюту. Попробуй написать код (EUR, RSD) или название (евро, динар)";
+          hint = tr("meta_currency_error");
           break;
       }
-      await context.send(hint, { reply_markup: metadataSkipKeyboard() });
+      await context.send(hint, { reply_markup: metadataSkipKeyboard(tr) });
     }
     return;
   }
@@ -1698,14 +1717,14 @@ bot.on("message", async (context) => {
       .filter(Boolean);
 
     if (newKeywords.length === 0) {
-      await context.send("Нужно указать хотя бы одно слово.");
+      await context.send(tr("kw_need_words"));
       return;
     }
 
     const sub = queries.getSubscriptionById(c.editingSubscriptionId, userId);
     if (!sub) {
       send(userId, { type: "CANCEL" });
-      await context.send("Подписка не найдена.");
+      await context.send(tr("sub_not_found"));
       return;
     }
 
@@ -1715,7 +1734,7 @@ bot.on("message", async (context) => {
     invalidateSubscriptionsCache();
 
     send(userId, { type: "CANCEL" });
-    await context.send(`✅ Добавлено: ${newKeywords.join(", ")}\nТекущие: ${unique.join(", ")}`);
+    await context.send(tr("kw_added", { added: newKeywords.join(", "), current: unique.join(", ") }));
     return;
   }
 
@@ -1727,14 +1746,14 @@ bot.on("message", async (context) => {
       .filter(Boolean);
 
     if (newKeywords.length === 0) {
-      await context.send("Нужно указать хотя бы одно слово.");
+      await context.send(tr("kw_need_words"));
       return;
     }
 
     const sub = queries.getSubscriptionById(c.editingSubscriptionId, userId);
     if (!sub) {
       send(userId, { type: "CANCEL" });
-      await context.send("Подписка не найдена.");
+      await context.send(tr("sub_not_found"));
       return;
     }
 
@@ -1744,20 +1763,20 @@ bot.on("message", async (context) => {
     invalidateSubscriptionsCache();
 
     send(userId, { type: "CANCEL" });
-    await context.send(`✅ Добавлено: ${newKeywords.join(", ")}\nТекущие: ${unique.join(", ")}`);
+    await context.send(tr("kw_added", { added: newKeywords.join(", "), current: unique.join(", ") }));
     return;
   }
 
   // Handle editing existing subscription description
   if (currentState === "editingSubDescription" && c.editingSubscriptionId) {
     if (text.length < 5) {
-      await context.send("Описание слишком короткое.");
+      await context.send(tr("kw_description_short"));
       return;
     }
 
     queries.updateLlmDescription(c.editingSubscriptionId, userId, text);
     send(userId, { type: "TEXT_DESCRIPTION", text });
-    await context.send("✅ Описание обновлено");
+    await context.send(tr("kw_description_updated"));
     return;
   }
 
@@ -1769,7 +1788,7 @@ bot.on("message", async (context) => {
       .filter(Boolean);
 
     if (newKeywords.length === 0) {
-      await context.send("Нужно указать хотя бы одно слово.");
+      await context.send(tr("kw_need_words"));
       return;
     }
 
@@ -1781,15 +1800,15 @@ bot.on("message", async (context) => {
 
       send(userId, { type: "TEXT_KEYWORDS", keywords: newKeywords });
       await context.send(
-        format`✅ Добавлено: ${newKeywords.join(", ")}
+        format`${tr("kw_added_full", { added: newKeywords.join(", ") })}
 
-${bold("Позитивные:")}
+${bold(tr("kw_positive"))}
 ${code(unique.join(", "))}
 
-${bold("Негативные:")}
-${code(c.pendingSub.negativeKeywords.join(", ") || "нет")}
+${bold(tr("kw_negative"))}
+${code(c.pendingSub.negativeKeywords.join(", ") || tr("analysis_none"))}
         `,
-        { reply_markup: keywordEditConfirmKeyboard(queryId) }
+        { reply_markup: keywordEditConfirmKeyboard(queryId, tr) }
       );
       return;
     }
@@ -1799,7 +1818,7 @@ ${code(c.pendingSub.negativeKeywords.join(", ") || "нет")}
       const sub = queries.getSubscriptionById(c.editingSubscriptionId, userId);
       if (!sub) {
         send(userId, { type: "CANCEL" });
-        await context.send("Подписка не найдена.");
+        await context.send(tr("sub_not_found"));
         return;
       }
 
@@ -1809,7 +1828,7 @@ ${code(c.pendingSub.negativeKeywords.join(", ") || "нет")}
       invalidateSubscriptionsCache();
 
       send(userId, { type: "CANCEL" });
-      await context.send(`✅ Добавлено: ${newKeywords.join(", ")}\nТекущие: ${unique.join(", ")}`);
+      await context.send(tr("kw_added_current", { added: newKeywords.join(", "), current: unique.join(", ") }));
       return;
     }
 
@@ -1825,7 +1844,7 @@ ${code(c.pendingSub.negativeKeywords.join(", ") || "нет")}
       .filter(Boolean);
 
     if (newKeywords.length === 0) {
-      await context.send("Нужно указать хотя бы одно слово.");
+      await context.send(tr("kw_need_words"));
       return;
     }
 
@@ -1837,12 +1856,12 @@ ${code(c.pendingSub.negativeKeywords.join(", ") || "нет")}
 
       send(userId, { type: "TEXT_KEYWORDS", keywords: newKeywords });
       await context.send(
-        format`✅ Добавлено: ${newKeywords.join(", ")}
+        format`${tr("kw_added", { words: newKeywords.join(", ") })}
 
-${bold("Позитивные:")}
+${bold(tr("kw_positive"))}
 ${code(c.pendingSub.positiveKeywords.join(", "))}
 
-${bold("Негативные:")}
+${bold(tr("kw_negative"))}
 ${code(unique.join(", "))}
         `,
         { reply_markup: keywordEditConfirmKeyboard(queryId) }
@@ -1855,7 +1874,7 @@ ${code(unique.join(", "))}
       const sub = queries.getSubscriptionById(c.editingSubscriptionId, userId);
       if (!sub) {
         send(userId, { type: "CANCEL" });
-        await context.send("Подписка не найдена.");
+        await context.send(tr("sub_not_found"));
         return;
       }
 
@@ -1865,7 +1884,7 @@ ${code(unique.join(", "))}
       invalidateSubscriptionsCache();
 
       send(userId, { type: "CANCEL" });
-      await context.send(`✅ Добавлено: ${newKeywords.join(", ")}\nТекущие: ${unique.join(", ")}`);
+      await context.send(tr("kw_added_current", { added: newKeywords.join(", "), current: unique.join(", ") }));
       return;
     }
 
@@ -1884,7 +1903,7 @@ ${code(unique.join(", "))}
       .filter((n) => !isNaN(n) && n >= 0);
 
     if (indices.length === 0) {
-      await context.send("Отправь номера слов через запятую (например: 1, 3)");
+      await context.send(tr("kw_send_numbers"));
       return;
     }
 
@@ -1905,12 +1924,12 @@ ${code(unique.join(", "))}
       }
 
       if (removed.length === 0) {
-        await context.send("Неверные номера.");
+        await context.send(tr("kw_invalid_numbers"));
         return;
       }
 
       if (type === "positive" && keywords.length === 0) {
-        await context.send("Нельзя удалить все позитивные слова.");
+        await context.send(tr("kw_cant_delete_all"));
         return;
       }
 
@@ -1923,13 +1942,13 @@ ${code(unique.join(", "))}
 
       const updatedC = ctx(userId);
       await context.send(
-        format`✅ Удалено: ${removed.join(", ")}
+        format`${tr("kw_deleted", { list: removed.join(", ") })}
 
-${bold("Позитивные:")}
+${bold(tr("kw_positive"))}
 ${code(updatedC.pendingSub?.positiveKeywords.join(", ") || "")}
 
-${bold("Негативные:")}
-${code(updatedC.pendingSub?.negativeKeywords.join(", ") || "нет")}
+${bold(tr("kw_negative"))}
+${code(updatedC.pendingSub?.negativeKeywords.join(", ") || tr("analysis_none"))}
         `,
         { reply_markup: keywordEditConfirmKeyboard(queryId) }
       );
@@ -1941,7 +1960,7 @@ ${code(updatedC.pendingSub?.negativeKeywords.join(", ") || "нет")}
       const sub = queries.getSubscriptionById(c.editingSubscriptionId, userId);
       if (!sub) {
         send(userId, { type: "CANCEL" });
-        await context.send("Подписка не найдена.");
+        await context.send(tr("sub_not_found"));
         return;
       }
 
@@ -1957,12 +1976,12 @@ ${code(updatedC.pendingSub?.negativeKeywords.join(", ") || "нет")}
       }
 
       if (removed.length === 0) {
-        await context.send("Неверные номера.");
+        await context.send(tr("kw_invalid_numbers"));
         return;
       }
 
       if (type === "positive" && keywords.length === 0) {
-        await context.send("Нельзя удалить все позитивные слова.");
+        await context.send(tr("kw_cant_delete_all"));
         return;
       }
 
@@ -1975,7 +1994,9 @@ ${code(updatedC.pendingSub?.negativeKeywords.join(", ") || "нет")}
 
       send(userId, { type: "CANCEL" });
       await context.send(
-        `✅ Удалено: ${removed.join(", ")}` + (keywords.length > 0 ? `\nОсталось: ${keywords.join(", ")}` : "")
+        keywords.length > 0
+          ? tr("kw_removed_remaining", { removed: removed.join(", "), remaining: keywords.join(", ") })
+          : tr("kw_removed_all", { removed: removed.join(", ") })
       );
       return;
     }
@@ -1994,14 +2015,14 @@ ${code(updatedC.pendingSub?.negativeKeywords.join(", ") || "нет")}
       llm_description: current.llmDescription,
     };
 
-    await context.send("Корректирую (может занять до минуты)...");
+    await context.send(tr("ai_correcting"));
 
     try {
       const result = await runWithRecovery(
         userId,
         "AI_EDIT",
         undefined, // MessageContext.send() doesn't return message_id
-        () => interpretEditCommand(text, currentSnake, conversation)
+        () => interpretEditCommand(text, currentSnake, conversation, getLLMLanguage(userId))
       );
 
       // Get examples for new parameters
@@ -2019,12 +2040,12 @@ ${code(updatedC.pendingSub?.negativeKeywords.join(", ") || "нет")}
       const removedNeg = currentSnake.negative_keywords.filter((k: string) => !result.negative_keywords.includes(k));
 
       let diffText = "";
-      if (addedPos.length) diffText += `+ Добавлено: ${addedPos.join(", ")}\n`;
-      if (removedPos.length) diffText += `- Удалено: ${removedPos.join(", ")}\n`;
-      if (addedNeg.length) diffText += `+ Исключения: ${addedNeg.join(", ")}\n`;
-      if (removedNeg.length) diffText += `- Из исключений: ${removedNeg.join(", ")}\n`;
+      if (addedPos.length) diffText += tr("diff_added", { list: addedPos.join(", ") }) + "\n";
+      if (removedPos.length) diffText += tr("diff_removed", { list: removedPos.join(", ") }) + "\n";
+      if (addedNeg.length) diffText += tr("diff_added_exclusions", { list: addedNeg.join(", ") }) + "\n";
+      if (removedNeg.length) diffText += tr("diff_removed_exclusions", { list: removedNeg.join(", ") }) + "\n";
       if (currentSnake.llm_description !== result.llm_description) {
-        diffText += `Описание: ${result.llm_description}\n`;
+        diffText += tr("diff_description", { desc: result.llm_description }) + "\n";
       }
 
       // Format examples
@@ -2046,20 +2067,20 @@ ${code(updatedC.pendingSub?.negativeKeywords.join(", ") || "нет")}
       });
 
       await context.send(
-        format`${bold("Изменения:")}
-${diffText || "Без изменений"}
-${bold("ИИ:")} ${result.summary}
+        format`${bold(tr("ai_changes"))}
+${diffText || tr("ai_no_changes")}
+${bold(tr("ai_comment"))} ${result.summary}
 
-${bold("Примеры сообщений:")}
+${bold(tr("ai_example_messages"))}
 ${examplesText}
-Можешь продолжить редактирование или применить:`,
+${tr("ai_continue_or_apply")}`,
         {
-          reply_markup: aiEditKeyboard(subscriptionId),
+          reply_markup: aiEditKeyboard(subscriptionId, tr),
         }
       );
     } catch (error) {
       botLog.error({ err: error, userId }, "AI edit interpretation failed");
-      await context.send("Ошибка обработки. Попробуй переформулировать.");
+      await context.send(tr("ai_error"));
     }
     return;
   }
@@ -2086,21 +2107,27 @@ ${examplesText}
     // Notify admin
     const adminId = process.env.ADMIN_ID;
     if (adminId) {
+      const adminTr = getTranslator(Number(adminId));
       const outcomeText = {
-        bought: "✅ Купил",
-        not_bought: "❌ Не купил",
-        complicated: "🤷 Всё сложно",
+        bought: adminTr("admin_feedback_bought"),
+        not_bought: adminTr("admin_feedback_not_bought"),
+        complicated: adminTr("admin_feedback_complicated"),
       };
       const user = queries.getUserByTelegramId(userId);
       const username = user?.username ? `@${user.username}` : `ID: ${userId}`;
       await bot.api.sendMessage({
         chat_id: Number(adminId),
-        text: `📝 Фидбек от ${username}:\n${outcomeText[outcome]}\n\nЗапрос: ${subscriptionQuery ?? "—"}\n\nОтзыв: ${text}`,
+        text: adminTr("admin_feedback_from", {
+          user: username,
+          outcome: outcomeText[outcome],
+          query: subscriptionQuery ?? "—",
+          review: text,
+        }),
       });
     }
 
     send(userId, { type: "FEEDBACK_REVIEW", text });
-    await context.send("Спасибо за отзыв!");
+    await context.send(tr("feedback_thanks_full"));
     return;
   }
 
@@ -2114,7 +2141,7 @@ ${examplesText}
       llm_description: current.llmDescription,
     };
 
-    await context.send("Корректирую (может занять до минуты)...");
+    await context.send(tr("ai_correcting"));
 
     try {
       if (mode === "normal") {
@@ -2147,15 +2174,14 @@ ${examplesText}
         });
 
         await context.send(
-          format`${bold("Новое описание:")}
+          format`${bold(tr("ai_new_description"))}
 ${descResult.description}
 
-${bold("ИИ:")} ${descResult.summary}
+${bold(tr("ai_comment"))} ${descResult.summary}
 
-Ключевые слова будут перегенерированы автоматически.
-Можешь продолжить уточнение или применить:`,
+${tr("ai_keywords_auto_regen")}`,
           {
-            reply_markup: pendingAiEditKeyboard(),
+            reply_markup: pendingAiEditKeyboard(tr),
           }
         );
       } else {
@@ -2164,7 +2190,7 @@ ${bold("ИИ:")} ${descResult.summary}
           userId,
           "AI_CORRECT",
           undefined,
-          () => interpretEditCommand(text, currentSnake, conversation)
+          () => interpretEditCommand(text, currentSnake, conversation, getLLMLanguage(userId))
         );
 
         // Format diff
@@ -2174,12 +2200,12 @@ ${bold("ИИ:")} ${descResult.summary}
         const removedNeg = currentSnake.negative_keywords.filter((k: string) => !result.negative_keywords.includes(k));
 
         let diffText = "";
-        if (addedPos.length) diffText += `+ Добавлено: ${addedPos.join(", ")}\n`;
-        if (removedPos.length) diffText += `- Удалено: ${removedPos.join(", ")}\n`;
-        if (addedNeg.length) diffText += `+ Исключения: ${addedNeg.join(", ")}\n`;
-        if (removedNeg.length) diffText += `- Из исключений: ${removedNeg.join(", ")}\n`;
+        if (addedPos.length) diffText += tr("diff_added", { list: addedPos.join(", ") }) + "\n";
+        if (removedPos.length) diffText += tr("diff_removed", { list: removedPos.join(", ") }) + "\n";
+        if (addedNeg.length) diffText += tr("diff_added_exclusions", { list: addedNeg.join(", ") }) + "\n";
+        if (removedNeg.length) diffText += tr("diff_removed_exclusions", { list: removedNeg.join(", ") }) + "\n";
         if (currentSnake.llm_description !== result.llm_description) {
-          diffText += `Описание: ${result.llm_description}\n`;
+          diffText += tr("diff_description", { desc: result.llm_description }) + "\n";
         }
 
         // Update FSM state with proposed changes
@@ -2194,19 +2220,19 @@ ${bold("ИИ:")} ${descResult.summary}
         });
 
         await context.send(
-          format`${bold("Изменения:")}
-${diffText || "Без изменений"}
-${bold("ИИ:")} ${result.summary}
+          format`${bold(tr("ai_changes"))}
+${diffText || tr("ai_no_changes")}
+${bold(tr("ai_comment"))} ${result.summary}
 
-Можешь продолжить редактирование или применить:`,
+${tr("ai_continue_or_apply")}`,
           {
-            reply_markup: pendingAiEditKeyboard(),
+            reply_markup: pendingAiEditKeyboard(tr),
           }
         );
       }
     } catch (error) {
       botLog.error({ err: error, userId }, "AI correction for pending failed");
-      await context.send("Ошибка обработки. Попробуй переформулировать.");
+      await context.send(tr("ai_error"));
     }
     return;
   }
@@ -2224,12 +2250,12 @@ ${bold("ИИ:")} ${result.summary}
       // More questions to ask
       const nextQuestion = questions[nextIndex] ?? "";
       const questionNumber = `(${nextIndex + 1}/${questions.length})`;
-      await context.send(format`${bold("Уточняющий вопрос")} ${questionNumber}\n\n${nextQuestion}`, {
-        reply_markup: skipQuestionKeyboard(),
+      await context.send(format`${bold(tr("clarify_question"))} ${questionNumber}\n\n${nextQuestion}`, {
+        reply_markup: skipQuestionKeyboard(tr),
       });
     } else {
       // All questions answered — start rating flow (semantic search by query)
-      await sendProgressWithPromo(context, userId, "Анализирую ответы...", "bot_analyzing");
+      await sendProgressWithPromo(context, userId, tr("clarify_analyzing"), "bot_analyzing");
       const updatedC = ctx(userId);
       const finalAnswers = updatedC.clarification?.answers || [...answers, text];
       const clarificationContext = formatClarificationContext(questions, finalAnswers);
@@ -2252,8 +2278,8 @@ ${bold("ИИ:")} ${result.summary}
     send(userId, { type: "SAVE_PENDING_QUERY", query });
     send(userId, { type: "ADDGROUP" });
     await context.send(
-      "Сначала нужно добавить хотя бы одну группу для мониторинга.\n\nВыбери группу:",
-      { reply_markup: groupPickerKeyboard(nextRequestId()) }
+      tr("sub_need_groups_first"),
+      { reply_markup: groupPickerKeyboard(nextRequestId(), tr) }
     );
     return;
   }
@@ -2267,7 +2293,7 @@ bot.on("callback_query", async (context) => {
   const userId = context.from?.id;
   if (!userId) return;
 
-  let data: { action: string; id?: string | number; type?: string; idx?: number; msgId?: number; grpId?: number; kw?: string };
+  let data: { action: string; id?: string | number; type?: string; idx?: number; msgId?: number; grpId?: number; kw?: string; lang?: string };
   try {
     const raw = JSON.parse(context.data || "{}");
     // Normalize short keys to long keys
@@ -2279,6 +2305,7 @@ bot.on("callback_query", async (context) => {
       msgId: raw.msgId ?? raw.m,
       grpId: raw.grpId ?? raw.g,
       kw: raw.kw,
+      lang: raw.lang ?? raw.l,
     };
   } catch {
     return;
@@ -2286,11 +2313,12 @@ bot.on("callback_query", async (context) => {
 
   const c = ctx(userId);
   const currentState = fsmState(userId);
+  const tr = getTranslator(userId);
 
   switch (data.action) {
     case "confirm": {
       if (currentState !== "awaitingConfirmation" || !c.pendingSub) {
-        await context.answer({ text: "Сессия истекла. Отправь новый запрос." });
+        await context.answer({ text: tr("sub_session_expired") });
         return;
       }
 
@@ -2321,10 +2349,8 @@ bot.on("callback_query", async (context) => {
         invalidateSubscriptionsCache();
 
         send(userId, { type: "CANCEL" });
-        await context.answer({ text: "Подписка создана" });
-        await context.editText(
-          "Подписка создана!\n\nУ тебя нет добавленных групп. Используй /addgroup для добавления."
-        );
+        await context.answer({ text: tr("cb_subscription_created") });
+        await context.editText(tr("sub_no_groups_created"));
         return;
       }
 
@@ -2335,15 +2361,15 @@ bot.on("callback_query", async (context) => {
       // Get region presets for user's country
       const regionPresets = getUserRegionPresets(userId);
 
-      await context.answer({ text: "Выбери группы" });
+      await context.answer({ text: tr("cb_select_groups") });
       await context.editText(
         format`
-${bold("Выбери группы для мониторинга:")}
+${bold(tr("sub_select_groups"))}
 
-Выбрано: 0 из ${groups.length}
+${groups.length}
         `,
         {
-          reply_markup: groupsKeyboard(groups, new Set(), regionPresets),
+          reply_markup: groupsKeyboard(groups, new Set(), regionPresets, tr),
         }
       );
       break;
@@ -2352,12 +2378,12 @@ ${bold("Выбери группы для мониторинга:")}
     case "edit": {
       // Legacy - redirect to positive keywords submenu
       if (!c.pendingSub) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
-      await context.answer({ text: "Выбери действие" });
+      await context.answer({ text: tr("cb_select_action") });
       await context.editText(
-        `Позитивные слова: ${c.pendingSub.positiveKeywords.join(", ")}\n\nЧто сделать?`,
+        tr("kw_pending_positive", { list: c.pendingSub.positiveKeywords.join(", ") }),
         { reply_markup: keywordEditSubmenuPending("positive") }
       );
       break;
@@ -2366,12 +2392,12 @@ ${bold("Выбери группы для мониторинга:")}
     // Pending subscription: show submenu for positive keywords
     case "edit_positive_pending": {
       if (!c.pendingSub) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
-      await context.answer({ text: "Выбери действие" });
+      await context.answer({ text: tr("cb_select_action") });
       await context.editText(
-        `Позитивные слова: ${c.pendingSub.positiveKeywords.join(", ")}\n\nЧто сделать?`,
+        tr("kw_pending_positive", { list: c.pendingSub.positiveKeywords.join(", ") }),
         { reply_markup: keywordEditSubmenuPending("positive") }
       );
       break;
@@ -2380,12 +2406,12 @@ ${bold("Выбери группы для мониторинга:")}
     // Pending subscription: show submenu for negative keywords
     case "edit_negative_pending": {
       if (!c.pendingSub) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
-      await context.answer({ text: "Выбери действие" });
+      await context.answer({ text: tr("cb_select_action") });
       await context.editText(
-        `Негативные слова: ${c.pendingSub.negativeKeywords.join(", ") || "нет"}\n\nЧто сделать?`,
+        tr("kw_pending_negative", { list: c.pendingSub.negativeKeywords.join(", ") || tr("analysis_none") }),
         { reply_markup: keywordEditSubmenuPending("negative") }
       );
       break;
@@ -2394,13 +2420,13 @@ ${bold("Выбери группы для мониторинга:")}
     // Pending: add positive keywords
     case "add_positive_pending": {
       if (!c.pendingSub) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
       send(userId, { type: "ADD_POSITIVE" });
-      await context.answer({ text: "Отправь слова" });
+      await context.answer({ text: tr("cb_send_words") });
       await context.editText(
-        `Текущие: ${c.pendingSub.positiveKeywords.join(", ")}\n\nОтправь слова для добавления через запятую:`
+        tr("kw_current_send_add", { current: c.pendingSub.positiveKeywords.join(", ") })
       );
       break;
     }
@@ -2408,13 +2434,13 @@ ${bold("Выбери группы для мониторинга:")}
     // Pending: add negative keywords
     case "add_negative_pending": {
       if (!c.pendingSub) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
       send(userId, { type: "ADD_NEGATIVE" });
-      await context.answer({ text: "Отправь слова" });
+      await context.answer({ text: tr("cb_send_words") });
       await context.editText(
-        `Текущие: ${c.pendingSub.negativeKeywords.join(", ") || "нет"}\n\nОтправь слова для добавления через запятую:`
+        tr("kw_current_send_add", { current: c.pendingSub.negativeKeywords.join(", ") || tr("analysis_none") })
       );
       break;
     }
@@ -2422,19 +2448,19 @@ ${bold("Выбери группы для мониторинга:")}
     // Pending: remove positive keywords (show UI)
     case "remove_positive_pending": {
       if (!c.pendingSub) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
       const keywords = c.pendingSub.positiveKeywords;
       if (keywords.length === 0) {
-        await context.answer({ text: "Нет слов для удаления" });
+        await context.answer({ text: tr("kw_no_words_to_delete") });
         return;
       }
       send(userId, { type: "REMOVE_POSITIVE" });
       const list = keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
-      await context.answer({ text: "Выбери слова" });
+      await context.answer({ text: tr("kw_select_words") });
       await context.editText(
-        `Позитивные слова:\n${list}\n\nНажми на слово или отправь номера через запятую:`,
+        tr("kw_select_words_numbered", { label: tr("kw_positive_label"), list }),
         { reply_markup: removeKeywordsKeyboard(keywords, "positive", null) }
       );
       break;
@@ -2443,19 +2469,19 @@ ${bold("Выбери группы для мониторинга:")}
     // Pending: remove negative keywords (show UI)
     case "remove_negative_pending": {
       if (!c.pendingSub) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
       const keywords = c.pendingSub.negativeKeywords;
       if (keywords.length === 0) {
-        await context.answer({ text: "Нет слов для удаления" });
+        await context.answer({ text: tr("kw_no_words_to_delete") });
         return;
       }
       send(userId, { type: "REMOVE_NEGATIVE" });
       const list = keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
-      await context.answer({ text: "Выбери слова" });
+      await context.answer({ text: tr("kw_select_words") });
       await context.editText(
-        `Негативные слова:\n${list}\n\nНажми на слово или отправь номера через запятую:`,
+        tr("kw_select_words_numbered", { label: tr("kw_negative_label"), list }),
         { reply_markup: removeKeywordsKeyboard(keywords, "negative", null) }
       );
       break;
@@ -2464,7 +2490,7 @@ ${bold("Выбери группы для мониторинга:")}
     // Pending: remove keyword by clicking button
     case "rm_kw_pending": {
       if (!c.pendingSub) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
       const type = data.type as "positive" | "negative";
@@ -2476,21 +2502,21 @@ ${bold("Выбери группы для мониторинга:")}
           : [...c.pendingSub.negativeKeywords];
       const removed = keywords[idx];
       if (!removed) {
-        await context.answer({ text: "Слово не найдено" });
+        await context.answer({ text: tr("kw_word_not_found") });
         return;
       }
 
       keywords.splice(idx, 1);
 
       if (type === "positive" && keywords.length === 0) {
-        await context.answer({ text: "Нельзя удалить последнее слово" });
+        await context.answer({ text: tr("kw_cant_delete_last") });
         return;
       }
 
       // Remove keyword via FSM event
       send(userId, { type: "REMOVE_KEYWORD", index: idx });
 
-      await context.answer({ text: `Удалено: ${removed}` });
+      await context.answer({ text: tr("kw_answer_removed", { removed }) });
 
       // Re-read context after FSM update
       const updatedC = ctx(userId);
@@ -2501,24 +2527,24 @@ ${bold("Выбери группы для мониторинга:")}
         send(userId, { type: "BACK_TO_CONFIRM" });
         await context.editText(
           format`
-${bold("Ключевые слова:")}
+${bold(tr("list_keywords"))}
 
-${bold("Позитивные:")}
+${bold(tr("kw_positive"))}
 ${code(updatedC.pendingSub?.positiveKeywords.join(", ") ?? "")}
 
-${bold("Негативные:")}
-${code(updatedC.pendingSub?.negativeKeywords.join(", ") || "нет")}
+${bold(tr("kw_negative"))}
+${code(updatedC.pendingSub?.negativeKeywords.join(", ") || tr("analysis_none"))}
 
-${bold("Описание для LLM:")}
+${bold(tr("list_llm_description"))}
 ${updatedC.pendingSub?.llmDescription ?? ""}
           `,
           { reply_markup: keywordEditConfirmKeyboard(queryId) }
         );
       } else {
         const list = keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
-        const label = type === "positive" ? "Позитивные" : "Негативные";
+        const label = type === "positive" ? tr("kw_positive_label") : tr("kw_negative_label");
         await context.editText(
-          `${label} слова:\n${list}\n\nНажми на слово или отправь номера через запятую:`,
+          tr("kw_words_list", { label, list }),
           { reply_markup: removeKeywordsKeyboard(keywords, type, null) }
         );
       }
@@ -2528,7 +2554,7 @@ ${updatedC.pendingSub?.llmDescription ?? ""}
     // Pending: back to confirmation screen
     case "back_to_confirm": {
       if (!c.pendingSub) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
       const queryId = `${userId}_${Date.now()}`;
@@ -2536,15 +2562,15 @@ ${updatedC.pendingSub?.llmDescription ?? ""}
       await context.answer({ text: "OK" });
       await context.editText(
         format`
-${bold("Ключевые слова:")}
+${bold(tr("list_keywords"))}
 
-${bold("Позитивные:")}
+${bold(tr("kw_positive"))}
 ${code(c.pendingSub.positiveKeywords.join(", "))}
 
-${bold("Негативные:")}
-${code(c.pendingSub.negativeKeywords.join(", ") || "нет")}
+${bold(tr("kw_negative"))}
+${code(c.pendingSub.negativeKeywords.join(", ") || tr("analysis_none"))}
 
-${bold("Описание для LLM:")}
+${bold(tr("list_llm_description"))}
 ${c.pendingSub.llmDescription}
         `,
         { reply_markup: keywordEditConfirmKeyboard(queryId) }
@@ -2554,14 +2580,14 @@ ${c.pendingSub.llmDescription}
 
     case "cancel": {
       send(userId, { type: "CANCEL" });
-      await context.answer({ text: "Отменено" });
-      await context.editText("Отменено. Отправь новый запрос когда будешь готов.");
+      await context.answer({ text: tr("cb_cancelled") });
+      await context.editText(tr("cancel_send_new_query"));
       break;
     }
 
     case "skip_question": {
       if (currentState !== "clarifyingQuery" || !c.clarification) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
@@ -2576,14 +2602,14 @@ ${c.pendingSub.llmDescription}
         // More questions
         const nextQuestion = questions[nextIndex] ?? "";
         const questionNumber = `(${nextIndex + 1}/${questions.length})`;
-        await context.answer({ text: "Пропущено" });
-        await context.editText(format`${bold("Уточняющий вопрос")} ${questionNumber}\n\n${nextQuestion}`, {
+        await context.answer({ text: tr("clarify_skipped") });
+        await context.editText(format`${bold(tr("clarify_question"))} ${questionNumber}\n\n${nextQuestion}`, {
           reply_markup: skipQuestionKeyboard(),
         });
       } else {
         // All questions done — start rating flow (semantic search by query)
-        await context.answer({ text: "Генерирую..." });
-        await context.editText("Анализирую ответы...");
+        await context.answer({ text: tr("ai_generating") });
+        await context.editText(tr("clarify_analyzing"));
         const clarificationContext = formatClarificationContext(questions, answers);
 
         await startRatingFlow(context, userId, originalQuery, clarificationContext);
@@ -2595,14 +2621,14 @@ ${c.pendingSub.llmDescription}
       const subscriptionId = Number(data.id);
       // Get subscription info before deactivating (for feedback notification)
       const subToDelete = queries.getSubscriptionById(subscriptionId, userId);
-      const subscriptionQuery = subToDelete?.original_query ?? "Неизвестный запрос";
+      const subscriptionQuery = subToDelete?.original_query ?? tr("unknown_query");
 
       queries.deactivateSubscription(subscriptionId, userId);
       invalidateSubscriptionsCache();
-      await context.answer({ text: "Подписка отключена" });
+      await context.answer({ text: tr("sub_disabled") });
 
       // Ask for feedback
-      await context.editText("Подписка отключена.\n\nУдалось ли купить?", {
+      await context.editText(tr("sub_disabled_ask_feedback"), {
         reply_markup: feedbackOutcomeKeyboard(subscriptionId),
       });
 
@@ -2619,7 +2645,7 @@ ${c.pendingSub.llmDescription}
       const subscriptionId = Number(data.id);
       queries.pauseSubscription(subscriptionId, userId);
       invalidateSubscriptionsCache();
-      await context.answer({ text: "Подписка приостановлена" });
+      await context.answer({ text: tr("sub_paused") });
 
       // Update the message to show paused state
       const sub = queries.getSubscriptionById(subscriptionId, userId);
@@ -2630,22 +2656,22 @@ ${c.pendingSub.llmDescription}
 
         let messageText;
         if (mode === "advanced") {
-          let exclusionsText = "нет";
+          let exclusionsText = tr("analysis_none");
           if (hasNeg) {
             exclusionsText = sub.negative_keywords.join(", ");
           } else if (hasDisabledNeg) {
-            exclusionsText = `(отключены: ${sub.disabled_negative_keywords!.join(", ")})`;
+            exclusionsText = tr("list_exclusions_disabled_list", { list: sub.disabled_negative_keywords!.join(", ") });
           }
           messageText = format`
-${bold("Подписка #" + sub.id + " ⏸️")}
-${bold("Запрос:")} ${sub.original_query}
-${bold("Ключевые слова:")} ${code(sub.positive_keywords.join(", "))}
-${bold("Исключения:")} ${code(exclusionsText)}
+${bold(tr("list_sub_header_paused", { id: sub.id }))}
+${bold(tr("list_query"))} ${sub.original_query}
+${bold(tr("list_keywords"))} ${code(sub.positive_keywords.join(", "))}
+${bold(tr("list_exclusions"))} ${code(exclusionsText)}
           `;
         } else {
           messageText = format`
-${bold("Подписка #" + sub.id + " ⏸️")}
-${bold("Запрос:")} ${sub.original_query}
+${bold(tr("list_sub_header_paused", { id: sub.id }))}
+${bold(tr("list_query"))} ${sub.original_query}
           `;
         }
 
@@ -2659,7 +2685,7 @@ ${bold("Запрос:")} ${sub.original_query}
       const subscriptionId = Number(data.id);
       queries.resumeSubscription(subscriptionId, userId);
       invalidateSubscriptionsCache();
-      await context.answer({ text: "Подписка возобновлена" });
+      await context.answer({ text: tr("sub_resumed") });
 
       // Update the message to show active state
       const sub = queries.getSubscriptionById(subscriptionId, userId);
@@ -2670,22 +2696,22 @@ ${bold("Запрос:")} ${sub.original_query}
 
         let messageText;
         if (mode === "advanced") {
-          let exclusionsText = "нет";
+          let exclusionsText = tr("analysis_none");
           if (hasNeg) {
             exclusionsText = sub.negative_keywords.join(", ");
           } else if (hasDisabledNeg) {
-            exclusionsText = `(отключены: ${sub.disabled_negative_keywords!.join(", ")})`;
+            exclusionsText = tr("list_exclusions_disabled_list", { list: sub.disabled_negative_keywords!.join(", ") });
           }
           messageText = format`
-${bold("Подписка #" + sub.id)}
-${bold("Запрос:")} ${sub.original_query}
-${bold("Ключевые слова:")} ${code(sub.positive_keywords.join(", "))}
-${bold("Исключения:")} ${code(exclusionsText)}
+${bold(tr("list_sub_header", { id: sub.id, pause: "" }))}
+${bold(tr("list_query"))} ${sub.original_query}
+${bold(tr("list_keywords"))} ${code(sub.positive_keywords.join(", "))}
+${bold(tr("list_exclusions"))} ${code(exclusionsText)}
           `;
         } else {
           messageText = format`
-${bold("Подписка #" + sub.id)}
-${bold("Запрос:")} ${sub.original_query}
+${bold(tr("list_sub_header", { id: sub.id, pause: "" }))}
+${bold(tr("list_query"))} ${sub.original_query}
           `;
         }
 
@@ -2699,7 +2725,7 @@ ${bold("Запрос:")} ${sub.original_query}
       const subscriptionId = Number(data.id);
       queries.pauseSubscription(subscriptionId, userId);
       invalidateSubscriptionsCache();
-      await context.answer({ text: "Подписка приостановлена. /list чтобы возобновить." });
+      await context.answer({ text: tr("sub_paused_list") });
       break;
     }
 
@@ -2707,7 +2733,7 @@ ${bold("Запрос:")} ${sub.original_query}
       const subscriptionId = Number(data.id);
       const sub = queries.getSubscriptionById(subscriptionId, userId);
       if (!sub) {
-        await context.answer({ text: "Подписка не найдена" });
+        await context.answer({ text: tr("sub_not_found") });
         return;
       }
 
@@ -2724,14 +2750,14 @@ ${bold("Запрос:")} ${sub.original_query}
       const subscriptionId = Number(data.id);
       const sub = queries.getSubscriptionById(subscriptionId, userId);
       if (!sub) {
-        await context.answer({ text: "Подписка не найдена" });
+        await context.answer({ text: tr("sub_not_found") });
         return;
       }
 
       send(userId, { type: "CANCEL" }); // Reset to idle
-      await context.answer({ text: "Выбери действие" });
+      await context.answer({ text: tr("cb_select_action") });
       await context.editText(
-        `Позитивные слова: ${sub.positive_keywords.join(", ")}\n\nЧто сделать?`,
+        tr("kw_pending_positive", { list: sub.positive_keywords.join(", ") }),
         { reply_markup: keywordEditSubmenu("positive", subscriptionId) }
       );
       break;
@@ -2741,14 +2767,14 @@ ${bold("Запрос:")} ${sub.original_query}
       const subscriptionId = Number(data.id);
       const sub = queries.getSubscriptionById(subscriptionId, userId);
       if (!sub) {
-        await context.answer({ text: "Подписка не найдена" });
+        await context.answer({ text: tr("sub_not_found") });
         return;
       }
 
       send(userId, { type: "CANCEL" }); // Reset to idle
-      await context.answer({ text: "Выбери действие" });
+      await context.answer({ text: tr("cb_select_action") });
       await context.editText(
-        `Негативные слова: ${sub.negative_keywords.join(", ") || "нет"}\n\nЧто сделать?`,
+        tr("kw_pending_negative", { list: sub.negative_keywords.join(", ") || tr("analysis_none") }),
         { reply_markup: keywordEditSubmenu("negative", subscriptionId) }
       );
       break;
@@ -2758,15 +2784,14 @@ ${bold("Запрос:")} ${sub.original_query}
       const subscriptionId = Number(data.id);
       const sub = queries.getSubscriptionById(subscriptionId, userId);
       if (!sub) {
-        await context.answer({ text: "Подписка не найдена" });
+        await context.answer({ text: tr("sub_not_found") });
         return;
       }
 
       send(userId, { type: "EDIT_SUB_DESCRIPTION", subscriptionId });
-      await context.answer({ text: "Отправь новое описание" });
+      await context.answer({ text: tr("ai_send_description") });
       await context.send(
-        `Текущее описание:\n${sub.llm_description}\n\n` +
-          "Отправь новое описание для LLM верификации:"
+        tr("kw_current_description", { desc: sub.llm_description })
       );
       break;
     }
@@ -2775,7 +2800,7 @@ ${bold("Запрос:")} ${sub.original_query}
       const subscriptionId = Number(data.id);
       const sub = queries.getSubscriptionById(subscriptionId, userId);
       if (!sub) {
-        await context.answer({ text: "Подписка не найдена" });
+        await context.answer({ text: tr("sub_not_found") });
         return;
       }
 
@@ -2788,22 +2813,22 @@ ${bold("Запрос:")} ${sub.original_query}
       const newHasNeg = updated.negative_keywords.length > 0;
       const newHasDisabled = (updated.disabled_negative_keywords?.length ?? 0) > 0;
 
-      let exclusionsText = "нет";
+      let exclusionsText = tr("analysis_none");
       if (newHasNeg) {
         exclusionsText = updated.negative_keywords.join(", ");
       } else if (newHasDisabled) {
-        exclusionsText = `(отключены: ${updated.disabled_negative_keywords!.join(", ")})`;
+        exclusionsText = tr("list_exclusions_disabled_list", { list: updated.disabled_negative_keywords!.join(", ") });
       }
 
       await context.answer({
-        text: hasNeg ? "Исключения отключены" : "Исключения включены",
+        text: hasNeg ? tr("list_exclusions_disabled") : tr("list_exclusions_enabled"),
       });
       await context.editText(
         format`
-${bold("Подписка #" + updated.id)}
-${bold("Запрос:")} ${updated.original_query}
-${bold("Ключевые слова:")} ${code(updated.positive_keywords.join(", "))}
-${bold("Исключения:")} ${code(exclusionsText)}
+${bold(tr("list_sub_header", { id: updated.id, pause: "" }))}
+${bold(tr("list_query"))} ${updated.original_query}
+${bold(tr("list_keywords"))} ${code(updated.positive_keywords.join(", "))}
+${bold(tr("list_exclusions"))} ${code(exclusionsText)}
         `,
         {
           reply_markup: subscriptionKeyboard(subscriptionId, newHasNeg, newHasDisabled),
@@ -2815,11 +2840,11 @@ ${bold("Исключения:")} ${code(exclusionsText)}
     case "regenerate": {
       // Regenerate keywords for pending subscription
       if (currentState !== "awaitingConfirmation" || !c.pendingSub) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
-      await context.answer({ text: "Генерирую..." });
+      await context.answer({ text: tr("ai_generating") });
 
       const result = await runWithRecovery(
         userId,
@@ -2834,7 +2859,7 @@ ${bold("Исключения:")} ${code(exclusionsText)}
           }
         }
       ).catch(async () => {
-        await context.send("Ошибка генерации. Попробуй позже.");
+        await context.send(tr("ai_generation_error"));
         return null;
       });
 
@@ -2854,18 +2879,18 @@ ${bold("Исключения:")} ${code(exclusionsText)}
 
       await context.editText(
         format`
-${bold("Перегенерированные ключевые слова:")}
+${bold(tr("ai_regenerated_keywords"))}
 
-${bold("Позитивные:")}
+${bold(tr("kw_positive"))}
 ${code(result.positive_keywords.join(", "))}
 
-${bold("Негативные:")}
-${code(result.negative_keywords.join(", ") || "нет")}
+${bold(tr("kw_negative"))}
+${code(result.negative_keywords.join(", ") || tr("analysis_none"))}
 
-${bold("Описание:")}
+${bold(tr("list_description"))}
 ${result.llm_description}
 
-Подтверди или измени:
+${tr("ai_confirm_or_change")}
         `,
         {
           reply_markup: queries.getUserMode(userId) === "advanced"
@@ -2880,7 +2905,7 @@ ${result.llm_description}
       const subscriptionId = Number(data.id);
       const sub = queries.getSubscriptionById(subscriptionId, userId);
       if (!sub) {
-        await context.answer({ text: "Подписка не найдена" });
+        await context.answer({ text: tr("sub_not_found") });
         return;
       }
 
@@ -2898,25 +2923,21 @@ ${result.llm_description}
         },
       });
 
-      await context.answer({ text: "Режим редактирования" });
+      await context.answer({ text: tr("ai_edit_mode_short") });
 
       // Show current params and instructions
       const posPreview = sub.positive_keywords.slice(0, 10).join(", ");
       const posMore = sub.positive_keywords.length > 10 ? ` (+${sub.positive_keywords.length - 10})` : "";
 
       await context.editText(
-        format`${bold("Режим ИИ-редактирования")}
+        format`${bold(tr("ai_edit_mode"))}
 
-${bold("Текущие параметры:")}
-${bold("+ слова:")} ${code(posPreview + posMore)}
-${bold("- слова:")} ${code(sub.negative_keywords.join(", ") || "нет")}
-${bold("Описание:")} ${sub.llm_description}
+${bold(tr("ai_current_params"))}
+${bold(tr("ai_plus_words"))} ${code(posPreview + posMore)}
+${bold(tr("ai_words"))} ${code(sub.negative_keywords.join(", ") || tr("analysis_none"))}
+${bold(tr("list_description"))} ${sub.llm_description}
 
-Напиши что изменить, например:
-• "добавь слово аренда"
-• "убери слово продажа"
-• "добавь в исключения офис"
-• "измени описание на ..."`,
+${tr("ai_edit_examples")}`,
         {
           reply_markup: aiEditStartKeyboard(subscriptionId),
         }
@@ -2926,7 +2947,7 @@ ${bold("Описание:")} ${sub.llm_description}
 
     case "apply_ai_edit": {
       if (currentState !== "editingSubAi" || !c.pendingAiEdit?.proposed) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
@@ -2940,22 +2961,22 @@ ${bold("Описание:")} ${sub.llm_description}
 
       send(userId, { type: "APPLY_AI_EDIT" });
 
-      await context.answer({ text: "Применено!" });
-      await context.editText("✅ Изменения применены.");
+      await context.answer({ text: tr("ai_applied") });
+      await context.editText(tr("ai_changes_applied"));
       break;
     }
 
     case "cancel_ai_edit": {
       send(userId, { type: "CANCEL" });
-      await context.answer({ text: "Отменено" });
-      await context.editText("Редактирование отменено.");
+      await context.answer({ text: tr("cb_cancelled") });
+      await context.editText(tr("ai_cancelled_full"));
       break;
     }
 
     case "manual_ai_edit": {
       // User wants to describe changes manually instead of using AI suggestion
       if (currentState !== "editingSubAi" || !c.pendingAiEdit) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
@@ -2966,19 +2987,16 @@ ${bold("Описание:")} ${sub.llm_description}
           ? ` (+${current.positiveKeywords.length - 10})`
           : "";
 
-      await context.answer({ text: "Опиши изменения" });
+      await context.answer({ text: tr("ai_describe_changes_short") });
       await context.editText(
-        format`${bold("Опиши что изменить")}
+        format`${bold(tr("ai_describe_changes"))}
 
-${bold("Текущие параметры:")}
-${bold("+ слова:")} ${code(posPreview + posMore)}
-${bold("- слова:")} ${code(current.negativeKeywords.join(", ") || "нет")}
-${bold("Описание:")} ${current.llmDescription}
+${bold(tr("ai_current_params"))}
+${bold(tr("ai_plus_words"))} ${code(posPreview + posMore)}
+${bold(tr("ai_words"))} ${code(current.negativeKeywords.join(", ") || tr("analysis_none"))}
+${bold(tr("list_description"))} ${current.llmDescription}
 
-Напиши что изменить, например:
-• "добавь слово аренда"
-• "убери слово продажа"
-• "добавь в исключения офис"`,
+${tr("ai_edit_short_examples")}`,
         { reply_markup: aiEditStartKeyboard(subscriptionId) }
       );
       break;
@@ -2987,7 +3005,7 @@ ${bold("Описание:")} ${current.llmDescription}
     case "correct_pending": {
       // Enter AI correction mode for pending subscription
       if (currentState !== "awaitingConfirmation" || !c.pendingSub) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
@@ -3007,20 +3025,17 @@ ${bold("Описание:")} ${current.llmDescription}
         },
       });
 
-      await context.answer({ text: "Режим коррекции" });
+      await context.answer({ text: tr("ai_correction_mode_short") });
 
       if (userMode === "normal") {
         // Normal mode: only description, keywords will be regenerated
         await context.editText(
-          format`${bold("Уточнение запроса")}
+          format`${bold(tr("ai_clarify_query"))}
 
-${bold("Текущее описание:")}
+${bold(tr("ai_current_description"))}
 ${pending.llmDescription}
 
-Опиши что ты хочешь найти точнее:
-• "ищу только новые, не б/у"
-• "не нужны услуги, только товары"
-• "добавь что нужна доставка"`,
+${tr("ai_clarify_examples")}`,
           {
             reply_markup: pendingAiCorrectionStartKeyboard(),
           }
@@ -3031,17 +3046,14 @@ ${pending.llmDescription}
         const posMore = pending.positiveKeywords.length > 10 ? ` (+${pending.positiveKeywords.length - 10})` : "";
 
         await context.editText(
-          format`${bold("Режим ИИ-коррекции")}
+          format`${bold(tr("ai_correction_mode_full"))}
 
-${bold("Текущие параметры:")}
-${bold("+ слова:")} ${code(posPreview + posMore)}
-${bold("- слова:")} ${code(pending.negativeKeywords.join(", ") || "нет")}
-${bold("Описание:")} ${pending.llmDescription}
+${bold(tr("ai_current_params"))}
+${bold(tr("ai_plus_words"))} ${code(posPreview + posMore)}
+${bold(tr("ai_words"))} ${code(pending.negativeKeywords.join(", ") || tr("analysis_none"))}
+${bold(tr("list_description"))} ${pending.llmDescription}
 
-Напиши что изменить, например:
-• "убери размеры и бренды"
-• "добавь слово аренда"
-• "добавь в исключения ремонт"`,
+${tr("ai_edit_short_examples")}`,
           {
             reply_markup: pendingAiCorrectionStartKeyboard(),
           }
@@ -3052,7 +3064,7 @@ ${bold("Описание:")} ${pending.llmDescription}
 
     case "apply_pending_ai": {
       if (currentState !== "correctingPendingAi" || !c.pendingAiCorrection?.proposed) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
@@ -3062,30 +3074,30 @@ ${bold("Описание:")} ${pending.llmDescription}
       // Apply correction via FSM
       send(userId, { type: "APPLY_AI_CORRECTION" });
 
-      await context.answer({ text: "Применено!" });
+      await context.answer({ text: tr("ai_applied") });
 
       const mode = queries.getUserMode(userId);
 
       if (mode === "advanced") {
         await context.editText(
           format`
-${bold("Скорректированные ключевые слова:")}
+${bold(tr("ai_corrected_keywords"))}
 
-${bold("Позитивные:")}
+${bold(tr("kw_positive"))}
 ${code(proposed.positiveKeywords.join(", "))}
 
-${bold("Негативные:")}
-${code(proposed.negativeKeywords.join(", ") || "нет")}
+${bold(tr("kw_negative"))}
+${code(proposed.negativeKeywords.join(", ") || tr("analysis_none"))}
 
-${bold("Описание:")}
+${bold(tr("list_description"))}
 ${proposed.llmDescription}
 
-Подтверди или измени:
+${tr("ai_confirm_or_change")}
           `,
           { reply_markup: keywordEditConfirmKeyboard(queryId) }
         );
       } else {
-        await context.editText("Подтверди или измени:", {
+        await context.editText(tr("ai_confirm_or_change"), {
           reply_markup: confirmKeyboard(queryId),
         });
       }
@@ -3094,7 +3106,7 @@ ${proposed.llmDescription}
 
     case "cancel_pending_ai": {
       if (!c.pendingSub) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
@@ -3104,22 +3116,22 @@ ${proposed.llmDescription}
       // Return to awaiting_confirmation
       send(userId, { type: "CANCEL" });
 
-      await context.answer({ text: "Отменено" });
+      await context.answer({ text: tr("cb_cancelled") });
 
       await context.editText(
         format`
-${bold("Ключевые слова:")}
+${bold(tr("list_keywords"))}
 
-${bold("Позитивные:")}
+${bold(tr("kw_positive"))}
 ${code(pending.positiveKeywords.join(", "))}
 
-${bold("Негативные:")}
-${code(pending.negativeKeywords.join(", ") || "нет")}
+${bold(tr("kw_negative"))}
+${code(pending.negativeKeywords.join(", ") || tr("analysis_none"))}
 
-${bold("Описание:")}
+${bold(tr("list_description"))}
 ${pending.llmDescription}
 
-Подтверди или измени:
+${tr("ai_confirm_or_change")}
         `,
         {
           reply_markup: queries.getUserMode(userId) === "advanced"
@@ -3141,26 +3153,26 @@ ${pending.llmDescription}
       const subscriptionId = Number(data.id);
       const sub = queries.getSubscriptionById(subscriptionId, userId);
       if (!sub) {
-        await context.answer({ text: "Подписка не найдена" });
+        await context.answer({ text: tr("sub_not_found") });
         return;
       }
 
       send(userId, { type: "CANCEL" });
 
-      let exclusionsText = "нет";
+      let exclusionsText = tr("analysis_none");
       if (sub.negative_keywords.length > 0) {
         exclusionsText = sub.negative_keywords.join(", ");
       } else if ((sub.disabled_negative_keywords?.length ?? 0) > 0) {
-        exclusionsText = `(отключены: ${sub.disabled_negative_keywords!.join(", ")})`;
+        exclusionsText = tr("list_exclusions_disabled_list", { list: sub.disabled_negative_keywords!.join(", ") });
       }
 
       await context.answer({ text: "OK" });
       await context.editText(
         format`
-${bold("Подписка #" + sub.id)}
-${bold("Запрос:")} ${sub.original_query}
-${bold("Ключевые слова:")} ${code(sub.positive_keywords.join(", "))}
-${bold("Исключения:")} ${code(exclusionsText)}
+${bold(tr("list_sub_header", { id: sub.id, pause: "" }))}
+${bold(tr("list_query"))} ${sub.original_query}
+${bold(tr("list_keywords"))} ${code(sub.positive_keywords.join(", "))}
+${bold(tr("list_exclusions"))} ${code(exclusionsText)}
         `,
         {
           reply_markup: subscriptionKeyboard(
@@ -3178,14 +3190,14 @@ ${bold("Исключения:")} ${code(exclusionsText)}
       const subscriptionId = Number(data.id);
       const sub = queries.getSubscriptionById(subscriptionId, userId);
       if (!sub) {
-        await context.answer({ text: "Подписка не найдена" });
+        await context.answer({ text: tr("sub_not_found") });
         return;
       }
 
       send(userId, { type: "EDIT_SUB_POSITIVE", subscriptionId });
-      await context.answer({ text: "Отправь слова" });
+      await context.answer({ text: tr("cb_send_words") });
       await context.editText(
-        `Текущие: ${sub.positive_keywords.join(", ")}\n\nОтправь слова для добавления через запятую:`
+        tr("kw_current_send_add", { current: sub.positive_keywords.join(", ") })
       );
       break;
     }
@@ -3195,14 +3207,14 @@ ${bold("Исключения:")} ${code(exclusionsText)}
       const subscriptionId = Number(data.id);
       const sub = queries.getSubscriptionById(subscriptionId, userId);
       if (!sub) {
-        await context.answer({ text: "Подписка не найдена" });
+        await context.answer({ text: tr("sub_not_found") });
         return;
       }
 
       send(userId, { type: "EDIT_SUB_NEGATIVE", subscriptionId });
-      await context.answer({ text: "Отправь слова" });
+      await context.answer({ text: tr("cb_send_words") });
       await context.editText(
-        `Текущие: ${sub.negative_keywords.join(", ") || "нет"}\n\nОтправь слова для добавления через запятую:`
+        tr("kw_current_send_add", { current: sub.negative_keywords.join(", ") || tr("analysis_none") })
       );
       break;
     }
@@ -3212,21 +3224,21 @@ ${bold("Исключения:")} ${code(exclusionsText)}
       const subscriptionId = Number(data.id);
       const sub = queries.getSubscriptionById(subscriptionId, userId);
       if (!sub) {
-        await context.answer({ text: "Подписка не найдена" });
+        await context.answer({ text: tr("sub_not_found") });
         return;
       }
 
       if (sub.positive_keywords.length === 0) {
-        await context.answer({ text: "Нет слов для удаления" });
+        await context.answer({ text: tr("kw_no_words_to_delete") });
         return;
       }
 
       send(userId, { type: "EDIT_SUB_POSITIVE", subscriptionId });
 
       const list = sub.positive_keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
-      await context.answer({ text: "Выбери слова" });
+      await context.answer({ text: tr("kw_select_words") });
       await context.editText(
-        `Позитивные слова:\n${list}\n\nНажми на слово или отправь номера через запятую:`,
+        tr("kw_select_words_numbered", { label: tr("kw_positive_label"), list }),
         { reply_markup: removeKeywordsKeyboard(sub.positive_keywords, "positive", subscriptionId) }
       );
       break;
@@ -3237,21 +3249,21 @@ ${bold("Исключения:")} ${code(exclusionsText)}
       const subscriptionId = Number(data.id);
       const sub = queries.getSubscriptionById(subscriptionId, userId);
       if (!sub) {
-        await context.answer({ text: "Подписка не найдена" });
+        await context.answer({ text: tr("sub_not_found") });
         return;
       }
 
       if (sub.negative_keywords.length === 0) {
-        await context.answer({ text: "Нет слов для удаления" });
+        await context.answer({ text: tr("kw_no_words_to_delete") });
         return;
       }
 
       send(userId, { type: "EDIT_SUB_NEGATIVE", subscriptionId });
 
       const list = sub.negative_keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
-      await context.answer({ text: "Выбери слова" });
+      await context.answer({ text: tr("kw_select_words") });
       await context.editText(
-        `Негативные слова:\n${list}\n\nНажми на слово или отправь номера через запятую:`,
+        tr("kw_select_words_numbered", { label: tr("kw_negative_label"), list }),
         { reply_markup: removeKeywordsKeyboard(sub.negative_keywords, "negative", subscriptionId) }
       );
       break;
@@ -3265,14 +3277,14 @@ ${bold("Исключения:")} ${code(exclusionsText)}
 
       const sub = queries.getSubscriptionById(subscriptionId, userId);
       if (!sub) {
-        await context.answer({ text: "Подписка не найдена" });
+        await context.answer({ text: tr("sub_not_found") });
         return;
       }
 
       const keywords = type === "positive" ? [...sub.positive_keywords] : [...sub.negative_keywords];
       const removed = keywords[idx];
       if (!removed) {
-        await context.answer({ text: "Слово не найдено" });
+        await context.answer({ text: tr("kw_word_not_found") });
         return;
       }
 
@@ -3280,7 +3292,7 @@ ${bold("Исключения:")} ${code(exclusionsText)}
 
       if (type === "positive") {
         if (keywords.length === 0) {
-          await context.answer({ text: "Нельзя удалить последнее слово" });
+          await context.answer({ text: tr("kw_cant_delete_last") });
           return;
         }
         queries.updatePositiveKeywords(subscriptionId, userId, keywords);
@@ -3289,21 +3301,21 @@ ${bold("Исключения:")} ${code(exclusionsText)}
       }
       invalidateSubscriptionsCache();
 
-      await context.answer({ text: `Удалено: ${removed}` });
+      await context.answer({ text: tr("kw_answer_removed", { removed }) });
 
       if (keywords.length === 0) {
         // No more keywords to remove, go back to subscription
         const updated = queries.getSubscriptionById(subscriptionId, userId)!;
-        let exclusionsText = "нет";
+        let exclusionsText = tr("analysis_none");
         if (updated.negative_keywords.length > 0) {
           exclusionsText = updated.negative_keywords.join(", ");
         }
         await context.editText(
           format`
-${bold("Подписка #" + updated.id)}
-${bold("Запрос:")} ${updated.original_query}
-${bold("Ключевые слова:")} ${code(updated.positive_keywords.join(", "))}
-${bold("Исключения:")} ${code(exclusionsText)}
+${bold(tr("list_sub_header", { id: updated.id, pause: "" }))}
+${bold(tr("list_query"))} ${updated.original_query}
+${bold(tr("list_keywords"))} ${code(updated.positive_keywords.join(", "))}
+${bold(tr("list_exclusions"))} ${code(exclusionsText)}
           `,
           {
             reply_markup: subscriptionKeyboard(
@@ -3317,9 +3329,9 @@ ${bold("Исключения:")} ${code(exclusionsText)}
       } else {
         // Update the keyboard with remaining keywords
         const list = keywords.map((k, i) => `${i + 1}. ${k}`).join("\n");
-        const label = type === "positive" ? "Позитивные" : "Негативные";
+        const label = type === "positive" ? tr("kw_positive_label") : tr("kw_negative_label");
         await context.editText(
-          `${label} слова:\n${list}\n\nНажми на слово или отправь номера через запятую:`,
+          tr("kw_words_list", { label, list }),
           { reply_markup: removeKeywordsKeyboard(keywords, type, subscriptionId) }
         );
       }
@@ -3328,14 +3340,14 @@ ${bold("Исключения:")} ${code(exclusionsText)}
 
     case "skip_invite_link": {
       if (currentState !== "awaitingInviteLink") {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
       // Skip - go back to adding_group
       send(userId, { type: "SKIP_INVITE" });
-      await context.answer({ text: "Пропущено" });
-      await context.editText("Группа пропущена.");
+      await context.answer({ text: tr("clarify_skipped") });
+      await context.editText(tr("groups_skipped"));
       await showAddGroupPrompt(
         { send: (text, opts) => bot.api.sendMessage({ chat_id: userId, text, ...opts }) },
         userId
@@ -3352,7 +3364,7 @@ ${bold("Исключения:")} ${code(exclusionsText)}
       }, "toggle_group: received callback");
 
       if (currentState !== "selectingGroups" || c.availableGroups.length === 0) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
@@ -3368,13 +3380,13 @@ ${bold("Исключения:")} ${code(exclusionsText)}
       const isSelected = !c.selectedGroups.some((g) => g.id === groupId);
 
       const selectedIds = new Set(updatedC.selectedGroups.map((g) => g.id));
-      await context.answer({ text: isSelected ? "Выбрано" : "Снято" });
+      await context.answer({ text: isSelected ? tr("selected") : tr("deselected") });
       const regionPresets = getUserRegionPresets(userId);
       await context.editText(
         format`
-${bold("Выбери группы для мониторинга:")}
+${bold(tr("groups_select_for_monitoring"))}
 
-Выбрано: ${updatedC.selectedGroups.length} из ${updatedC.availableGroups.length}
+${tr("groups_selected_count", { selected: updatedC.selectedGroups.length, total: updatedC.availableGroups.length })}
         `,
         {
           reply_markup: groupsKeyboard(updatedC.availableGroups, selectedIds, regionPresets),
@@ -3386,7 +3398,7 @@ ${bold("Выбери группы для мониторинга:")}
     case "toggle_preset": {
       // Toggle all groups in a preset (select/deselect)
       if (currentState !== "selectingGroups" || c.availableGroups.length === 0) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
@@ -3401,7 +3413,7 @@ ${bold("Выбери группы для мониторинга:")}
       );
 
       if (availablePresetGroupIds.length === 0) {
-        await context.answer({ text: "Нет групп из этого пресета" });
+        await context.answer({ text: tr("preset_no_groups") });
         return;
       }
 
@@ -3417,7 +3429,7 @@ ${bold("Выбери группы для мониторинга:")}
             send(userId, { type: "TOGGLE_GROUP", groupId: gid });
           }
         }
-        await context.answer({ text: "Пресет снят" });
+        await context.answer({ text: tr("preset_deselected") });
       } else {
         // Select all preset groups that are not yet selected
         for (const gid of availablePresetGroupIds) {
@@ -3425,7 +3437,7 @@ ${bold("Выбери группы для мониторинга:")}
             send(userId, { type: "TOGGLE_GROUP", groupId: gid });
           }
         }
-        await context.answer({ text: "Пресет выбран" });
+        await context.answer({ text: tr("preset_selected") });
       }
 
       // Re-read context and update keyboard
@@ -3435,9 +3447,9 @@ ${bold("Выбери группы для мониторинга:")}
 
       await context.editText(
         format`
-${bold("Выбери группы для мониторинга:")}
+${bold(tr("groups_select_for_monitoring"))}
 
-Выбрано: ${updatedCtx.selectedGroups.length} из ${updatedCtx.availableGroups.length}
+${tr("groups_selected_count", { selected: updatedCtx.selectedGroups.length, total: updatedCtx.availableGroups.length })}
         `,
         {
           reply_markup: groupsKeyboard(updatedCtx.availableGroups, selectedIdsSet, regionPresets2),
@@ -3448,7 +3460,7 @@ ${bold("Выбери группы для мониторинга:")}
 
     case "select_all_groups": {
       if (currentState !== "selectingGroups" || c.availableGroups.length === 0) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
@@ -3457,12 +3469,12 @@ ${bold("Выбери группы для мониторинга:")}
       const updatedC = ctx(userId);
       const selectedIds = new Set(updatedC.availableGroups.map((g) => g.id));
       const regionPresets = getUserRegionPresets(userId);
-      await context.answer({ text: "Выбраны все" });
+      await context.answer({ text: tr("preset_all_selected") });
       await context.editText(
         format`
-${bold("Выбери группы для мониторинга:")}
+${bold(tr("groups_select_for_monitoring"))}
 
-Выбрано: ${updatedC.availableGroups.length} из ${updatedC.availableGroups.length}
+${tr("groups_selected_count", { selected: updatedC.availableGroups.length, total: updatedC.availableGroups.length })}
         `,
         {
           reply_markup: groupsKeyboard(updatedC.availableGroups, selectedIds, regionPresets),
@@ -3473,19 +3485,19 @@ ${bold("Выбери группы для мониторинга:")}
 
     case "deselect_all_groups": {
       if (currentState !== "selectingGroups" || c.availableGroups.length === 0) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
       send(userId, { type: "DESELECT_ALL" });
 
       const regionPresets = getUserRegionPresets(userId);
-      await context.answer({ text: "Сняты все" });
+      await context.answer({ text: tr("preset_all_deselected") });
       await context.editText(
         format`
-${bold("Выбери группы для мониторинга:")}
+${bold(tr("groups_select_for_monitoring"))}
 
-Выбрано: 0 из ${c.availableGroups.length}
+${tr("groups_selected_count", { selected: 0, total: c.availableGroups.length })}
         `,
         {
           reply_markup: groupsKeyboard(c.availableGroups, new Set(), regionPresets),
@@ -3501,7 +3513,7 @@ ${bold("Выбери группы для мониторинга:")}
         !c.pendingSub ||
         c.availableGroups.length === 0
       ) {
-        await context.answer({ text: "Сессия истекла. Отправь новый запрос." });
+        await context.answer({ text: tr("sub_session_expired") });
         return;
       }
 
@@ -3543,7 +3555,7 @@ ${bold("Выбери группы для мониторинга:")}
             dbMsg.sender_name ?? undefined,
             dbMsg.sender_username ?? undefined,
             undefined, // no media for cached examples
-            "🔥 Ты отметил как релевантный",
+            tr("rating_marked_relevant"),
             subscriptionId
           );
 
@@ -3574,12 +3586,12 @@ ${bold("Выбери группы для мониторинга:")}
       invalidateSubscriptionsCache();
       send(userId, { type: "CONFIRM_GROUPS" });
 
-      await context.answer({ text: "Подписка создана!" });
+      await context.answer({ text: tr("sub_created") });
 
       if (selectedGroups.length > 0) {
         const groupNames = selectedGroups.map((g) => g.title).join(", ");
         await context.editText(
-          `Подписка создана! Мониторинг групп: ${groupNames}\n\n⏳ Сканирую историю сообщений...`
+          tr("sub_created_scanning", { groups: groupNames })
         );
 
         // Scan cache in background
@@ -3589,12 +3601,12 @@ ${bold("Выбери группы для мониторинга:")}
             botLog.info({ total: result.total, subscriptionId }, "Cache scan complete");
             let resultText: string;
             if (result.total > 0) {
-              resultText = `✅ Подписка создана! Мониторинг групп: ${groupNames}\n\n📬 Найдено ${messages(result.total)} в истории.`;
+              resultText = tr("sub_created_found", { groups: groupNames, count: plural(userId, "messages_count", result.total) });
               if (result.total > 5) {
-                resultText += `\n\n📤 Отправлено первые 5 из ${result.total}. Остальные появятся в ленте при новых совпадениях.`;
+                resultText += tr("sub_created_sent_partial", { total: result.total });
               }
             } else {
-              resultText = `✅ Подписка создана! Мониторинг групп: ${groupNames}\n\n📭 В истории совпадений не найдено.`;
+              resultText = tr("sub_created_not_found", { groups: groupNames });
             }
             context
               .editText(resultText)
@@ -3606,13 +3618,13 @@ ${bold("Выбери группы для мониторинга:")}
             botLog.error(e, "Cache scan failed");
             context
               .editText(
-                `✅ Подписка создана! Мониторинг групп: ${groupNames}\n\n⚠️ Ошибка сканирования истории.`
+                tr("sub_created_scan_error", { groups: groupNames })
               )
               .catch(() => {});
           });
       } else {
         await context.editText(
-          "Подписка создана! Группы не выбраны, мониторинг будет по всем доступным."
+          tr("sub_created_no_groups")
         );
       }
       break;
@@ -3626,14 +3638,14 @@ ${bold("Выбери группы для мониторинга:")}
     case "rate_warm":
     case "rate_cold": {
       if (currentState !== "ratingExamples" || !c.ratingExamples) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
       const { messages, currentIndex } = c.ratingExamples;
       const currentExample = messages[currentIndex];
       if (!currentExample) {
-        await context.answer({ text: "Ошибка" });
+        await context.answer({ text: tr("error") });
         return;
       }
 
@@ -3646,7 +3658,7 @@ ${bold("Выбери группы для мониторинга:")}
       const rating = ratingMap[data.action]!;
 
       const ratingEmoji = { hot: "🔥", warm: "☀️", cold: "❄️" }[rating];
-      await context.answer({ text: `${ratingEmoji} Записано` });
+      await context.answer({ text: `${ratingEmoji} ${tr("rating_recorded")}` });
 
       // Send rating via FSM event
       send(userId, { type: "RATE", messageId: currentExample.id, rating });
@@ -3655,7 +3667,7 @@ ${bold("Выбери группы для мониторинга:")}
 
       if (nextIndex < messages.length) {
         // Show next example
-        await context.editText("Переходим к следующему...");
+        await context.editText(tr("rating_moving_next"));
         await showExampleForRating(
           context,
           userId,
@@ -3665,7 +3677,7 @@ ${bold("Выбери группы для мониторинга:")}
         );
       } else {
         // All examples rated, generate final keywords
-        await context.editText("Все примеры оценены!");
+        await context.editText(tr("rating_all_done"));
         await finishRatingAndGenerateKeywords(context, userId);
       }
       break;
@@ -3673,13 +3685,13 @@ ${bold("Выбери группы для мониторинга:")}
 
     case "skip_rating": {
       if (currentState !== "ratingExamples" || !c.ratingExamples) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
       send(userId, { type: "SKIP_RATING" });
-      await context.answer({ text: "Пропускаем..." });
-      await context.editText("Примеры пропущены.");
+      await context.answer({ text: tr("clarify_skipping") });
+      await context.editText(tr("clarify_examples_skipped"));
       await finishRatingAndGenerateKeywords(context, userId);
       break;
     }
@@ -3690,13 +3702,13 @@ ${bold("Выбери группы для мониторинга:")}
 
     case "set_mode_normal": {
       queries.setUserMode(userId, "normal");
-      await context.answer({ text: "Режим изменён" });
+      await context.answer({ text: tr("settings_mode_changed") });
       await context.editText(
-        format`${bold("Настройки")}
+        format`${bold(tr("settings_title"))}
 
-${bold("Текущий режим:")} 📊 Обычный
+${bold(tr("settings_current_mode"))} ${tr("settings_mode_normal")}
 
-В обычном режиме бот не показывает ключевые слова и не задаёт уточняющих вопросов.`,
+${tr("settings_normal_desc")}`,
         {
           reply_markup: settingsKeyboard("normal"),
         }
@@ -3706,13 +3718,13 @@ ${bold("Текущий режим:")} 📊 Обычный
 
     case "set_mode_advanced": {
       queries.setUserMode(userId, "advanced");
-      await context.answer({ text: "Режим изменён" });
+      await context.answer({ text: tr("settings_mode_changed") });
       await context.editText(
-        format`${bold("Настройки")}
+        format`${bold(tr("settings_title"))}
 
-${bold("Текущий режим:")} 🔬 Продвинутый
+${bold(tr("settings_current_mode"))} ${tr("settings_mode_advanced")}
 
-В продвинутом режиме ты видишь ключевые слова, можешь их редактировать и отвечаешь на уточняющие вопросы.`,
+${tr("settings_advanced_desc")}`,
         {
           reply_markup: settingsKeyboard("advanced"),
         }
@@ -3722,7 +3734,7 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
 
     case "noop": {
       // Do nothing (already selected option)
-      await context.answer({ text: "Уже выбрано" });
+      await context.answer({ text: tr("already_selected") });
       break;
     }
 
@@ -3731,24 +3743,24 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
       // Get forwarded message from reply_to_message
       const replyMsg = context.message?.replyMessage;
       if (!replyMsg) {
-        await context.answer({ text: "Не найдено исходное сообщение" });
+        await context.answer({ text: tr("analysis_no_original") });
         return;
       }
 
       const messageText = replyMsg.text || replyMsg.caption || "";
       if (!messageText) {
-        await context.answer({ text: "Сообщение не содержит текста" });
+        await context.answer({ text: tr("forward_no_text") });
         return;
       }
 
       // Extract forward info from the replied message
       const forwardInfo = extractForwardInfo(replyMsg as import("gramio").Message);
 
-      await context.answer({ text: "Анализирую..." });
+      await context.answer({ text: tr("forward_analyzing") });
 
       const userSubs = queries.getUserSubscriptions(userId);
       if (userSubs.length === 0) {
-        await context.editText("У тебя нет активных подписок для анализа.");
+        await context.editText(tr("forward_no_subscriptions"));
         return;
       }
 
@@ -3760,16 +3772,16 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
       );
 
       if (results.length === 0) {
-        await context.editText("Нет подписок для анализа этого сообщения.");
+        await context.editText(tr("forward_no_matching_subs"));
         return;
       }
 
       // Edit original message to remove button
-      await context.editText("Результаты анализа:");
+      await context.editText(tr("forward_results"));
 
       // Send each result as separate message
       for (const { analysis } of results) {
-        const text = formatAnalysisResult(analysis);
+        const text = formatAnalysisResult(analysis, userId);
         const isRejected = analysis.result !== "matched";
 
         if (isRejected && forwardInfo?.chatId !== undefined) {
@@ -3795,13 +3807,13 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
       const grpId = data.grpId as number;
 
       if (!subscriptionId) {
-        await context.answer({ text: "Подписка не найдена" });
+        await context.answer({ text: tr("sub_not_found") });
         return;
       }
 
       const subscription = queries.getSubscriptionById(subscriptionId, userId);
       if (!subscription) {
-        await context.answer({ text: "Подписка не найдена" });
+        await context.answer({ text: tr("sub_not_found") });
         return;
       }
 
@@ -3815,12 +3827,12 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
       }
 
       if (!messageText) {
-        await context.answer({ text: "Текст сообщения не найден" });
+        await context.answer({ text: tr("forward_text_not_found") });
         return;
       }
 
-      await context.answer({ text: "Расширяю критерии..." });
-      await editCallbackMessage(context, "⏳ Извлекаю ключевые слова и обновляю подписку...");
+      await context.answer({ text: tr("forward_expanding") });
+      await editCallbackMessage(context, tr("forward_expanding_progress"));
 
       try {
         // Generate keywords from the message text
@@ -3828,7 +3840,7 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
         const newKeywords = await extractKeywordsFromText(messageText);
 
         if (newKeywords.length === 0) {
-          await editCallbackMessage(context, "Не удалось извлечь ключевые слова из сообщения.");
+          await editCallbackMessage(context, tr("forward_expand_failed"));
           return;
         }
 
@@ -3841,11 +3853,11 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
 
         await editCallbackMessage(
           context,
-          `✅ Критерии расширены!\n\nДобавлены слова: ${newKeywords.join(", ")}`
+          tr("forward_expand_success", { words: newKeywords.join(", ") })
         );
       } catch (e) {
         botLog.error({ err: e, subscriptionId }, "Failed to expand criteria");
-        await editCallbackMessage(context, "Ошибка при расширении критериев. Попробуй позже.");
+        await editCallbackMessage(context, tr("forward_expand_error"));
       }
       break;
     }
@@ -3855,13 +3867,13 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
       const subscriptionId = data.id as number;
 
       if (!subscriptionId) {
-        await context.answer({ text: "Подписка не найдена" });
+        await context.answer({ text: tr("sub_not_found") });
         return;
       }
 
       const subscription = queries.getSubscriptionById(subscriptionId, userId);
       if (!subscription) {
-        await context.answer({ text: "Подписка не найдена" });
+        await context.answer({ text: tr("sub_not_found") });
         return;
       }
 
@@ -3878,10 +3890,9 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
           conversation: [],
         },
       });
-      await context.answer({ text: "Корректировка с ИИ" });
+      await context.answer({ text: tr("forward_ai_correction") });
       await context.editText(
-        `Опиши, как изменить критерии поиска для подписки "${subscription.original_query}".\n\n` +
-          `Например: «добавь слова про скидки» или «убери слишком строгие фильтры»`,
+        tr("ai_edit_existing_prompt", { query: subscription.original_query }),
         { reply_markup: aiEditStartKeyboard(subscriptionId) }
       );
       break;
@@ -3892,13 +3903,13 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
       const keyword = data.kw;
 
       if (!subscriptionId || !keyword) {
-        await context.answer({ text: "Ошибка: нет данных" });
+        await context.answer({ text: tr("error_data") });
         return;
       }
 
       const subscription = queries.getSubscriptionById(subscriptionId, userId);
       if (!subscription) {
-        await context.answer({ text: "Подписка не найдена" });
+        await context.answer({ text: tr("sub_not_found") });
         return;
       }
 
@@ -3909,19 +3920,21 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
       );
 
       if (newNegative.length === currentNegative.length) {
-        await context.answer({ text: "Слово не найдено" });
+        await context.answer({ text: tr("kw_word_not_found") });
         return;
       }
 
       queries.updateNegativeKeywords(subscriptionId, userId, newNegative);
       invalidateSubscriptionsCache();
 
-      await context.answer({ text: "Слово удалено" });
+      await context.answer({ text: tr("kw_word_deleted") });
       await editCallbackMessage(
         context,
-        `✅ Слово "${keyword}" удалено из исключений.\n\n` +
-          `Подписка: "${subscription.original_query}"\n` +
-          `Исключающие слова: ${newNegative.length > 0 ? newNegative.join(", ") : "нет"}`
+        tr("ai_keyword_removed", {
+          keyword,
+          query: subscription.original_query,
+          remaining: newNegative.length > 0 ? newNegative.join(", ") : tr("analysis_none"),
+        })
       );
       break;
     }
@@ -3930,7 +3943,7 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
       // "Мимо" button - message was shown but doesn't match user intent
       // Show feedback immediately before any DB/AI operations
       await context.answer();
-      await context.send("⏳ Анализирую сообщение...");
+      await context.send(tr("miss_analyzing"));
 
       // Short keys s/m/g are normalized to id/msgId/grpId above
       const subscriptionId = data.id as number;
@@ -3938,22 +3951,22 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
       const groupId = data.grpId as number;
 
       if (!subscriptionId || !messageId || !groupId) {
-        await context.answer({ text: "Ошибка: нет данных" });
+        await context.answer({ text: tr("error_data") });
         return;
       }
 
       const subscription = queries.getSubscriptionById(subscriptionId, userId);
       if (!subscription) {
-        await context.answer({ text: "Подписка не найдена" });
+        await context.answer({ text: tr("sub_not_found") });
         return;
       }
 
       // Get message text from DB
       const message = queries.getMessage(messageId, groupId);
-      const messageText = message?.text?.slice(0, 500) || "[текст недоступен]";
+      const messageText = message?.text?.slice(0, 500) || tr("miss_text_unavailable");
 
       // Build context message for AI
-      const contextMessage = `Это сообщение было показано, но оно мимо:\n"${messageText}"\n\nПредложи как изменить подписку чтобы такие сообщения не попадали.`;
+      const contextMessage = tr("miss_context", { text: messageText });
 
       // Start AI editing with context in conversation
       send(userId, {
@@ -3978,7 +3991,7 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
 
       try {
         const result = await runWithRecovery(userId, "AI_EDIT", undefined, () =>
-          interpretEditCommand(contextMessage, currentSnake, [])
+          interpretEditCommand(contextMessage, currentSnake, [], getLLMLanguage(userId))
         );
 
         // Format diff
@@ -3990,8 +4003,8 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
         );
 
         let diffText = "";
-        if (addedNeg.length) diffText += `+ Исключения: ${addedNeg.join(", ")}\n`;
-        if (removedPos.length) diffText += `- Удалено: ${removedPos.join(", ")}\n`;
+        if (addedNeg.length) diffText += tr("diff_added_exclusions", { list: addedNeg.join(", ") }) + "\n";
+        if (removedPos.length) diffText += tr("diff_removed", { list: removedPos.join(", ") }) + "\n";
 
         // Update FSM with proposed changes
         send(userId, { type: "TEXT_AI_COMMAND", text: contextMessage });
@@ -4005,20 +4018,20 @@ ${bold("Текущий режим:")} 🔬 Продвинутый
         });
 
         await context.editText(
-          format`${bold("Мимо!")} Анализирую сообщение...
+          format`${bold(tr("miss_title"))} ${tr("miss_analyzing")}
 
-${bold("Предложение:")}
-${diffText || "Без изменений"}
+${bold(tr("miss_suggestion"))}
+${diffText || tr("miss_no_changes")}
 
-${bold("ИИ:")} ${result.summary}
+${bold(tr("ai_comment"))} ${result.summary}
 
-Можешь уточнить или применить:`,
+${tr("miss_clarify_or_apply")}`,
           { reply_markup: aiEditKeyboard(subscriptionId) }
         );
       } catch (error) {
         botLog.error({ err: error, userId, subscriptionId }, "Miss analysis failed");
         await context.editText(
-          `Ошибка анализа. Опиши своими словами что изменить в подписке "${subscription.original_query}":`,
+          tr("miss_error_describe", { query: subscription.original_query }),
           { reply_markup: aiEditStartKeyboard(subscriptionId) }
         );
       }
@@ -4027,10 +4040,10 @@ ${bold("ИИ:")} ${result.summary}
 
     case "add_group_quick": {
       const groupId = data.id as number;
-      const groupTitle = (data as { title?: string }).title || "Неизвестная группа";
+      const groupTitle = (data as { title?: string }).title || tr("group_unknown");
 
-      await context.answer({ text: "Добавляю группу..." });
-      await editCallbackMessage(context, `⏳ Добавляю группу "${groupTitle}"...`);
+      await context.answer({ text: tr("groups_adding") });
+      await editCallbackMessage(context, tr("group_adding_progress", { title: groupTitle }));
 
       try {
         // Check if userbot is member
@@ -4038,17 +4051,17 @@ ${bold("ИИ:")} ${result.summary}
         if (!isMember) {
           await editCallbackMessage(
             context,
-            `Бот не может читать эту группу. Используй /addgroup и отправь пригласительную ссылку.`
+            tr("group_cant_read")
           );
           return;
         }
 
         // Add group for user
         queries.addUserGroup(userId, groupId, groupTitle, false);
-        await editCallbackMessage(context, `✅ Группа "${groupTitle}" добавлена в мониторинг.`);
+        await editCallbackMessage(context, tr("group_added_to_monitoring", { title: groupTitle }));
       } catch (e) {
         botLog.error({ err: e, groupId }, "Failed to add group quick");
-        await editCallbackMessage(context, "Не удалось добавить группу. Используй /addgroup.");
+        await editCallbackMessage(context, tr("group_add_use_addgroup"));
       }
       break;
     }
@@ -4059,14 +4072,14 @@ ${bold("ИИ:")} ${result.summary}
 
     case "metadata_marketplace": {
       if (currentState !== "collectingGroupMetadata" || !c.pendingGroupMetadata) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
       const isMarketplace = (data as { value?: boolean }).value ?? false;
       send(userId, { type: "METADATA_MARKETPLACE", isMarketplace });
 
-      await context.answer({ text: isMarketplace ? "Да" : "Нет" });
+      await context.answer({ text: isMarketplace ? tr("meta_answer_yes") : tr("meta_answer_no") });
 
       // Ask next question (country)
       await askNextMetadataQuestion(
@@ -4078,7 +4091,7 @@ ${bold("ИИ:")} ${result.summary}
 
     case "metadata_skip": {
       if (currentState !== "collectingGroupMetadata" || !c.pendingGroupMetadata) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
@@ -4086,7 +4099,7 @@ ${bold("ИИ:")} ${result.summary}
       const isLastStep = meta.step === "currency";
 
       send(userId, { type: "METADATA_SKIP" });
-      await context.answer({ text: "Пропущено" });
+      await context.answer({ text: tr("clarify_skipped") });
 
       if (isLastStep) {
         // Save metadata and finish
@@ -4123,13 +4136,13 @@ ${bold("ИИ:")} ${result.summary}
 
     case "metadata_confirm": {
       if (currentState !== "collectingGroupMetadata" || !c.pendingGroupMetadata) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
       const value = (data as { value?: string }).value;
       if (!value) {
-        await context.answer({ text: "Ошибка данных" });
+        await context.answer({ text: tr("error_data") });
         return;
       }
 
@@ -4138,7 +4151,7 @@ ${bold("ИИ:")} ${result.summary}
 
       // Confirm prefilled value (sends METADATA_TEXT which advances step)
       send(userId, { type: "METADATA_TEXT", text: value });
-      await context.answer({ text: "Подтверждено" });
+      await context.answer({ text: tr("meta_confirmed") });
 
       if (isLastStep) {
         // Save metadata and finish
@@ -4175,25 +4188,25 @@ ${bold("ИИ:")} ${result.summary}
 
     case "metadata_change": {
       if (currentState !== "collectingGroupMetadata" || !c.pendingGroupMetadata) {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
       // Switch to text input mode
       send(userId, { type: "METADATA_CHANGE_PREFILLED" });
-      await context.answer({ text: "Введи значение" });
+      await context.answer({ text: tr("meta_enter_value") });
 
       const meta = ctx(userId).pendingGroupMetadata!;
       let prompt = "";
       switch (meta.step) {
         case "country":
-          prompt = "Введи страну (например: Сербия, Россия, Черногория):";
+          prompt = tr("meta_prompt_country");
           break;
         case "city":
-          prompt = "Введи город (например: Белград, Москва):";
+          prompt = tr("meta_prompt_city");
           break;
         case "currency":
-          prompt = "Введи валюту (например: динар, евро, рубль):";
+          prompt = tr("meta_prompt_currency");
           break;
       }
 
@@ -4214,7 +4227,7 @@ ${bold("ИИ:")} ${result.summary}
       const outcome = (data as { outcome?: string }).outcome as "bought" | "not_bought" | "complicated";
 
       if (!outcome || currentState !== "collectingFeedbackOutcome") {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
@@ -4222,15 +4235,15 @@ ${bold("ИИ:")} ${result.summary}
       send(userId, { type: "FEEDBACK_OUTCOME", outcome });
 
       const outcomeLabels = {
-        bought: "Купил",
-        not_bought: "Не купил",
-        complicated: "Всё сложно",
+        bought: tr("feedback_outcome_bought"),
+        not_bought: tr("feedback_outcome_not_bought"),
+        complicated: tr("feedback_outcome_complicated"),
       };
       await context.answer({ text: outcomeLabels[outcome] });
 
       // Ask for review
       await context.editText(
-        "Спасибо за ответ!\n\nОставьте отзыв сообщением (что понравилось, что можно улучшить):",
+        tr("feedback_review_prompt"),
         { reply_markup: feedbackReviewKeyboard(subscriptionId) }
       );
       break;
@@ -4238,7 +4251,7 @@ ${bold("ИИ:")} ${result.summary}
 
     case "skip_feedback": {
       if (currentState !== "awaitingFeedbackReview") {
-        await context.answer({ text: "Сессия истекла" });
+        await context.answer({ text: tr("cb_session_expired") });
         return;
       }
 
@@ -4258,23 +4271,29 @@ ${bold("ИИ:")} ${result.summary}
         // Notify admin
         const adminId = process.env.ADMIN_ID;
         if (adminId) {
+          const adminTr = getTranslator(Number(adminId));
           const outcomeText = {
-            bought: "✅ Купил",
-            not_bought: "❌ Не купил",
-            complicated: "🤷 Всё сложно",
+            bought: adminTr("admin_feedback_bought"),
+            not_bought: adminTr("admin_feedback_not_bought"),
+            complicated: adminTr("admin_feedback_complicated"),
           };
           const user = queries.getUserByTelegramId(userId);
           const username = user?.username ? `@${user.username}` : `ID: ${userId}`;
           await bot.api.sendMessage({
             chat_id: Number(adminId),
-            text: `📝 Фидбек от ${username}:\n${outcomeText[outcome]}\n\nЗапрос: ${subscriptionQuery ?? "—"}\n\nОтзыв: —`,
+            text: adminTr("admin_feedback_from", {
+              user: username,
+              outcome: outcomeText[outcome],
+              query: subscriptionQuery ?? "—",
+              review: "—",
+            }),
           });
         }
       }
 
       send(userId, { type: "SKIP_FEEDBACK" });
-      await context.answer({ text: "Спасибо!" });
-      await context.editText("Спасибо за обратную связь!");
+      await context.answer({ text: tr("feedback_thanks") });
+      await context.editText(tr("feedback_thanks_full"));
       break;
     }
 
@@ -4287,30 +4306,30 @@ ${bold("ИИ:")} ${result.summary}
       const plan = raw.plan as "basic" | "pro" | "business";
 
       if (!plan || !["basic", "pro", "business"].includes(plan)) {
-        await context.answer({ text: "Неверный план" });
+        await context.answer({ text: tr("pay_invalid_plan") });
         return;
       }
 
-      await context.answer({ text: "Создаю ссылку на оплату..." });
+      await context.answer({ text: tr("pay_creating_link") });
 
       try {
         const link = await createSubscriptionLink(bot, plan, userId);
         const planNames = { basic: "Basic", pro: "Pro", business: "Business" };
 
         await context.editText(
-          `💎 Оформление подписки ${planNames[plan]}\n\nНажми кнопку ниже для оплаты:`,
+          tr("premium_select_plan", { plan: planNames[plan] }),
           {
             reply_markup: {
               inline_keyboard: [
-                [{ text: `Оплатить ${planNames[plan]}`, url: link }],
-                [{ text: "← Назад", callback_data: JSON.stringify({ action: "back_to_premium" }) }],
+                [{ text: tr("premium_pay_button", { plan: planNames[plan] }), url: link }],
+                [{ text: tr("premium_back"), callback_data: JSON.stringify({ action: "back_to_premium" }) }],
               ],
             },
           }
         );
       } catch (error) {
         botLog.error({ error }, "Failed to create subscription link");
-        await context.editText("Ошибка создания ссылки на оплату. Попробуй позже.");
+        await context.editText(tr("pay_link_error"));
       }
       break;
     }
@@ -4339,10 +4358,7 @@ ${bold("ИИ:")} ${result.summary}
 
       await context.answer();
       await context.editText(
-        "🗺️ **Пресеты регионов**\n\n" +
-        "Пресет — это набор всех барахолок региона.\n" +
-        "Купи пресет и добавляй все группы региона в подписку одним кликом.\n\n" +
-        "Выбери регион:",
+        tr("preset_title"),
         {
           parse_mode: "Markdown",
           reply_markup: presetsListKeyboard(presetsWithAccess),
@@ -4356,7 +4372,7 @@ ${bold("ИИ:")} ${result.summary}
       const presetId = raw.id as number;
 
       if (!presetId) {
-        await context.answer({ text: "Ошибка" });
+        await context.answer({ text: tr("error") });
         return;
       }
 
@@ -4364,7 +4380,7 @@ ${bold("ИИ:")} ${result.summary}
       const preset = presets.find((p) => p.id === presetId);
 
       if (!preset) {
-        await context.answer({ text: "Пресет не найден" });
+        await context.answer({ text: tr("preset_not_found") });
         return;
       }
 
@@ -4372,14 +4388,14 @@ ${bold("ИИ:")} ${result.summary}
       const groups = queries.getPresetGroups(presetId);
 
       let text = `🗺️ **${preset.region_name}**\n\n`;
-      text += `📍 Страна: ${preset.country_code || "—"}\n`;
-      text += `💱 Валюта: ${preset.currency || "—"}\n`;
-      text += `👥 Групп в пресете: ${groups.length}\n\n`;
+      text += tr("preset_country", { value: preset.country_code || "—" }) + "\n";
+      text += tr("preset_currency", { value: preset.currency || "—" }) + "\n";
+      text += tr("preset_groups_count", { count: groups.length }) + "\n\n";
 
       if (hasAccess) {
-        text += "✅ У тебя есть доступ к этому пресету";
+        text += tr("preset_has_access");
       } else {
-        text += "🔒 Для доступа нужно купить пресет";
+        text += tr("preset_need_buy");
       }
 
       await context.answer();
@@ -4396,7 +4412,7 @@ ${bold("ИИ:")} ${result.summary}
       const accessType = raw.type as "lifetime" | "subscription";
 
       if (!presetId || !accessType) {
-        await context.answer({ text: "Ошибка" });
+        await context.answer({ text: tr("error") });
         return;
       }
 
@@ -4404,21 +4420,21 @@ ${bold("ИИ:")} ${result.summary}
       const preset = presets.find((p) => p.id === presetId);
 
       if (!preset) {
-        await context.answer({ text: "Пресет не найден" });
+        await context.answer({ text: tr("preset_not_found") });
         return;
       }
 
       const price = accessType === "lifetime" ? 1000 : 300;
 
-      await context.answer({ text: "Создаю счёт..." });
+      await context.answer({ text: tr("pay_creating_invoice") });
 
       try {
         await sendPaymentInvoice(bot, userId, {
           type: "preset",
-          title: `Пресет: ${preset.region_name}`,
+          title: tr("preset_buy_title", { name: preset.region_name }),
           description: accessType === "lifetime"
-            ? `Доступ навсегда к ${preset.group_count} группам`
-            : `Доступ на 30 дней к ${preset.group_count} группам`,
+            ? tr("preset_buy_desc_lifetime", { count: preset.group_count })
+            : tr("preset_buy_desc_month", { count: preset.group_count }),
           amount: price,
           payload: {
             type: "preset",
@@ -4428,7 +4444,7 @@ ${bold("ИИ:")} ${result.summary}
         });
       } catch (error) {
         botLog.error({ error }, "Failed to send preset invoice");
-        await context.editText("Ошибка создания счёта. Попробуй позже.");
+        await context.editText(tr("pay_invoice_error"));
       }
       break;
     }
@@ -4439,7 +4455,7 @@ ${bold("ИИ:")} ${result.summary}
       const regionCode = raw.code as string;
 
       if (!regionCode) {
-        await context.answer({ text: "Ошибка" });
+        await context.answer({ text: tr("error") });
         return;
       }
 
@@ -4450,7 +4466,7 @@ ${bold("ИИ:")} ${result.summary}
       const pendingQuery = c.pendingQuery;
       if (pendingQuery) {
         send(userId, { type: "CLEAR_PENDING_QUERY" });
-        await context.answer({ text: `Регион: ${getCountryName(regionCode)}` });
+        await context.answer({ text: tr("preset_region", { name: getCountryName(regionCode) }) });
         // Delete the region selection message
         if (context.message?.id) {
           await bot.api.deleteMessage({ chat_id: userId, message_id: context.message.id });
@@ -4461,7 +4477,7 @@ ${bold("ИИ:")} ${result.summary}
           pendingQuery
         );
       } else {
-        await context.answer({ text: `Регион сохранён: ${getCountryName(regionCode)}` });
+        await context.answer({ text: tr("preset_region_saved", { name: getCountryName(regionCode) }) });
         // Delete the region selection message
         if (context.message?.id) {
           await bot.api.deleteMessage({ chat_id: userId, message_id: context.message.id });
@@ -4480,14 +4496,14 @@ ${bold("ИИ:")} ${result.summary}
       const groupId = raw.g as number;
 
       if (!messageId || !groupId) {
-        await context.answer({ text: "Данные сообщения не найдены" });
+        await context.answer({ text: tr("analysis_data_not_found") });
         return;
       }
 
       // Get the message text from DB
       const msg = queries.getMessage(messageId, groupId);
       if (!msg) {
-        await context.answer({ text: "Сообщение не найдено в базе" });
+        await context.answer({ text: tr("analysis_message_not_found") });
         return;
       }
 
@@ -4497,8 +4513,8 @@ ${bold("ИИ:")} ${result.summary}
 
       if (isFree || price === 0) {
         // Free analysis (first free or Business plan) — full deep analysis
-        await context.answer({ text: "Анализирую..." });
-        await editCallbackMessage(context, "⏳ Анализирую объявление...\nЭто может занять 10-30 секунд.");
+        await context.answer({ text: tr("forward_analyzing") });
+        await editCallbackMessage(context, tr("analysis_product_analyzing"));
 
         try {
           const { analyzeWithMedia } = await import("../llm/deep-analyze.ts");
@@ -4522,16 +4538,16 @@ ${bold("ИИ:")} ${result.summary}
           botLog.info({ userId, messageId, groupId }, "Product analyzed (free, deep)");
         } catch (error) {
           botLog.error({ error, userId }, "Deep analysis failed");
-          await editCallbackMessage(context, "Ошибка анализа. Попробуй позже.");
+          await editCallbackMessage(context, tr("analysis_error"));
         }
       } else {
         // Paid analysis - send invoice
-        await context.answer({ text: "Открываю оплату..." });
+        await context.answer({ text: tr("promo_opening_payment") });
 
         await sendPaymentInvoice(bot, userId, {
           type: "analyze",
-          title: "Анализ объявления",
-          description: "Полный анализ: рыночные цены, проверка на скам, похожие товары",
+          title: tr("analysis_title"),
+          description: tr("analysis_desc"),
           amount: price,
           payload: {
             type: "analyze",
@@ -4554,7 +4570,7 @@ ${bold("ИИ:")} ${result.summary}
       const groupId = raw.g as number;
 
       if (!messageId || !groupId) {
-        await context.answer({ text: "Данные не найдены" });
+        await context.answer({ text: tr("analysis_data_not_found") });
         return;
       }
 
@@ -4570,7 +4586,7 @@ ${bold("ИИ:")} ${result.summary}
 
       if (!canPromote) {
         await context.answer({
-          text: "Вы можете продвигать только свои посты",
+          text: tr("promo_only_own_posts"),
           show_alert: true,
         });
         return;
@@ -4580,24 +4596,20 @@ ${bold("ИИ:")} ${result.summary}
       const existingPromo = queries.getProductPromotion(messageId, groupId);
       if (existingPromo) {
         const endsAt = new Date(existingPromo.ends_at * 1000);
+        const locale = getUserLocale(userId);
+        const dateStr = endsAt.toLocaleDateString(locale === "rs" ? "sr" : locale);
         await context.answer({
-          text: `Уже продвигается до ${endsAt.toLocaleDateString("ru")}`,
+          text: tr("promo_already_until", { date: dateStr }),
           show_alert: true,
         });
         return;
       }
 
       await context.answer();
-      await context.editText(
-        format`🚀 ${bold("Продвижение товара")}
-
-Выбери длительность продвижения:
-• Товар будет выше в WebApp поиске
-• Показывается при ожидании анализа`,
-        {
-          reply_markup: promotionDurationKeyboard("product", messageId, groupId, false),
-        }
-      );
+      await context.editText(tr("promo_product_full"), {
+        parse_mode: "Markdown",
+        reply_markup: promotionDurationKeyboard("product", messageId, groupId, false),
+      });
       break;
     }
 
@@ -4607,7 +4619,7 @@ ${bold("ИИ:")} ${result.summary}
       const groupId = raw.g as number;
 
       if (!groupId) {
-        await context.answer({ text: "Данные не найдены" });
+        await context.answer({ text: tr("analysis_data_not_found") });
         return;
       }
 
@@ -4622,7 +4634,7 @@ ${bold("ИИ:")} ${result.summary}
 
       if (!canPromote) {
         await context.answer({
-          text: "Вы можете продвигать только группы, где вы администратор",
+          text: tr("promo_only_admin_groups"),
           show_alert: true,
         });
         return;
@@ -4630,20 +4642,15 @@ ${bold("ИИ:")} ${result.summary}
 
       // Check if already promoted
       if (queries.isGroupPromoted(groupId)) {
-        await context.answer({ text: "Группа уже продвигается", show_alert: true });
+        await context.answer({ text: tr("promo_already_promoted"), show_alert: true });
         return;
       }
 
       await context.answer();
-      await context.editText(
-        format`🚀 ${bold("Продвижение группы")}
-
-Выбери длительность продвижения:
-• Группа будет рекомендоваться пользователям`,
-        {
-          reply_markup: promotionDurationKeyboard("group", groupId, undefined, false),
-        }
-      );
+      await context.editText(tr("promo_group_full"), {
+        parse_mode: "Markdown",
+        reply_markup: promotionDurationKeyboard("group", groupId, undefined, false),
+      });
       break;
     }
 
@@ -4655,15 +4662,17 @@ ${bold("ИИ:")} ${result.summary}
 
       const promo = queries.getProductPromotion(messageId, groupId);
       if (!promo) {
-        await context.answer({ text: "Продвижение не найдено" });
+        await context.answer({ text: tr("promo_not_found") });
         return;
       }
 
       const endsAt = new Date(promo.ends_at * 1000);
       const daysLeft = Math.ceil((promo.ends_at - Date.now() / 1000) / 86400);
+      const locale = getUserLocale(userId);
+      const dateStr = endsAt.toLocaleDateString(locale === "rs" ? "sr" : locale);
 
       await context.answer({
-        text: `Продвижение до ${endsAt.toLocaleDateString("ru")} (${daysLeft} дн.)`,
+        text: tr("promo_status", { date: dateStr, days: daysLeft }),
         show_alert: true,
       });
       break;
@@ -4676,7 +4685,7 @@ ${bold("ИИ:")} ${result.summary}
       const days = raw.days as number;
 
       if (!messageId || !groupId || !days) {
-        await context.answer({ text: "Ошибка данных" });
+        await context.answer({ text: tr("error_data") });
         return;
       }
 
@@ -4685,7 +4694,7 @@ ${bold("ИИ:")} ${result.summary}
       if (!userIsAdmin) {
         const senderId = queries.getMessageSenderId(messageId, groupId);
         if (senderId === null || senderId !== userId) {
-          await context.answer({ text: "Вы можете продвигать только свои посты", show_alert: true });
+          await context.answer({ text: tr("promo_only_own_posts"), show_alert: true });
           return;
         }
       }
@@ -4694,12 +4703,12 @@ ${bold("ИИ:")} ${result.summary}
       const prices = { 3: 100, 7: 200, 30: 500 };
       const price = prices[days as keyof typeof prices] || 100;
 
-      await context.answer({ text: "Открываю оплату..." });
+      await context.answer({ text: tr("promo_opening_payment") });
 
       await sendPaymentInvoice(bot, userId, {
         type: "promotion_product",
-        title: `Продвижение товара (${days} дн.)`,
-        description: "Товар будет выше в WebApp поиске",
+        title: tr("promo_product_title", { days }),
+        description: tr("promo_product_desc"),
         amount: price,
         payload: {
           type: "promotion_product",
@@ -4717,7 +4726,7 @@ ${bold("ИИ:")} ${result.summary}
       const days = raw.days as number;
 
       if (!groupId || !days) {
-        await context.answer({ text: "Ошибка данных" });
+        await context.answer({ text: tr("error_data") });
         return;
       }
 
@@ -4726,7 +4735,7 @@ ${bold("ИИ:")} ${result.summary}
       if (!userIsAdmin) {
         const isGroupAdmin = await isUserGroupAdmin(userId, groupId);
         if (!isGroupAdmin) {
-          await context.answer({ text: "Вы можете продвигать только свои группы", show_alert: true });
+          await context.answer({ text: tr("promo_only_admin_groups"), show_alert: true });
           return;
         }
       }
@@ -4735,12 +4744,12 @@ ${bold("ИИ:")} ${result.summary}
       const prices = { 3: 300, 7: 600, 30: 1500 };
       const price = prices[days as keyof typeof prices] || 300;
 
-      await context.answer({ text: "Открываю оплату..." });
+      await context.answer({ text: tr("promo_opening_payment") });
 
       await sendPaymentInvoice(bot, userId, {
         type: "promotion_group",
-        title: `Продвижение группы (${days} дн.)`,
-        description: "Группа будет рекомендоваться пользователям",
+        title: tr("promo_group_title_days", { days }),
+        description: tr("promo_group_desc"),
         amount: price,
         payload: {
           type: "promotion_group",
@@ -4752,8 +4761,8 @@ ${bold("ИИ:")} ${result.summary}
     }
 
     case "cancel_promo": {
-      await context.answer({ text: "Отменено" });
-      await context.editText("Продвижение отменено.");
+      await context.answer({ text: tr("cb_cancelled") });
+      await context.editText(tr("promo_cancelled"));
       break;
     }
 
@@ -4868,7 +4877,7 @@ ${bold("ИИ:")} ${result.summary}
     case "publish_to_preset": {
       const presetId = typeof data.id === "number" ? data.id : parseInt(String(data.id), 10);
       if (!presetId || isNaN(presetId)) {
-        await context.answer({ text: "Ошибка данных" });
+        await context.answer({ text: tr("error_data") });
         return;
       }
 
@@ -4885,7 +4894,7 @@ ${bold("ИИ:")} ${result.summary}
     case "confirm_publication": {
       const publicationId = typeof data.id === "number" ? data.id : parseInt(String(data.id), 10);
       if (!publicationId || isNaN(publicationId)) {
-        await context.answer({ text: "Ошибка данных" });
+        await context.answer({ text: tr("error_data") });
         return;
       }
 
@@ -4901,7 +4910,7 @@ ${bold("ИИ:")} ${result.summary}
     case "use_pub_credit": {
       const publicationId = typeof data.id === "number" ? data.id : parseInt(String(data.id), 10);
       if (!publicationId || isNaN(publicationId)) {
-        await context.answer({ text: "Ошибка данных" });
+        await context.answer({ text: tr("error_data") });
         return;
       }
 
@@ -4912,6 +4921,21 @@ ${bold("ИИ:")} ${result.summary}
         publicationId,
         async () => { await context.answer(); }
       );
+      break;
+    }
+
+    case "lang": {
+      const newLang = data.lang;
+      if (!newLang || !isValidLocale(newLang)) {
+        await context.answer({ text: "Invalid language" });
+        return;
+      }
+
+      const tr = setUserLanguage(userId, newLang as Locale);
+      await context.answer({ text: tr("lang_changed") });
+      await context.editText(tr("lang_select"), {
+        reply_markup: languageKeyboard(newLang as Locale),
+      });
       break;
     }
   }
@@ -4930,9 +4954,11 @@ bot.onError(({ context, error }) => {
 bot.on("pre_checkout_query", async (context) => {
   const userId = context.from?.id;
   if (!userId) {
-    await context.answerPreCheckoutQuery({ ok: false, error_message: "Пользователь не найден" });
+    await context.answerPreCheckoutQuery({ ok: false, error_message: getTranslatorForLocale("ru")("pay_user_not_found") });
     return;
   }
+
+  const tr = getTranslator(userId);
 
   try {
     const payload = JSON.parse(context.invoicePayload || "{}") as PaymentPayload;
@@ -4945,7 +4971,7 @@ bot.on("pre_checkout_query", async (context) => {
     );
   } catch (error) {
     botLog.error({ error, userId }, "Pre-checkout error");
-    await context.answerPreCheckoutQuery({ ok: false, error_message: "Ошибка проверки платежа" });
+    await context.answerPreCheckoutQuery({ ok: false, error_message: tr("pay_verification_error") });
   }
 });
 
@@ -4969,6 +4995,8 @@ bot.on("successful_payment", async (context) => {
   await context.send(result.message);
 
   // Handle post-payment actions
+  const tr = getTranslator(userId);
+
   try {
     const payload = JSON.parse(payment.invoicePayload) as PaymentPayload;
 
@@ -4976,7 +5004,7 @@ bot.on("successful_payment", async (context) => {
       // Run the paid deep analysis
       const msg = queries.getMessage(payload.messageId, payload.groupId);
       if (msg) {
-        await context.send("⏳ Анализирую объявление...\nЭто может занять 10-30 секунд.");
+        await context.send(tr("analysis_product_analyzing"));
 
         const { analyzeWithMedia } = await import("../llm/deep-analyze.ts");
         const { formatDeepAnalysisHtml } = await import("./formatters.ts");
@@ -5032,7 +5060,7 @@ function buildMessageLink(groupId: number, messageId: number): string {
  * Format:
  *   <Quote from post>
  *
- *   Группа: <Group Name> (link if public)
+ *   Group: <Group Name> (link if public)
  *   <Sender Name> @username
  */
 function buildNotificationCaption(
@@ -5042,12 +5070,15 @@ function buildNotificationCaption(
   senderName?: string,
   senderUsername?: string,
   maxLength: number = 1000, // Telegram caption limit is 1024
-  competitorCount?: number // Number of other users hunting the same product
+  competitorCount?: number, // Number of other users hunting the same product
+  telegramId?: number
 ): string {
+  const tr = telegramId ? getTranslator(telegramId) : getTranslatorForLocale("ru");
+
   // Group line (with link if username available)
   const groupLine = groupUsername
-    ? `Группа: [${groupTitle}](https://t.me/${groupUsername})`
-    : `Группа: ${groupTitle}`;
+    ? tr("notif_group_link", { title: groupTitle, username: groupUsername })
+    : tr("notif_group", { title: groupTitle });
 
   // Author line
   let authorLine = "";
@@ -5059,7 +5090,7 @@ function buildNotificationCaption(
 
   // Competitor line (only shown for Pro/Business users)
   const competitorLine = competitorCount && competitorCount > 0
-    ? `\n👥 ~${competitorCount} человек тоже ищут это`
+    ? tr("notif_competitors", { count: competitorCount })
     : "";
 
   const suffix = `\n\n${groupLine}\n${authorLine}${competitorLine}`;
@@ -5090,25 +5121,25 @@ function buildNotificationKeyboard(
 ): { inline_keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> } | undefined {
   if (!messageId || !groupId) return undefined;
 
+  const tr = telegramId ? getTranslator(telegramId) : getTranslatorForLocale("ru");
   const messageUrl = buildMessageLink(groupId, messageId);
-  const userIsAdmin = telegramId ? isAdmin(telegramId) : false;
 
   // Get analyze price for user (if telegramId provided)
-  let analyzeLabel = "🔍 Анализ";
+  let analyzeLabel = tr("notif_analyze");
   if (telegramId) {
     const price = getAnalyzePrice(telegramId);
     const isFree = canUseFreeAnalyze(telegramId);
     if (price === 0) {
-      analyzeLabel = "🔍 Анализ";
+      analyzeLabel = tr("notif_analyze");
     } else if (isFree) {
-      analyzeLabel = "🔍 Анализ (1 бесплатный)";
+      analyzeLabel = tr("notif_analyze_free");
     } else {
-      analyzeLabel = `🔍 Анализ — ${price}⭐`;
+      analyzeLabel = tr("notif_analyze_price", { price });
     }
   }
 
   const keyboard: Array<Array<{ text: string; url?: string; callback_data?: string }>> = [
-    [{ text: "📎 Перейти к посту", url: messageUrl }],
+    [{ text: tr("notif_go_to_post"), url: messageUrl }],
     [{
       text: analyzeLabel,
       callback_data: JSON.stringify({ action: "analyze_product", m: messageId, g: groupId }),
@@ -5118,11 +5149,11 @@ function buildNotificationKeyboard(
   // Add "Miss" and "Pause" buttons if subscription ID available (short keys for 64-byte limit)
   if (subscriptionId) {
     keyboard.push([{
-      text: "👎 Мимо",
+      text: tr("notif_miss"),
       callback_data: JSON.stringify({ a: "miss", s: subscriptionId, m: messageId, g: groupId }),
     }]);
     keyboard.push([{
-      text: "⏸️ Остановить подписку",
+      text: tr("notif_pause_sub"),
       callback_data: JSON.stringify({ action: "pause_from_notification", id: subscriptionId }),
     }]);
   }
@@ -5131,12 +5162,12 @@ function buildNotificationKeyboard(
   const isPromoted = queries.isProductPromoted(messageId, groupId);
   if (!isPromoted) {
     keyboard.push([{
-      text: "🚀 Продвинуть",
+      text: tr("notif_promote"),
       callback_data: JSON.stringify({ action: "promote_product", m: messageId, g: groupId }),
     }]);
   } else {
     keyboard.push([{
-      text: "✅ Уже продвигается",
+      text: tr("notif_already_promoted"),
       callback_data: JSON.stringify({ action: "promo_info", m: messageId, g: groupId }),
     }]);
   }
@@ -5177,7 +5208,8 @@ export async function notifyUser(
         senderName,
         senderUsername,
         1000, // Leave some room for Telegram formatting
-        showCompetitors
+        showCompetitors,
+        telegramId
       );
 
       if (media.length === 1) {
@@ -5204,8 +5236,9 @@ export async function notifyUser(
         }
 
         // Send query + reasoning as separate message
+        const tr = getTranslator(telegramId);
         const detailsText = reasoning
-          ? `**${subscriptionQuery}**\n💡 Причина: ${reasoning}`
+          ? `**${subscriptionQuery}**\n${tr("notif_reason", { reason: reasoning })}`
           : `**${subscriptionQuery}**`;
         await bot.api.sendMessage({
           chat_id: telegramId,
@@ -5230,8 +5263,9 @@ export async function notifyUser(
         });
 
         // Send query + reasoning + keyboard as separate message
+        const tr = getTranslator(telegramId);
         const detailsText = reasoning
-          ? `**${subscriptionQuery}**\n💡 Причина: ${reasoning}`
+          ? `**${subscriptionQuery}**\n${tr("notif_reason", { reason: reasoning })}`
           : `**${subscriptionQuery}**`;
         await bot.api.sendMessage({
           chat_id: telegramId,
@@ -5249,7 +5283,8 @@ export async function notifyUser(
         senderName,
         senderUsername,
         4000, // Telegram message limit is 4096
-        showCompetitors
+        showCompetitors,
+        telegramId
       );
 
       await bot.api.sendMessage({
@@ -5260,8 +5295,9 @@ export async function notifyUser(
       });
 
       // Send query + reasoning as separate message
+      const tr = getTranslator(telegramId);
       const detailsText = reasoning
-        ? `**${subscriptionQuery}**\n💡 Причина: ${reasoning}`
+        ? `**${subscriptionQuery}**\n${tr("notif_reason", { reason: reasoning })}`
         : `**${subscriptionQuery}**`;
       await bot.api.sendMessage({
         chat_id: telegramId,

@@ -9,6 +9,7 @@ import { Bot } from "gramio";
 import { format, bold } from "@gramio/format";
 import { queries } from "../db/index.ts";
 import { botLog } from "../logger.ts";
+import { getTranslator } from "../i18n/index.ts";
 import {
   publishMenuKeyboard,
   publishPresetKeyboard,
@@ -46,10 +47,12 @@ export async function handlePublishCommand(
   bot: Bot,
   userId: number
 ): Promise<void> {
+  const tr = getTranslator(userId);
+
   if (!isPublisherEnabled()) {
     await bot.api.sendMessage({
       chat_id: userId,
-      text: "⚠️ Публикация временно недоступна. Обратитесь к администратору.",
+      text: tr("pub_disabled"),
     });
     return;
   }
@@ -58,18 +61,9 @@ export async function handlePublishCommand(
 
   await bot.api.sendMessage({
     chat_id: userId,
-    text: format`📢 ${bold("Публикация объявлений")}
-
-Публикуй объявления на все барахолки региона одним нажатием!
-
-${hasSession
-    ? "✅ Твой Telegram аккаунт подключён"
-    : "Для публикации нужно подключить твой Telegram аккаунт. Объявления будут отправляться от твоего имени."}
-
-Цена: 100⭐ за публикацию во всех группах пресета
-`,
+    text: `${tr("pub_title")}\n\n${tr("pub_intro")}\n\n${hasSession ? tr("pub_connected") : tr("pub_need_connect")}\n\n${tr("pub_price", { price: 100 })}`,
     parse_mode: "Markdown",
-    reply_markup: publishMenuKeyboard(hasSession),
+    reply_markup: publishMenuKeyboard(hasSession, tr),
   });
 }
 
@@ -82,19 +76,15 @@ export async function handleConnectTelegram(
   answerCallback: () => Promise<void>,
   editMessage: (text: string, keyboard?: object) => Promise<void>
 ): Promise<void> {
+  const tr = getTranslator(userId);
   await answerCallback();
 
   // Set state to awaiting phone
   publicationStates.set(userId, { step: "awaiting_phone" });
 
   await editMessage(
-    `🔗 *Подключение Telegram*
-
-Для публикации объявлений нужно авторизовать твой Telegram аккаунт.
-
-📱 Отправь свой номер телефона в формате:
-+79001234567`,
-    { reply_markup: cancelAuthKeyboard() }
+    `${tr("pub_connect_title")}\n\n${tr("pub_connect_intro")}\n\n${tr("pub_send_phone")}`,
+    { reply_markup: cancelAuthKeyboard(tr) }
   );
 }
 
@@ -109,6 +99,8 @@ export async function handlePublicationText(
   const state = publicationStates.get(userId);
   if (!state) return false;
 
+  const tr = getTranslator(userId);
+
   switch (state.step) {
     case "awaiting_phone": {
       // Validate phone format
@@ -116,7 +108,7 @@ export async function handlePublicationText(
       if (!phone.startsWith("+") || phone.length < 10) {
         await bot.api.sendMessage({
           chat_id: userId,
-          text: "❌ Неверный формат. Отправь номер с кодом страны, например: +79001234567",
+          text: tr("pub_invalid_phone"),
         });
         return true;
       }
@@ -126,7 +118,7 @@ export async function handlePublicationText(
       if ("error" in result) {
         await bot.api.sendMessage({
           chat_id: userId,
-          text: `❌ Ошибка: ${result.error}`,
+          text: tr("pub_error", { error: result.error }),
         });
         publicationStates.delete(userId);
         return true;
@@ -137,10 +129,8 @@ export async function handlePublicationText(
 
       await bot.api.sendMessage({
         chat_id: userId,
-        text: format`📨 Код отправлен в Telegram!
-
-Введи код из сообщения:`,
-        reply_markup: cancelAuthKeyboard(),
+        text: tr("pub_code_sent"),
+        reply_markup: cancelAuthKeyboard(tr),
       });
       return true;
     }
@@ -155,15 +145,15 @@ export async function handlePublicationText(
           publicationStates.set(userId, { ...state, step: "awaiting_password" });
           await bot.api.sendMessage({
             chat_id: userId,
-            text: "🔐 Введи пароль двухфакторной аутентификации:",
-            reply_markup: cancelAuthKeyboard(),
+            text: tr("pub_enter_2fa"),
+            reply_markup: cancelAuthKeyboard(tr),
           });
           return true;
         }
 
         await bot.api.sendMessage({
           chat_id: userId,
-          text: `❌ Ошибка: ${result.error}\n\nПопробуй ещё раз с /publish`,
+          text: tr("pub_error_retry", { error: result.error }),
         });
         publicationStates.delete(userId);
         cancelPendingAuth(userId);
@@ -175,10 +165,9 @@ export async function handlePublicationText(
 
       await bot.api.sendMessage({
         chat_id: userId,
-        text: format`✅ ${bold("Аккаунт подключён!")}
-
-Теперь ты можешь публиковать объявления на барахолках.`,
-        reply_markup: publishMenuKeyboard(true),
+        text: tr("pub_connected_success"),
+        parse_mode: "Markdown",
+        reply_markup: publishMenuKeyboard(true, tr),
       });
       return true;
     }
@@ -191,7 +180,7 @@ export async function handlePublicationText(
       if ("error" in result) {
         await bot.api.sendMessage({
           chat_id: userId,
-          text: `❌ Ошибка: ${result.error}\n\nПопробуй ещё раз с /publish`,
+          text: tr("pub_error_retry", { error: result.error }),
         });
         publicationStates.delete(userId);
         cancelPendingAuth(userId);
@@ -203,10 +192,9 @@ export async function handlePublicationText(
 
       await bot.api.sendMessage({
         chat_id: userId,
-        text: format`✅ ${bold("Аккаунт подключён!")}
-
-Теперь ты можешь публиковать объявления на барахолках.`,
-        reply_markup: publishMenuKeyboard(true),
+        text: tr("pub_connected_success"),
+        parse_mode: "Markdown",
+        reply_markup: publishMenuKeyboard(true, tr),
       });
       return true;
     }
@@ -222,10 +210,10 @@ export async function handlePublicationText(
 
       await bot.api.sendMessage({
         chat_id: userId,
-        text: `✅ Текст сохранён${photoCount > 0 ? ` (+ ${photoCount} фото)` : ""}
-
-Можешь добавить ещё текст или фото, или нажми «Готово» для перехода к подтверждению.`,
-        reply_markup: contentInputKeyboard(true),
+        text: photoCount > 0
+          ? `${tr("pub_text_saved_photos", { count: photoCount })}\n\n${tr("pub_add_more")}`
+          : `${tr("pub_text_saved")}\n\n${tr("pub_add_more")}`,
+        reply_markup: contentInputKeyboard(true, tr),
       });
       return true;
     }
@@ -248,13 +236,14 @@ export async function handlePublicationPhoto(
   const state = publicationStates.get(userId);
   if (!state || state.step !== "awaiting_content") return false;
 
+  const tr = getTranslator(userId);
   const photos = state.photoFileIds || [];
 
   if (photos.length >= 10) {
     await bot.api.sendMessage({
       chat_id: userId,
-      text: "❌ Максимум 10 фото. Удали лишние или нажми «Готово».",
-      reply_markup: contentInputKeyboard(!!state.text),
+      text: tr("pub_max_photos"),
+      reply_markup: contentInputKeyboard(!!state.text, tr),
     });
     return true;
   }
@@ -275,8 +264,10 @@ export async function handlePublicationPhoto(
 
   await bot.api.sendMessage({
     chat_id: userId,
-    text: `📷 Фото добавлено (${photos.length}/10)${caption ? " + текст сохранён" : ""}${hasText ? "" : "\n\nНе забудь добавить текст объявления!"}`,
-    reply_markup: contentInputKeyboard(hasText),
+    text: caption
+      ? tr("pub_photo_added_text", { current: photos.length })
+      : tr("pub_photo_added", { current: photos.length }) + (hasText ? "" : tr("pub_add_text_reminder")),
+    reply_markup: contentInputKeyboard(hasText, tr),
   });
 
   return true;
@@ -290,13 +281,14 @@ export async function handleContentDone(
   userId: number,
   answerCallback: () => Promise<void>
 ): Promise<void> {
+  const tr = getTranslator(userId);
   await answerCallback();
 
   const state = publicationStates.get(userId);
   if (!state || state.step !== "awaiting_content") {
     await bot.api.sendMessage({
       chat_id: userId,
-      text: "❌ Нет активного объявления. Начни с /publish",
+      text: tr("pub_no_active"),
     });
     return;
   }
@@ -304,8 +296,8 @@ export async function handleContentDone(
   if (!state.text) {
     await bot.api.sendMessage({
       chat_id: userId,
-      text: "❌ Добавь текст объявления!",
-      reply_markup: contentInputKeyboard(false),
+      text: tr("pub_need_text"),
+      reply_markup: contentInputKeyboard(false, tr),
     });
     return;
   }
@@ -327,7 +319,7 @@ export async function handleContentDone(
   if (!publicationId) {
     await bot.api.sendMessage({
       chat_id: userId,
-      text: "❌ Ошибка создания публикации. Попробуй позже.",
+      text: tr("pub_create_error"),
     });
     publicationStates.delete(userId);
     return;
@@ -337,7 +329,7 @@ export async function handleContentDone(
   const presets = queries.getRegionPresets();
   const preset = presets.find((p) => p.id === presetId);
   const presetGroups = queries.getPresetGroups(presetId);
-  const presetName = preset?.region_name || "Регион";
+  const presetName = preset?.region_name || tr("pub_region");
 
   publicationStates.set(userId, { ...state, step: "awaiting_confirm" });
 
@@ -346,15 +338,7 @@ export async function handleContentDone(
   // Show full text for review
   await bot.api.sendMessage({
     chat_id: userId,
-    text: `📋 *Проверь объявление перед публикацией*
-
-─────────────────
-${state.text}
-─────────────────
-
-${photoCount > 0 ? `📷 *Фото:* ${photoCount} шт.\n` : ""}
-*Куда:* ${presetName} (${presetGroups.length} групп)
-*Цена:* 100⭐`,
+    text: `${tr("pub_review_title")}\n\n─────────────────\n${state.text}\n─────────────────\n\n${photoCount > 0 ? `${tr("pub_review_photos", { count: photoCount })}\n` : ""}${tr("pub_review_dest", { preset: presetName, groups: presetGroups.length })}\n${tr("pub_review_price", { price: 100 })}`,
     parse_mode: "Markdown",
   });
 
@@ -364,16 +348,9 @@ ${photoCount > 0 ? `📷 *Фото:* ${photoCount} шт.\n` : ""}
   // Explain AI flow separately
   await bot.api.sendMessage({
     chat_id: userId,
-    text: `🤖 *Как работает публикация:*
-
-После оплаты бот для каждой группы:
-1. Сгенерирует уникальную версию текста через AI (чтобы не выглядело как спам)
-2. Покажет тебе для проверки
-3. Отправит только после твоего подтверждения
-
-Ты сможешь отредактировать или пропустить любую группу.${credits > 0 ? `\n\n🎁 У тебя есть *${credits}* бесплатных публикаций!` : ""}`,
+    text: `${tr("pub_how_it_works_title")}\n\n${tr("pub_how_it_works")}${credits > 0 ? `\n\n${tr("pub_free_credits", { count: credits })}` : ""}`,
     parse_mode: "Markdown",
-    reply_markup: publishConfirmKeyboard(publicationId, credits > 0),
+    reply_markup: publishConfirmKeyboard(publicationId, credits > 0, tr),
   });
 }
 
@@ -386,11 +363,12 @@ export async function handleCreatePublication(
   answerCallback: () => Promise<void>,
   editMessage: (text: string, keyboard?: object) => Promise<void>
 ): Promise<void> {
+  const tr = getTranslator(userId);
   await answerCallback();
 
   // Check daily limit
   if (!queries.canPublishToday(userId)) {
-    await editMessage("❌ Достигнут дневной лимит публикаций (10). Попробуй завтра.");
+    await editMessage(tr("pub_daily_limit"));
     return;
   }
 
@@ -405,15 +383,13 @@ export async function handleCreatePublication(
     .filter((p) => p.group_count > 0);
 
   if (presetsWithGroups.length === 0) {
-    await editMessage("❌ Нет доступных пресетов с группами.");
+    await editMessage(tr("pub_no_presets"));
     return;
   }
 
   await editMessage(
-    `📝 *Создание объявления*
-
-Выбери регион для публикации:`,
-    { reply_markup: publishPresetKeyboard(presetsWithGroups) }
+    tr("pub_select_region"),
+    { reply_markup: publishPresetKeyboard(presetsWithGroups, tr) }
   );
 }
 
@@ -427,6 +403,7 @@ export async function handlePublishToPreset(
   answerCallback: () => Promise<void>,
   editMessage: (text: string, keyboard?: object) => Promise<void>
 ): Promise<void> {
+  const tr = getTranslator(userId);
   await answerCallback();
 
   // Set state to awaiting content (text + optional photos)
@@ -434,21 +411,11 @@ export async function handlePublishToPreset(
 
   const presets = queries.getRegionPresets();
   const preset = presets.find((p) => p.id === presetId);
-  const presetName = preset?.region_name || "Неизвестный регион";
+  const presetName = preset?.region_name || tr("pub_unknown_region");
 
   await editMessage(
-    `📝 *Создание объявления*
-
-*Регион:* ${presetName}
-
-Отправь:
-• Текст объявления (описание, цена, контакты)
-• Фото (до 10 штук)
-
-Можешь отправить сначала текст, потом фото — или наоборот.
-
-Когда закончишь — нажми ✅ *Готово*`,
-    { reply_markup: contentInputKeyboard() }
+    `${tr("pub_create_title")}\n\n${tr("pub_create_region", { region: presetName })}\n\n${tr("pub_create_instructions")}`,
+    { reply_markup: contentInputKeyboard(false, tr) }
   );
 }
 
@@ -461,13 +428,14 @@ export async function handleConfirmPublication(
   publicationId: number,
   answerCallback: () => Promise<void>
 ): Promise<void> {
+  const tr = getTranslator(userId);
   await answerCallback();
 
   const publication = queries.getPublication(publicationId);
   if (!publication) {
     await bot.api.sendMessage({
       chat_id: userId,
-      text: "❌ Публикация не найдена.",
+      text: tr("pub_not_found"),
     });
     publicationStates.delete(userId);
     return;
@@ -476,8 +444,8 @@ export async function handleConfirmPublication(
   // Send payment invoice
   await sendPaymentInvoice(bot, userId, {
     type: "publication",
-    title: "Публикация объявления",
-    description: "Публикация во все группы пресета",
+    title: tr("pub_invoice_title"),
+    description: tr("pub_invoice_desc"),
     amount: 100,
     payload: {
       type: "publication",
@@ -497,13 +465,14 @@ export async function handleUsePubCredit(
   publicationId: number,
   answerCallback: () => Promise<void>
 ): Promise<void> {
+  const tr = getTranslator(userId);
   await answerCallback();
 
   const publication = queries.getPublication(publicationId);
   if (!publication) {
     await bot.api.sendMessage({
       chat_id: userId,
-      text: "❌ Публикация не найдена.",
+      text: tr("pub_not_found"),
     });
     publicationStates.delete(userId);
     return;
@@ -514,14 +483,14 @@ export async function handleUsePubCredit(
   if (!used) {
     await bot.api.sendMessage({
       chat_id: userId,
-      text: "❌ У тебя нет бесплатных публикаций.",
+      text: tr("pub_no_credits"),
     });
     return;
   }
 
   await bot.api.sendMessage({
     chat_id: userId,
-    text: "🎁 Бесплатная публикация активирована!",
+    text: tr("pub_credit_used"),
   });
 
   publicationStates.delete(userId);
@@ -540,25 +509,26 @@ export async function handleMyPublications(
   answerCallback: () => Promise<void>,
   editMessage: (text: string, keyboard?: object) => Promise<void>
 ): Promise<void> {
+  const tr = getTranslator(userId);
   await answerCallback();
 
   const publications = queries.getUserPublications(userId, 5);
 
   if (publications.length === 0) {
     await editMessage(
-      "📋 У тебя пока нет публикаций.",
-      { reply_markup: publishMenuKeyboard(true) }
+      tr("pub_no_publications"),
+      { reply_markup: publishMenuKeyboard(true, tr) }
     );
     return;
   }
 
   const lines = publications.map((p) => {
     const statusMap: Record<string, string> = {
-      pending: "⏳ Ожидает",
-      processing: "🔄 Публикуется",
-      completed: "✅ Готово",
-      failed: "❌ Ошибка",
-      cancelled: "🚫 Отменено",
+      pending: tr("pub_status_pending"),
+      processing: tr("pub_status_processing"),
+      completed: tr("pub_status_completed"),
+      failed: tr("pub_status_failed"),
+      cancelled: tr("pub_status_cancelled"),
     };
     const status = statusMap[p.status] || p.status;
 
@@ -569,10 +539,8 @@ export async function handleMyPublications(
   });
 
   await editMessage(
-    `📋 *Мои публикации*
-
-${lines.join("\n")}`,
-    { reply_markup: publishMenuKeyboard(true) }
+    `${tr("pub_my_title")}\n\n${lines.join("\n")}`,
+    { reply_markup: publishMenuKeyboard(true, tr) }
   );
 }
 
@@ -585,13 +553,14 @@ export async function handleDisconnectAccount(
   answerCallback: () => Promise<void>,
   editMessage: (text: string, keyboard?: object) => Promise<void>
 ): Promise<void> {
+  const tr = getTranslator(userId);
   await answerCallback();
 
   await disconnectUser(userId);
 
   await editMessage(
-    "✅ Аккаунт отключён. Для публикации нужно подключить его снова.",
-    { reply_markup: publishMenuKeyboard(false) }
+    tr("pub_disconnected"),
+    { reply_markup: publishMenuKeyboard(false, tr) }
   );
 
   botLog.info({ userId }, "User disconnected publishing account");
@@ -606,12 +575,13 @@ export async function handleCancelAuth(
   answerCallback: () => Promise<void>,
   editMessage: (text: string, keyboard?: object) => Promise<void>
 ): Promise<void> {
+  const tr = getTranslator(userId);
   await answerCallback();
 
   cancelPendingAuth(userId);
   publicationStates.delete(userId);
 
-  await editMessage("Отменено.", { reply_markup: publishMenuKeyboard(hasActiveSession(userId)) });
+  await editMessage(tr("pub_cancelled"), { reply_markup: publishMenuKeyboard(hasActiveSession(userId), tr) });
 }
 
 /**
@@ -623,10 +593,11 @@ export async function handleCancelPublication(
   answerCallback: () => Promise<void>,
   editMessage: (text: string, keyboard?: object) => Promise<void>
 ): Promise<void> {
+  const tr = getTranslator(userId);
   await answerCallback();
   publicationStates.delete(userId);
 
-  await editMessage("Публикация отменена.", { reply_markup: publishMenuKeyboard(hasActiveSession(userId)) });
+  await editMessage(tr("pub_publication_cancelled"), { reply_markup: publishMenuKeyboard(hasActiveSession(userId), tr) });
 }
 
 /**

@@ -14,6 +14,7 @@ import { queries } from "../db/index.ts";
 import { hasPriorityNotifications } from "./payments.ts";
 import { botLog } from "../logger.ts";
 import type { MediaItem } from "../types.ts";
+import { getTranslator } from "../i18n/index.ts";
 
 export const PRIORITY_DELAY_MS = 4 * 60 * 1000; // 4 minutes
 
@@ -136,8 +137,9 @@ export async function processDelayedQueue(): Promise<void> {
       }
 
       // Add delay warning to reasoning
+      const t = getTranslator(notification.telegramId);
       const delayedReasoning = notification.wasDelayed
-        ? `${notification.reasoning || ""}\n\n⏱ Этот пуш был задержан на 4 мин. Получай мгновенно с подпиской Basic!`
+        ? `${notification.reasoning || ""}\n\n⏱ ${t("notif_delayed", { minutes: 4 })}`
         : notification.reasoning;
 
       await notifyUserFn(

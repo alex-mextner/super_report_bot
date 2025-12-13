@@ -12,6 +12,7 @@ import type { Bot } from "gramio";
 import { queries } from "../db/index.ts";
 import { botLog } from "../logger.ts";
 import { startInteractivePublication } from "../publisher/interactive.ts";
+import { getTranslator, getTranslatorForLocale, getUserLocale } from "../i18n/index.ts";
 
 // Plan prices in Stars
 export const PLAN_PRICES = {
@@ -144,23 +145,26 @@ export async function createSubscriptionLink(
   plan: "basic" | "pro" | "business",
   userId: number
 ): Promise<string> {
-  const descriptions = {
-    basic: "10 подписок, 20 групп, приоритетные пуши",
-    pro: "50 подписок, безлимит групп, фора, скидка 50% на анализ",
-    business: "Безлимит всего, бесплатный анализ",
-  };
+  const tr = getTranslator(userId);
+  const descriptionKeys = {
+    basic: "plan_basic_desc",
+    pro: "plan_pro_desc",
+    business: "plan_business_desc",
+  } as const;
+
+  const planCapital = plan.charAt(0).toUpperCase() + plan.slice(1);
 
   // Note: subscription_period is a valid Telegram API param but not in gramio types yet
   // Using type assertion to bypass TypeScript check
   const result = await bot.api.createInvoiceLink({
-    title: `Подписка ${plan.charAt(0).toUpperCase() + plan.slice(1)}`,
-    description: descriptions[plan],
+    title: tr("plan_subscription_title", { plan: planCapital }),
+    description: tr(descriptionKeys[plan]),
     payload: JSON.stringify({
       type: "subscription",
       plan,
     } satisfies PaymentPayload),
     currency: "XTR",
-    prices: [{ label: `${plan} план`, amount: PLAN_PRICES[plan] }],
+    prices: [{ label: tr("plan_label", { plan: planCapital }), amount: PLAN_PRICES[plan] }],
     subscription_period: 30 * 24 * 60 * 60, // 30 days in seconds
   } as Parameters<typeof bot.api.createInvoiceLink>[0]);
 
@@ -180,6 +184,8 @@ export async function handlePreCheckout(
   telegramId: number,
   payload: PaymentPayload
 ): Promise<boolean> {
+  const tr = getTranslator(telegramId);
+
   try {
     // Validate based on payment type
     switch (payload.type) {
@@ -199,7 +205,7 @@ export async function handlePreCheckout(
             await bot.api.answerPreCheckoutQuery({
               pre_checkout_query_id: preCheckoutQueryId,
               ok: false,
-              error_message: "Пресет не найден",
+              error_message: tr("pay_preset_not_found"),
             });
             return false;
           }
@@ -217,7 +223,7 @@ export async function handlePreCheckout(
     await bot.api.answerPreCheckoutQuery({
       pre_checkout_query_id: preCheckoutQueryId,
       ok: false,
-      error_message: "Ошибка проверки платежа",
+      error_message: tr("pay_verification_error"),
     });
     return false;
   }
@@ -233,6 +239,9 @@ export async function handleSuccessfulPayment(
   amount: number,
   payloadStr: string
 ): Promise<{ success: boolean; message: string }> {
+  const tr = getTranslator(telegramId);
+  const locale = getUserLocale(telegramId);
+
   try {
     const payload = JSON.parse(payloadStr) as PaymentPayload;
 
@@ -248,7 +257,7 @@ export async function handleSuccessfulPayment(
     switch (payload.type) {
       case "subscription": {
         if (!payload.plan || payload.plan === "free") {
-          return { success: false, message: "Неверный план" };
+          return { success: false, message: tr("pay_invalid_plan") };
         }
 
         const expiresAt = new Date(
@@ -257,9 +266,10 @@ export async function handleSuccessfulPayment(
         queries.updateUserPlan(telegramId, payload.plan, expiresAt, chargeId);
 
         const planNames = { basic: "Basic", pro: "Pro", business: "Business" };
+        const dateStr = new Date(expiresAt).toLocaleDateString(locale === "rs" ? "sr" : locale);
         return {
           success: true,
-          message: `✅ Подписка ${planNames[payload.plan]} активирована до ${new Date(expiresAt).toLocaleDateString("ru")}`,
+          message: tr("pay_sub_activated", { plan: planNames[payload.plan], date: dateStr }),
         };
       }
 
@@ -267,13 +277,13 @@ export async function handleSuccessfulPayment(
         // Analyze will be handled separately after payment confirmation
         return {
           success: true,
-          message: "✅ Оплата принята, запускаю анализ...",
+          message: tr("pay_analyze_started"),
         };
       }
 
       case "preset": {
         if (!payload.presetId) {
-          return { success: false, message: "Пресет не указан" };
+          return { success: false, message: tr("pay_preset_missing") };
         }
 
         const accessType = payload.accessType || "lifetime";
@@ -292,15 +302,18 @@ export async function handleSuccessfulPayment(
         const preset = queries
           .getRegionPresets()
           .find((p) => p.id === payload.presetId);
+        const presetName = preset?.region_name || "Unknown";
         return {
           success: true,
-          message: `✅ Доступ к пресету "${preset?.region_name}" активирован${accessType === "subscription" ? " на 30 дней" : " навсегда"}`,
+          message: accessType === "subscription"
+            ? tr("pay_preset_access_month", { name: presetName })
+            : tr("pay_preset_access_lifetime", { name: presetName }),
         };
       }
 
       case "promotion_group": {
         if (!payload.groupId) {
-          return { success: false, message: "Группа не указана" };
+          return { success: false, message: tr("pay_group_missing") };
         }
 
         const groupDays = payload.days || 3;
@@ -313,13 +326,13 @@ export async function handleSuccessfulPayment(
 
         return {
           success: true,
-          message: `✅ Продвижение группы активировано на ${groupDays} дней`,
+          message: tr("pay_group_promo_activated", { days: groupDays }),
         };
       }
 
       case "promotion_product": {
         if (!payload.messageId || !payload.groupId) {
-          return { success: false, message: "Товар не указан" };
+          return { success: false, message: tr("pay_product_missing") };
         }
 
         const productDays = payload.days || 3;
@@ -333,29 +346,29 @@ export async function handleSuccessfulPayment(
 
         return {
           success: true,
-          message: `✅ Продвижение товара активировано на ${productDays} дней`,
+          message: tr("pay_product_promo_activated", { days: productDays }),
         };
       }
 
       case "publication": {
         if (!payload.publicationId) {
-          return { success: false, message: "Публикация не указана" };
+          return { success: false, message: tr("pay_publication_missing") };
         }
 
         // Interactive publication will be started by the caller
         // Just return success here, the actual flow starts in bot handler
         return {
           success: true,
-          message: "✅ Оплата принята! Сейчас начнём публикацию...",
+          message: tr("pay_publication_started"),
         };
       }
 
       default:
-        return { success: false, message: "Неизвестный тип платежа" };
+        return { success: false, message: tr("pay_unknown_type") };
     }
   } catch (error) {
     botLog.error({ error, chargeId }, "Failed to process payment");
-    return { success: false, message: "Ошибка обработки платежа" };
+    return { success: false, message: tr("pay_processing_error") };
   }
 }
 
@@ -363,6 +376,8 @@ export async function handleSuccessfulPayment(
  * Format plan info for display
  */
 export function formatPlanInfo(telegramId: number): string {
+  const tr = getTranslator(telegramId);
+  const locale = getUserLocale(telegramId);
   const { plan, plan_expires_at } = queries.getUserPlan(telegramId);
   const limits = queries.getPlanLimits(plan);
   const subCount = queries.getUserSubscriptionCount(telegramId);
@@ -376,35 +391,36 @@ export function formatPlanInfo(telegramId: number): string {
   };
 
   const maxSubsDisplay =
-    limits.maxSubscriptions === Infinity ? "∞" : limits.maxSubscriptions;
+    limits.maxSubscriptions === Infinity ? "∞" : String(limits.maxSubscriptions);
   const maxGroupsDisplay =
     limits.maxGroupsPerSubscription === Infinity
       ? "∞"
-      : limits.maxGroupsPerSubscription;
+      : String(limits.maxGroupsPerSubscription);
 
-  let info = `💎 Твой план: ${planNames[plan]}\n\n`;
-  info += `Лимиты:\n`;
-  info += `• Подписок: ${subCount}/${maxSubsDisplay}\n`;
-  info += `• Групп на подписку: ${maxGroupsDisplay}\n`;
+  let info = tr("plan_info_title", { plan: planNames[plan] });
+  info += tr("plan_info_limits");
+  info += tr("plan_info_subs", { current: subCount, max: maxSubsDisplay });
+  info += tr("plan_info_groups", { max: maxGroupsDisplay });
 
   if (plan === "free") {
-    info += `• Бесплатных анализов: ${1 - freeAnalyzes}/1 (в 6 мес)\n`;
+    info += tr("plan_info_free_analyzes", { used: 1 - freeAnalyzes });
   }
 
   if (limits.hasPriority) {
-    info += `• ⚡ Приоритетные пуши\n`;
+    info += tr("plan_info_priority");
   }
   if (limits.hasFora) {
-    info += `• 👥 Видишь сколько людей ищут то же\n`;
+    info += tr("plan_info_fora");
   }
   if (limits.analyzePrice === 0) {
-    info += `• 🔍 Бесплатный анализ товаров\n`;
+    info += tr("plan_info_free_analysis");
   } else if (plan === "pro") {
-    info += `• 🔍 Анализ со скидкой 50% (${limits.analyzePrice}⭐)\n`;
+    info += tr("plan_info_discount_analysis", { price: limits.analyzePrice });
   }
 
   if (plan_expires_at && plan !== "free") {
-    info += `\n📅 Действует до: ${new Date(plan_expires_at).toLocaleDateString("ru")}`;
+    const dateStr = new Date(plan_expires_at).toLocaleDateString(locale === "rs" ? "sr" : locale);
+    info += tr("plan_info_expires", { date: dateStr });
   }
 
   return info;

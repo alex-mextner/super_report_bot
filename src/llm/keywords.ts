@@ -2,98 +2,98 @@ import { hf, MODELS, withRetry } from "./index.ts";
 import { llmLog } from "../logger.ts";
 import type { KeywordGenerationResult, ExampleRating, RatingExample } from "../types.ts";
 
-const SYSTEM_PROMPT = `Ты помощник для извлечения ключевых слов из поисковых запросов пользователей.
-Твоя задача — сгенерировать позитивные и негативные ключевые слова для фильтрации сообщений.
+const SYSTEM_PROMPT = `You are a keyword extraction assistant for user search queries.
+Your task is to generate positive and negative keywords for message filtering.
 
-## Правила
+## Rules
 
-### Позитивные ключевые слова (positive_keywords)
-**ВАЖНО: Генерируй 50-100 ключевых слов!**
+### Positive keywords (positive_keywords)
+**IMPORTANT: Generate 50-100 keywords!**
 
-Перечисли ВСЕ возможные подвиды/типы/разновидности того, что ищет пользователь:
-- Для категорий — все конкретные виды (одежда → куртка, пальто, джинсы, футболка, свитер, платье, юбка, шорты...)
-- Для техники — все бренды и типы (телефон → iphone, samsung, xiaomi, redmi, poco, honor, android...)
-- Для мебели — все виды (мебель → диван, кресло, стол, стул, шкаф, комод, кровать, тумба...)
-- Синонимы для каждого подвида
-- Разговорные/уменьшительные формы (куртка → курточка, кроссовки → кроссы)
-- Транслит где уместно (iphone → айфон)
-- Множественное и единственное число
+List ALL possible subtypes/variants of what the user is looking for:
+- For categories — all specific types (clothing → jacket, coat, jeans, t-shirt, sweater, dress, skirt, shorts...)
+- For electronics — all brands and types (phone → iphone, samsung, xiaomi, redmi, poco, honor, android...)
+- For furniture — all types (furniture → sofa, armchair, table, chair, wardrobe, dresser, bed, nightstand...)
+- Synonyms for each subtype
+- Colloquial/diminutive forms
+- Transliteration where appropriate (iphone → айфон for Russian)
+- Singular and plural forms
 
-Чем больше вариантов — тем лучше matching!
+More variants = better matching!
 
-### Негативные ключевые слова (negative_keywords)
-Слова для ИСКЛЮЧЕНИЯ нерелевантных результатов. Это критически важно!
+### Negative keywords (negative_keywords)
+Words to EXCLUDE irrelevant results. This is critically important!
 
-**Типичные негативные слова по категориям:**
+**Typical negative words by category:**
 
-Для товаров/покупок:
-- "запчасти", "запчасть", "разбор", "разборка" (если не ищут запчасти)
-- "неисправный", "сломанный", "битый", "на запчасти"
-- "ремонт", "починка" (если ищут новый товар)
-- "обмен", "меняю" (если ищут покупку)
-- "срочно продам" (спам-маркер)
+For goods/purchases:
+- "spare parts", "disassembly" (if not looking for parts)
+- "broken", "defective", "for parts"
+- "repair", "fix" (if looking for new item)
+- "exchange", "swap" (if looking to buy)
+- "urgent sale" (spam marker)
 
-Для поиска работы:
-- "стажёр", "стажировка" (если ищут опытного)
-- "без опыта" (если нужен опыт)
-- "подработка" (если ищут полную занятость)
-- "удалёнка" (если нужен офис, и наоборот)
+For job search:
+- "intern", "internship" (if looking for experienced)
+- "no experience" (if experience needed)
+- "part-time" (if looking for full-time)
+- "remote" (if office needed, and vice versa)
 
-Для недвижимости:
-- "посуточно", "почасово" (если долгосрок)
-- "хостел", "койко-место" (если квартира)
-- "без мебели" (если с мебелью нужна)
+For real estate:
+- "daily", "hourly" (if long-term)
+- "hostel", "shared room" (if apartment)
+- "unfurnished" (if furnished needed)
 
-Общие спам-фильтры:
-- "реклама", "продвижение", "раскрутка"
-- "пирамида", "mlm", "сетевой"
-- "казино", "ставки"
+Common spam filters:
+- "advertisement", "promotion"
+- "pyramid", "mlm", "network marketing"
+- "casino", "betting"
 
-**КРИТИЧНО — Тип объявления (куплю vs продам):**
-Определи намерение пользователя и ИСКЛЮЧИ противоположный тип объявлений:
+**CRITICAL — Listing type (buying vs selling):**
+Determine user intent and EXCLUDE opposite listing types:
 
-1. Если пользователь ИЩЕТ/ПОКУПАЕТ товар (по умолчанию для большинства запросов):
-   → В negative добавь: "куплю", "ищу", "нужен", "нужна", "нужно", "требуется", "приму в дар", "возьму"
-   → В positive добавь: "продам", "продаю", "продаётся", "отдам"
+1. If user is LOOKING FOR/BUYING an item (default for most queries):
+   → Add to negative: buyer keywords (куплю, ищу, нужен, looking for, want to buy, WTB)
+   → Add to positive: seller keywords (продам, продаю, selling, for sale, WTS)
 
-2. Если пользователь ПРОДАЁТ товар (явно указано "продаю", "отдам", "ищу покупателя"):
-   → В negative добавь: "продам", "продаю", "продаётся", "отдам", "цена", "торг"
-   → В positive добавь: "куплю", "ищу", "нужен", "возьму"
+2. If user is SELLING an item (explicitly stated "selling", "for sale"):
+   → Add to negative: seller keywords (продам, продаю, selling, for sale, price)
+   → Add to positive: buyer keywords (куплю, ищу, looking for, want to buy)
 
-3. Если пользователь ПРЕДЛАГАЕТ услуги (явно указано "предлагаю услуги", "выполню работу"):
-   → В negative добавь: "предлагаю", "выполню", "оказываю услуги", "делаю на заказ"
-   → В positive добавь: "ищу мастера", "нужен специалист", "требуется"
+3. If user OFFERS services (explicitly stated "offering services"):
+   → Add to negative: service provider keywords
+   → Add to positive: service seeker keywords
 
-4. Если пользователь ИЩЕТ услуги/исполнителя:
-   → В negative добавь: "ищу работу", "ищу заказы", "готов выполнить"
-   → В positive добавь: "предлагаю", "выполню", "оказываю"
+4. If user is LOOKING FOR services/contractor:
+   → Add to negative: job seeker keywords
+   → Add to positive: service provider keywords
 
-## Примеры
+## Examples
 
-Запрос: "одежда женская купить"
+Query: "women's clothing buy"
 {
-  "positive_keywords": ["одежда", "вещи", "гардероб", "куртка", "курточка", "пуховик", "ветровка", "парка", "бомбер", "пальто", "плащ", "тренч", "джинсы", "брюки", "штаны", "леггинсы", "лосины", "шорты", "юбка", "мини", "миди", "макси", "платье", "сарафан", "туника", "футболка", "майка", "топ", "блузка", "рубашка", "кофта", "свитер", "джемпер", "кардиган", "худи", "толстовка", "свитшот", "водолазка", "жилет", "жилетка", "костюм", "пиджак", "блейзер", "комбинезон", "боди", "белье", "пижама", "халат", "спортивка", "спортивный", "женская", "женский", "продам", "продаю", "отдам", "цена", "размер"],
-  "negative_keywords": ["детская", "мужская", "оптом", "сток", "секонд", "б/у", "порвано", "пятно", "дырка", "обмен", "меняю", "куплю", "ищу", "нужна", "требуется", "возьму"],
-  "description": "Женская одежда на продажу"
+  "positive_keywords": ["одежда", "вещи", "куртка", "пуховик", "пальто", "джинсы", "брюки", "юбка", "платье", "футболка", "блузка", "свитер", "худи", "костюм", "женская", "продам", "продаю", "clothing", "jacket", "coat", "jeans", "dress", "blouse", "sweater", "women's", "selling"],
+  "negative_keywords": ["детская", "мужская", "обмен", "куплю", "ищу", "children", "men's", "exchange", "looking for", "WTB"],
+  "description": "Women's clothing for sale"
 }
 
-Запрос: "телефон смартфон купить"
+Query: "smartphone phone buy"
 {
-  "positive_keywords": ["телефон", "смартфон", "мобильный", "сотовый", "трубка", "iphone", "айфон", "apple", "эпл", "samsung", "самсунг", "галакси", "galaxy", "xiaomi", "сяоми", "redmi", "редми", "poco", "поко", "honor", "хонор", "huawei", "хуавей", "oneplus", "ванплюс", "realme", "реалми", "oppo", "vivo", "google", "pixel", "пиксель", "nokia", "нокиа", "motorola", "моторола", "asus", "асус", "rog", "sony", "сони", "android", "андроид", "ios", "pro", "max", "plus", "ultra", "lite", "mini", "продам", "продаю", "цена"],
-  "negative_keywords": ["запчасти", "разбор", "разборка", "битый", "неисправный", "сломан", "не включается", "ремонт", "экран отдельно", "дисплей", "корпус", "батарея", "аккумулятор", "зарядка", "чехол", "стекло", "плёнка", "куплю", "ищу", "нужен", "требуется", "возьму"],
-  "description": "Смартфоны на продажу"
+  "positive_keywords": ["телефон", "смартфон", "iphone", "айфон", "samsung", "самсунг", "xiaomi", "redmi", "honor", "huawei", "android", "продам", "продаю", "phone", "smartphone", "selling", "for sale"],
+  "negative_keywords": ["запчасти", "битый", "сломан", "ремонт", "куплю", "ищу", "spare parts", "broken", "repair", "looking for", "WTB"],
+  "description": "Smartphones for sale"
 }
 
-Запрос: "мебель для дома"
+Query: "home furniture"
 {
-  "positive_keywords": ["мебель", "меблировка", "диван", "диванчик", "софа", "кресло", "кресла", "пуф", "пуфик", "стол", "столик", "стул", "стулья", "табурет", "табуретка", "шкаф", "шкафчик", "комод", "тумба", "тумбочка", "кровать", "кроватка", "матрас", "матрац", "полка", "полки", "стеллаж", "этажерка", "вешалка", "гардероб", "гардеробная", "прихожая", "обувница", "зеркало", "трюмо", "туалетный", "письменный", "компьютерный", "журнальный", "обеденный", "кухонный", "барный", "угловой", "раскладной", "трансформер", "модульный", "продам", "продаю", "отдам", "цена", "доставка"],
-  "negative_keywords": ["сборка", "ремонт", "реставрация", "перетяжка", "обивка", "фурнитура", "ножки", "колёсики", "запчасти", "оптом", "производство", "на заказ", "куплю", "ищу", "нужен", "нужна", "требуется", "возьму"],
-  "description": "Мебель на продажу"
+  "positive_keywords": ["мебель", "диван", "кресло", "стол", "стул", "шкаф", "кровать", "комод", "полка", "продам", "продаю", "furniture", "sofa", "armchair", "table", "chair", "wardrobe", "bed", "selling"],
+  "negative_keywords": ["ремонт", "реставрация", "запчасти", "куплю", "ищу", "repair", "restoration", "parts", "looking for", "WTB"],
+  "description": "Home furniture for sale"
 }
 
-## Формат ответа
+## Response format
 
-Ответь ТОЛЬКО JSON без дополнительного текста:
+Respond ONLY with JSON, no additional text:
 {
   "positive_keywords": [...],
   "negative_keywords": [...],
@@ -181,11 +181,11 @@ export function generateKeywordsFallback(query: string): KeywordGenerationResult
 // Draft keywords generation (fast, for searching examples)
 // =====================================================
 
-const DRAFT_KEYWORDS_PROMPT = `Из запроса пользователя извлеки 10-15 ключевых слов для поиска.
-Включи: основные термины, синонимы, бренды, вариации написания.
+const DRAFT_KEYWORDS_PROMPT = `Extract 10-15 keywords from the user query for searching.
+Include: main terms, synonyms, brands, spelling variations.
 
-Ответ ТОЛЬКО JSON массив строк, без пояснений:
-["слово1", "слово2", ...]`;
+Respond ONLY with JSON array of strings, no explanations:
+["word1", "word2", ...]`;
 
 /**
  * Generate draft keywords quickly for searching similar messages
@@ -229,34 +229,34 @@ export async function generateDraftKeywords(query: string): Promise<string[]> {
 // Example messages generation (when cache is empty)
 // =====================================================
 
-const EXAMPLE_MESSAGES_PROMPT = `Сгенерируй 3 примера объявлений, которые могли бы подойти под запрос пользователя.
+const EXAMPLE_MESSAGES_PROMPT = `Generate 3 example listings that could match the user's query.
 
-## Типы примеров
-1. Точное совпадение — идеально подходит под запрос
-2. Вариация по цене/состоянию — похожий товар, но другие условия
-3. Альтернатива — смежный товар/услуга, который может не подойти
+## Example types
+1. Exact match — perfectly fits the query
+2. Price/condition variation — similar item but different terms
+3. Alternative — related item/service that might not fit
 
-## Каждый пример ОБЯЗАТЕЛЬНО содержит
-- Реалистичную цену для данного товара/услуги (изучи рынок!)
-- Город или район
-- Контакт (пиши в ЛС, @username, +7...)
-- Состояние (б/у, новый, торг уместен)
-- Эмодзи как в реальных объявлениях
-- 2-4 предложения
+## Each example MUST contain
+- Realistic price for this item/service (research the market!)
+- City or district
+- Contact (DM, @username, phone...)
+- Condition (used, new, negotiable)
+- Emojis like in real listings
+- 2-4 sentences
 
-## ВАЖНО про цены
-- iPhone 14: 45000-70000₽ (НЕ 5000₽)
-- MacBook Pro: 80000-200000₽ (НЕ 15000₽)
-- Велосипед б/у: 5000-30000₽
-- Диван б/у: 3000-15000₽
-Исследуй реальные цены на рынке!
+## IMPORTANT about prices
+- iPhone 14: $600-900 (NOT $50)
+- MacBook Pro: $1000-2500 (NOT $150)
+- Used bicycle: $50-300
+- Used sofa: $30-150
+Research real market prices!
 
-Ответ ТОЛЬКО JSON:
+Respond ONLY with JSON:
 {
   "examples": [
-    {"text": "текст объявления 1", "variation": "exact"},
-    {"text": "текст объявления 2", "variation": "price"},
-    {"text": "текст объявления 3", "variation": "alternative"}
+    {"text": "listing text 1", "variation": "exact"},
+    {"text": "listing text 2", "variation": "price"},
+    {"text": "listing text 3", "variation": "alternative"}
   ]
 }`;
 
@@ -315,7 +315,7 @@ export function generatedToRatingExamples(
     id: -(idx + 1), // negative IDs for generated examples
     text: ex.text,
     groupId: 0,
-    groupTitle: "Пример",
+    groupTitle: "Example",
     isGenerated: true,
   }));
 }
@@ -329,65 +329,65 @@ interface RatingFeedback {
   rating: ExampleRating;
 }
 
-const KEYWORDS_WITH_RATINGS_PROMPT = `Ты помощник для извлечения ключевых слов из поисковых запросов.
-Пользователь оценил примеры объявлений — учти эту обратную связь!
+const KEYWORDS_WITH_RATINGS_PROMPT = `You are a keyword extraction assistant for search queries.
+User has rated example listings — consider this feedback!
 
-## Обратная связь
+## Feedback types
 
-🔥 Горячо = попадание в точку!
-   - Извлекай ТИП товара/услуги
-   - Если в ЗАПРОСЕ пользователя есть конкретика (бренд, характеристика) — учитывай её
-   - Пример показывает ИМЕННО то что нужно
+🔥 Hot = perfect match!
+   - Extract the TYPE of product/service
+   - If user's QUERY has specifics (brand, characteristic) — include them
+   - Example shows EXACTLY what's needed
 
-☀️ Тепло = правильный тип, но не совсем то
-   - Извлекай только КАТЕГОРИЮ/ТИП товара
-   - ИГНОРИРУЙ частности из примера (размеры, цвета, бренды)
-   - Пример показывает направление, но не эталон
+☀️ Warm = right type but not quite
+   - Extract only the CATEGORY/TYPE
+   - IGNORE specifics from example (sizes, colors, brands)
+   - Example shows direction, not the standard
 
-❄️ Холодно = не подходит
-   - Понимай что ИСКЛЮЧАТЬ по типу
-   - Добавляй характерные слова в negative_keywords
+❄️ Cold = doesn't fit
+   - Understand what to EXCLUDE by type
+   - Add characteristic words to negative_keywords
 
-## КРИТИЧЕСКИ ВАЖНО — что НЕ нужно извлекать из примеров:
-- НЕ извлекай конкретные размеры (46, S, W30, 42-44)
-- НЕ извлекай конкретные бренды, если они не в запросе пользователя
-- НЕ извлекай конкретные цены или диапазоны цен
-- НЕ извлекай конкретные цвета, если они не в запросе
-- НЕ извлекай конкретные стили (baggy, slim) если не в запросе
-- НЕ извлекай специфические характеристики из примеров
+## CRITICALLY IMPORTANT — what NOT to extract from examples:
+- DO NOT extract specific sizes (46, S, W30, 42-44)
+- DO NOT extract specific brands unless in user's original query
+- DO NOT extract specific prices or price ranges
+- DO NOT extract specific colors unless in query
+- DO NOT extract specific styles (baggy, slim) unless in query
+- DO NOT extract specific characteristics from examples
 
-Примеры нужны ТОЛЬКО для понимания:
-- Какой ТИП объявлений релевантен (продажа vs услуги)
-- Какая КАТЕГОРИЯ товаров/услуг подходит
-- Что ИСКЛЮЧАТЬ по типу (например, услуги строительства)
+Examples are ONLY for understanding:
+- What TYPE of listings is relevant (sale vs services)
+- What CATEGORY of products/services fits
+- What to EXCLUDE by type (e.g., construction services)
 
-## Правила генерации
+## Generation rules
 
-### positive_keywords (50-100 слов)
-- Основной товар/услуга из ЗАПРОСА пользователя
-- ВСЕ подвиды/типы этого товара/услуги
-- Синонимы, разговорные формы, транслит
-- НЕ добавляй конкретные бренды/размеры/цвета из примеров
+### positive_keywords (50-100 words)
+- Main product/service from user's QUERY
+- ALL subtypes/variants of this product/service
+- Synonyms, colloquial forms, transliteration
+- DO NOT add specific brands/sizes/colors from examples
 
 ### negative_keywords
-- Слова для исключения нерелевантных ТИПОВ контента
-- Типичные слова из "холодных" примеров (услуги, аренда, ремонт — если не нужны)
-- Стандартные спам-фильтры
+- Words to exclude irrelevant TYPES of content
+- Typical words from "cold" examples (services, rental, repair — if not needed)
+- Standard spam filters
 
-**КРИТИЧНО — Тип объявления (куплю vs продам):**
-Определи намерение пользователя и ИСКЛЮЧИ противоположный тип:
-- Если ПОКУПАЕТ товар → negative: "куплю", "ищу", "нужен", "требуется", "возьму"
-- Если ПРОДАЁТ товар → negative: "продам", "продаю", "цена", "торг", "отдам"
-- Если ПРЕДЛАГАЕТ услуги → negative: "предлагаю", "выполню", "оказываю"
-- Если ИЩЕТ услуги → negative: "ищу работу", "готов выполнить"
+**CRITICAL — Listing type (buying vs selling):**
+Determine user intent and EXCLUDE opposite type:
+- If BUYING → negative: buyer keywords (куплю, ищу, looking for, WTB)
+- If SELLING → negative: seller keywords (продам, продаю, selling, for sale)
+- If OFFERING services → negative: provider keywords
+- If SEEKING services → negative: job seeker keywords
 
 ### description
-Краткое ОБЩЕЕ описание того, что ищет пользователь.
-НЕ включай конкретные размеры, бренды, стили — только общую категорию.
-Пример: "мужские джинсы" НЕ "мужские джинсы ASOS размера W30 в стиле baggy"
+Brief GENERAL description of what user is looking for.
+DO NOT include specific sizes, brands, styles — only general category.
+Example: "men's jeans" NOT "men's ASOS jeans size W30 baggy style"
 
-## Формат ответа
-ТОЛЬКО JSON:
+## Response format
+ONLY JSON:
 {
   "positive_keywords": [...],
   "negative_keywords": [...],
@@ -411,27 +411,27 @@ export async function generateKeywordsWithRatings(
   const cold = ratings.filter((r) => r.rating === "cold");
 
   if (hot.length > 0) {
-    feedbackLines.push("🔥 Горячо (релевантно):");
+    feedbackLines.push("🔥 Hot (relevant):");
     hot.forEach((r) => feedbackLines.push(`  "${r.text.slice(0, 200)}..."`));
   }
 
   if (warm.length > 0) {
-    feedbackLines.push("☀️ Тепло (частично):");
+    feedbackLines.push("☀️ Warm (partially):");
     warm.forEach((r) => feedbackLines.push(`  "${r.text.slice(0, 200)}..."`));
   }
 
   if (cold.length > 0) {
-    feedbackLines.push("❄️ Холодно (нерелевантно):");
+    feedbackLines.push("❄️ Cold (irrelevant):");
     cold.forEach((r) => feedbackLines.push(`  "${r.text.slice(0, 200)}..."`));
   }
 
   const feedbackSection = feedbackLines.length > 0
-    ? `\n\nОценки пользователя:\n${feedbackLines.join("\n")}`
+    ? `\n\nUser ratings:\n${feedbackLines.join("\n")}`
     : "";
 
   const userMessage = clarificationContext
-    ? `Запрос: ${query}${clarificationContext}${feedbackSection}`
-    : `Запрос: ${query}${feedbackSection}`;
+    ? `Query: ${query}${clarificationContext}${feedbackSection}`
+    : `Query: ${query}${feedbackSection}`;
 
   const response = await withRetry(async () => {
     const result = await hf.chatCompletion({
@@ -492,28 +492,28 @@ export async function generateKeywordsWithRatings(
 // Description correction (for normal mode)
 // =====================================================
 
-const CORRECT_DESCRIPTION_PROMPT = `Ты помощник для уточнения поисковых запросов.
-Пользователь хочет скорректировать описание того, что он ищет.
+const CORRECT_DESCRIPTION_PROMPT = `You are an assistant for refining search queries.
+User wants to adjust the description of what they're looking for.
 
-## Твоя задача
-1. Понять исходный запрос пользователя (что он искал изначально)
-2. Понять что пользователь хочет изменить/уточнить
-3. Создать новое описание, объединяющее исходный смысл с уточнениями
+## Your task
+1. Understand the original user query (what they were looking for initially)
+2. Understand what user wants to change/refine
+3. Create a new description combining original meaning with refinements
 
-## Правила
-- Описание должно СОХРАНЯТЬ суть исходного запроса
-- Добавляй уточнения из инструкции пользователя
-- Описание должно быть кратким (1-2 предложения)
-- Не теряй важные детали из исходного запроса
-- Не добавляй конкретные размеры, бренды, цвета если пользователь явно не просит
-- Фокусируйся на КАТЕГОРИИ и ТИПЕ товара/услуги
-- Учитывай исключения (что НЕ нужно)
+## Rules
+- Description must PRESERVE the essence of original query
+- Add refinements from user's instruction
+- Description should be brief (1-2 sentences)
+- Don't lose important details from original query
+- Don't add specific sizes, brands, colors unless user explicitly asks
+- Focus on CATEGORY and TYPE of product/service
+- Consider exclusions (what is NOT needed)
 
-## Формат ответа
-ТОЛЬКО JSON:
+## Response format
+ONLY JSON:
 {
-  "description": "новое описание",
-  "summary": "что изменил (коротко)"
+  "description": "new description",
+  "summary": "what changed (briefly)"
 }`;
 
 interface DescriptionCorrectionResult {
@@ -525,22 +525,22 @@ interface DescriptionCorrectionResult {
 // Extract keywords from message text (for criteria expansion)
 // =====================================================
 
-const EXTRACT_KEYWORDS_PROMPT = `Из текста сообщения извлеки 5-15 ключевых слов/фраз, которые могут быть полезны для поиска похожих объявлений.
+const EXTRACT_KEYWORDS_PROMPT = `Extract 5-15 keywords/phrases from message text that could be useful for finding similar listings.
 
-Включи:
-- Названия товаров/услуг
-- Бренды и модели
-- Характеристики и параметры
-- Релевантные прилагательные
+Include:
+- Product/service names
+- Brands and models
+- Characteristics and parameters
+- Relevant adjectives
 
-НЕ включай:
-- Стоп-слова (и, в, на, для, с)
-- Контактные данные
-- Цены и валюты
-- Эмодзи
+DO NOT include:
+- Stop words (and, in, on, for, with)
+- Contact information
+- Prices and currencies
+- Emojis
 
-Ответ ТОЛЬКО JSON массив строк:
-["слово1", "слово2", ...]`;
+Respond ONLY with JSON array of strings:
+["word1", "word2", ...]`;
 
 /**
  * Extract keywords from message text for criteria expansion
@@ -590,11 +590,11 @@ export async function correctDescription(
   currentDescription: string,
   userInstruction: string
 ): Promise<DescriptionCorrectionResult> {
-  const userMessage = `Исходный запрос пользователя: "${originalQuery}"
+  const userMessage = `Original user query: "${originalQuery}"
 
-Текущее описание: "${currentDescription}"
+Current description: "${currentDescription}"
 
-Что пользователь хочет изменить: ${userInstruction}`;
+What user wants to change: ${userInstruction}`;
 
   const response = await withRetry(async () => {
     const result = await hf.chatCompletion({
@@ -623,7 +623,7 @@ export async function correctDescription(
     const parsed = JSON.parse(match[0]);
     return {
       description: parsed.description || currentDescription,
-      summary: parsed.summary || "Описание обновлено",
+      summary: parsed.summary || "Description updated",
     };
   } catch {
     throw new Error(`Invalid JSON in LLM response: ${match[0]}`);

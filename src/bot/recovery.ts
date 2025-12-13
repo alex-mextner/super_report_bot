@@ -35,6 +35,7 @@ import { interpretEditCommand } from "../llm/edit";
 import { confirmKeyboard, keywordEditConfirmKeyboard, skipQuestionKeyboard } from "./keyboards";
 import type { Bot } from "gramio";
 import { format, bold } from "gramio";
+import { getTranslator, getLLMLanguage } from "../i18n/index";
 
 /**
  * Recover all interrupted operations on bot startup.
@@ -91,18 +92,20 @@ async function recoverOperation(
 
   botLog.info({ userId, operationType, messageId }, "Recovering operation");
 
+  const tr = getTranslator(userId);
+
   // Notify user
   try {
     if (messageId) {
       await bot.api.editMessageText({
         chat_id: userId,
         message_id: messageId,
-        text: "⏳ Бот был перезапущен, возобновляю операцию...",
+        text: tr("recovery_resuming"),
       });
     } else {
       await bot.api.sendMessage({
         chat_id: userId,
-        text: "⏳ Бот был перезапущен, возобновляю операцию...",
+        text: tr("recovery_resuming"),
       });
     }
   } catch (e) {
@@ -185,24 +188,25 @@ async function retryGenerateKeywords(
   });
 
   // Show confirmation with keyboard
+  const tr = getTranslator(userId);
   const mode = queries.getUserMode(userId);
   const queryId = `${userId}_${Date.now()}`;
   const positive = result.positive_keywords.join(", ");
   const negative = result.negative_keywords.join(", ");
 
   const text =
-    `⏳ Бот был перезапущен. Ключевые слова восстановлены:\n\n` +
-    `🔍 Позитивные: ${positive}\n` +
-    `🚫 Негативные: ${negative}\n\n` +
+    `${tr("recovery_keywords_restored")}\n\n` +
+    `${tr("recovery_positive", { keywords: positive })}\n` +
+    `${tr("recovery_negative", { keywords: negative })}\n\n` +
     `📝 ${result.llm_description}\n\n` +
-    `Подтверди или скорректируй:`;
+    tr("recovery_confirm");
 
   await bot.api.sendMessage({
     chat_id: userId,
     text,
     reply_markup: mode === "advanced"
-      ? keywordEditConfirmKeyboard(queryId)
-      : confirmKeyboard(queryId),
+      ? keywordEditConfirmKeyboard(queryId, tr)
+      : confirmKeyboard(queryId, tr),
   });
 }
 
@@ -214,6 +218,8 @@ async function retryAiCorrect(
   userId: number,
   ctx: BotContext
 ): Promise<void> {
+  const tr = getTranslator(userId);
+
   if (!ctx.pendingAiCorrection) {
     botLog.warn({ userId }, "No pendingAiCorrection for recovery");
     send(userId, { type: "CLEAR_OPERATION" });
@@ -228,7 +234,7 @@ async function retryAiCorrect(
     send(userId, { type: "CLEAR_OPERATION" });
     await bot.api.sendMessage({
       chat_id: userId,
-      text: "❌ Не удалось восстановить AI-корректировку. Попробуй еще раз.",
+      text: tr("recovery_ai_correct_failed"),
     });
     return;
   }
@@ -243,7 +249,8 @@ async function retryAiCorrect(
         negative_keywords: current.negativeKeywords,
         llm_description: current.llmDescription,
       },
-      conversation
+      conversation,
+      getLLMLanguage(userId)
     );
 
     const proposed = {
@@ -256,10 +263,10 @@ async function retryAiCorrect(
     send(userId, { type: "AI_CORRECTION_PROPOSED", proposed });
 
     const text =
-      `✅ AI-коррекция восстановлена:\n\n` +
-      `🔍 Позитивные: ${proposed.positiveKeywords.join(", ")}\n` +
-      `🚫 Негативные: ${proposed.negativeKeywords.join(", ")}\n\n` +
-      `Отправь "применить" чтобы использовать эти ключевые слова, или опиши другие изменения.`;
+      `${tr("recovery_ai_correct_restored")}\n\n` +
+      `${tr("recovery_positive", { keywords: proposed.positiveKeywords.join(", ") })}\n` +
+      `${tr("recovery_negative", { keywords: proposed.negativeKeywords.join(", ") })}\n\n` +
+      tr("recovery_ai_correct_apply");
 
     await bot.api.sendMessage({ chat_id: userId, text });
   } catch (error) {
@@ -267,7 +274,7 @@ async function retryAiCorrect(
     send(userId, { type: "CLEAR_OPERATION" });
     await bot.api.sendMessage({
       chat_id: userId,
-      text: "❌ Не удалось восстановить AI-корректировку. Попробуй еще раз.",
+      text: tr("recovery_ai_correct_failed"),
     });
   }
 }
@@ -280,6 +287,8 @@ async function retryAiEdit(
   userId: number,
   ctx: BotContext
 ): Promise<void> {
+  const tr = getTranslator(userId);
+
   if (!ctx.pendingAiEdit) {
     botLog.warn({ userId }, "No pendingAiEdit for recovery");
     send(userId, { type: "CLEAR_OPERATION" });
@@ -294,7 +303,7 @@ async function retryAiEdit(
     send(userId, { type: "CLEAR_OPERATION" });
     await bot.api.sendMessage({
       chat_id: userId,
-      text: "❌ Не удалось восстановить AI-редактирование. Попробуй еще раз.",
+      text: tr("recovery_ai_edit_failed"),
     });
     return;
   }
@@ -309,7 +318,8 @@ async function retryAiEdit(
         negative_keywords: current.negativeKeywords,
         llm_description: current.llmDescription,
       },
-      conversation
+      conversation,
+      getLLMLanguage(userId)
     );
 
     const proposed = {
@@ -322,10 +332,10 @@ async function retryAiEdit(
     send(userId, { type: "AI_PROPOSED", proposed });
 
     const text =
-      `✅ AI-редактирование восстановлено:\n\n` +
-      `🔍 Позитивные: ${proposed.positiveKeywords.join(", ")}\n` +
-      `🚫 Негативные: ${proposed.negativeKeywords.join(", ")}\n\n` +
-      `Отправь "применить" чтобы сохранить изменения.`;
+      `${tr("recovery_ai_edit_restored")}\n\n` +
+      `${tr("recovery_positive", { keywords: proposed.positiveKeywords.join(", ") })}\n` +
+      `${tr("recovery_negative", { keywords: proposed.negativeKeywords.join(", ") })}\n\n` +
+      tr("recovery_ai_edit_apply");
 
     await bot.api.sendMessage({ chat_id: userId, text });
   } catch (error) {
@@ -333,7 +343,7 @@ async function retryAiEdit(
     send(userId, { type: "CLEAR_OPERATION" });
     await bot.api.sendMessage({
       chat_id: userId,
-      text: "❌ Не удалось восстановить AI-редактирование. Попробуй еще раз.",
+      text: tr("recovery_ai_edit_failed"),
     });
   }
 }
@@ -346,6 +356,7 @@ async function retryGenerateQuestions(
   userId: number,
   ctx: BotContext
 ): Promise<void> {
+  const tr = getTranslator(userId);
   const query = ctx.pendingSub?.originalQuery;
 
   if (!query) {
@@ -353,9 +364,7 @@ async function retryGenerateQuestions(
     send(userId, { type: "CLEAR_OPERATION" });
     await bot.api.sendMessage({
       chat_id: userId,
-      text:
-        "⚠️ Бот был перезапущен во время анализа запроса.\n" +
-        "Отправь свой запрос еще раз, и я начну сначала.",
+      text: tr("recovery_query_lost"),
     });
     return;
   }
@@ -383,12 +392,11 @@ async function retryGenerateQuestions(
         });
 
         const firstQuestion = analysis.questions[0]!;
-        const questionNumber = `(1/${analysis.questions.length})`;
         await bot.api.sendMessage({
           chat_id: userId,
-          text: `⏳ Бот был перезапущен. Продолжаем:\n\n<b>Уточняющий вопрос</b> ${questionNumber}\n\n${firstQuestion}`,
+          text: `${tr("recovery_clarify_continue")}\n\n${tr("recovery_clarify_question", { current: 1, total: analysis.questions.length })}\n\n${firstQuestion}`,
           parse_mode: "HTML",
-          reply_markup: skipQuestionKeyboard(),
+          reply_markup: skipQuestionKeyboard(tr),
         });
       } else {
         // No clarification needed, go to rating
@@ -402,9 +410,7 @@ async function retryGenerateQuestions(
         // Start rating flow - send message asking to rate
         await bot.api.sendMessage({
           chat_id: userId,
-          text:
-            "⏳ Бот был перезапущен. Продолжаем с примерами.\n" +
-            "Используй /start чтобы начать заново.",
+          text: tr("recovery_examples_restart"),
         });
       }
     } else {
@@ -426,12 +432,11 @@ async function retryGenerateQuestions(
       });
 
       const firstQuestion = questions[0]!;
-      const questionNumber = `(1/${questions.length})`;
       await bot.api.sendMessage({
         chat_id: userId,
-        text: `⏳ Бот был перезапущен. Продолжаем:\n\n<b>Уточняющий вопрос</b> ${questionNumber}\n\n${firstQuestion}`,
+        text: `${tr("recovery_clarify_continue")}\n\n${tr("recovery_clarify_question", { current: 1, total: questions.length })}\n\n${firstQuestion}`,
         parse_mode: "HTML",
-        reply_markup: skipQuestionKeyboard(),
+        reply_markup: skipQuestionKeyboard(tr),
       });
     }
   } catch (error) {
@@ -439,9 +444,7 @@ async function retryGenerateQuestions(
     send(userId, { type: "CLEAR_OPERATION" });
     await bot.api.sendMessage({
       chat_id: userId,
-      text:
-        "❌ Не удалось восстановить сессию после перезапуска.\n" +
-        "Отправь свой запрос еще раз.",
+      text: tr("recovery_session_failed"),
     });
   }
 }
@@ -455,6 +458,7 @@ async function retryGenerateExamples(
   userId: number,
   ctx: BotContext
 ): Promise<void> {
+  const tr = getTranslator(userId);
   const query = ctx.pendingSub?.originalQuery;
 
   if (!query) {
@@ -462,9 +466,7 @@ async function retryGenerateExamples(
     send(userId, { type: "CLEAR_OPERATION" });
     await bot.api.sendMessage({
       chat_id: userId,
-      text:
-        "⚠️ Бот был перезапущен во время генерации примеров.\n" +
-        "Отправь свой запрос еще раз.",
+      text: tr("recovery_examples_lost"),
     });
     return;
   }
@@ -501,17 +503,17 @@ async function retryGenerateExamples(
   const negative = result.negative_keywords.join(", ");
 
   const text =
-    `⏳ Бот был перезапущен. Пропускаем примеры, ключевые слова готовы:\n\n` +
-    `🔍 Позитивные: ${positive}\n` +
-    `🚫 Негативные: ${negative}\n\n` +
+    `${tr("recovery_examples_skipped")}\n\n` +
+    `${tr("recovery_positive", { keywords: positive })}\n` +
+    `${tr("recovery_negative", { keywords: negative })}\n\n` +
     `📝 ${result.llm_description}\n\n` +
-    `Подтверди или скорректируй:`;
+    tr("recovery_confirm");
 
   await bot.api.sendMessage({
     chat_id: userId,
     text,
     reply_markup: mode === "advanced"
-      ? keywordEditConfirmKeyboard(queryId)
-      : confirmKeyboard(queryId),
+      ? keywordEditConfirmKeyboard(queryId, tr)
+      : confirmKeyboard(queryId, tr),
   });
 }

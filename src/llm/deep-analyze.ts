@@ -14,8 +14,13 @@ import { fetchMediaForMessage } from "../listener/index.ts";
 import { analyzeListingImage, type ListingImageAnalysis } from "./vision.ts";
 import { semanticSearch } from "../embeddings/search.ts";
 import type { GroupMetadata } from "../types.ts";
-import { items as pluralItems } from "../utils/pluralize.ts";
+import { getTranslatorForLocale, plural as i18nPlural } from "../i18n/index.ts";
 import { withRetry } from "./index.ts";
+
+// Simple English pluralization for items count
+const pluralItems = (n: number): string => {
+  return n === 1 ? `${n} item` : `${n} items`;
+};
 
 const BRAVE_API = "https://api.search.brave.com/res/v1/web/search";
 const BRAVE_KEY = process.env.BRAVE_API_KEY;
@@ -232,7 +237,7 @@ function convertFromEur(amountInEur: number, targetCurrency: string, rates: Reco
   return amountInEur * rate;
 }
 
-// Normalize currency code from LLM response (may return "рубли", "rubles", etc.)
+// Normalize currency code from LLM response (may return Russian "рубли", "rubles", etc.)
 function normalizeCurrency(currency: string | null): string | null {
   if (!currency) return null;
   const upper = currency.toUpperCase().trim();
@@ -345,36 +350,36 @@ async function extractListingInfo(text: string): Promise<{
   notListingReason: string | null;
   items: ExtractedItem[];
 }> {
-  const systemPrompt = `Ты эксперт по анализу объявлений.
-Проанализируй текст и определи:
-1. Это объявление (продажа, аренда, услуга)?
-2. Какие товары/услуги предлагаются (может быть несколько)?
-3. Цены для каждого товара — НОРМАЛИЗУЙ в числовой формат
-4. Поисковые запросы для проверки цен каждого товара
+  const systemPrompt = `You are an expert at analyzing listings/advertisements.
+Analyze the text and determine:
+1. Is this a listing (sale, rent, service)?
+2. What products/services are offered (may be multiple)?
+3. Prices for each item — NORMALIZE to numeric format
+4. Search queries to verify prices for each item
 
-ВАЖНО:
-- Если в тексте несколько товаров — выдели КАЖДЫЙ отдельно
-- Аренда квартиры — тоже объявление (listingType: "rent")
-- Если это НЕ объявление — объясни почему (notListingReason)
-- Цены ВСЕГДА в формате {"value": число, "currency": "код ISO 4217"}
-- "5 тыс руб" → {"value": 5000, "currency": "RUB"}
+IMPORTANT:
+- If text contains multiple items — extract EACH separately
+- Apartment rental is also a listing (listingType: "rent")
+- If NOT a listing — explain why (notListingReason)
+- Prices ALWAYS in format {"value": number, "currency": "ISO 4217 code"}
+- "5 тыс руб" / "5k rubles" → {"value": 5000, "currency": "RUB"}
 - "100€" → {"value": 100, "currency": "EUR"}
-- "50к" без валюты в русском тексте → {"value": 50000, "currency": "RUB"}
-- Отвечай ТОЛЬКО в формате JSON без markdown`;
+- "50к" without currency in Russian text → {"value": 50000, "currency": "RUB"}
+- Respond ONLY in JSON format without markdown`;
 
-  const userPrompt = `Текст объявления:
+  const userPrompt = `Listing text:
 ${text}
 
-Верни JSON:
+Return JSON:
 {
   "isListing": boolean,
   "listingType": "sale" | "rent" | "service" | "other" | null,
-  "notListingReason": "причина, почему это не объявление (если isListing=false)" | null,
+  "notListingReason": "reason why this is not a listing (if isListing=false)" | null,
   "items": [
     {
-      "name": "название товара/услуги",
-      "price": {"value": число, "currency": "код ISO 4217"} или null,
-      "searchQuery": "запрос для поиска цены на этот товар"
+      "name": "product/service name",
+      "price": {"value": number, "currency": "ISO 4217 code"} or null,
+      "searchQuery": "search query to check price for this item"
     }
   ]
 }`;
@@ -389,7 +394,7 @@ ${text}
     apiLog.error({ err: error }, "Failed to extract listing info");
   }
 
-  return { isListing: false, listingType: null, notListingReason: "Не удалось проанализировать текст", items: [] };
+  return { isListing: false, listingType: null, notListingReason: "Failed to analyze text", items: [] };
 }
 
 // ============= Price Analysis =============
@@ -465,31 +470,31 @@ async function analyzeItemPrice(
     .map((r, i) => `[${i + 1}] ${r.title}\nURL: ${r.url}\n${r.description}`)
     .join("\n\n");
 
-  const systemPrompt = `Ты эксперт по анализу цен.
-Проанализируй результаты поиска и определи рыночную цену товара.
+  const systemPrompt = `You are a price analysis expert.
+Analyze search results and determine the market price for the product.
 
-ВАЖНО:
-- Извлеки цены из результатов поиска и НОРМАЛИЗУЙ их в числовой формат
-- Укажи валюту найденных цен в формате ISO 4217
-- НЕ конвертируй валюты — просто укажи как есть
-- Отвечай ТОЛЬКО в формате JSON без markdown`;
+IMPORTANT:
+- Extract prices from search results and NORMALIZE them to numeric format
+- Specify currency of found prices in ISO 4217 format
+- DO NOT convert currencies — just report as-is
+- Respond ONLY in JSON format without markdown`;
 
-  const userPrompt = `Товар: ${itemName}
-Цена в объявлении: ${extractedPriceDisplay || "не указана"}
+  const userPrompt = `Product: ${itemName}
+Listing price: ${extractedPriceDisplay || "not specified"}
 
-Результаты поиска:
+Search results:
 ${context}
 
-Верни JSON:
+Return JSON:
 {
-  "minPrice": {"value": число, "currency": "код ISO 4217"} или null,
-  "maxPrice": {"value": число, "currency": "код ISO 4217"} или null,
-  "avgPrice": {"value": число, "currency": "код ISO 4217"} или null,
-  "priceDataFound": boolean (удалось ли найти цены в результатах поиска),
-  "worthBuying": boolean (false ТОЛЬКО если найдены негативные отзывы о качестве товара, иначе true),
-  "worthBuyingReason": "причина НЕ рекомендации если worthBuying=false, иначе null",
+  "minPrice": {"value": number, "currency": "ISO 4217 code"} or null,
+  "maxPrice": {"value": number, "currency": "ISO 4217 code"} or null,
+  "avgPrice": {"value": number, "currency": "ISO 4217 code"} or null,
+  "priceDataFound": boolean (whether prices were found in search results),
+  "worthBuying": boolean (false ONLY if negative reviews about product quality were found, otherwise true),
+  "worthBuyingReason": "reason for NOT recommending if worthBuying=false, otherwise null",
   "sources": [
-    {"index": номер источника 1-8, "price": "найденная цена как текст или null"}
+    {"index": source number 1-8, "price": "found price as text or null"}
   ]
 }`;
 
@@ -632,10 +637,10 @@ function detectScamFlags(
   // 0. Image analysis flags
   if (imageAnalysis) {
     if (imageAnalysis.quality === "stock_photo") {
-      flags.push("Стоковое фото (не реальный товар)");
+      flags.push("Stock photo (not a real product)");
       score += 20;
     } else if (imageAnalysis.quality === "screenshot") {
-      flags.push("Скриншот вместо фото товара");
+      flags.push("Screenshot instead of product photo");
       score += 10;
     }
     // Add any suspicious flags from vision analysis
@@ -647,7 +652,7 @@ function detectScamFlags(
     }
     // Condition mismatch between text and photo
     if (imageAnalysis.conditionMismatch && imageAnalysis.mismatchReason) {
-      flags.push(`Расхождение текста и фото: ${imageAnalysis.mismatchReason}`);
+      flags.push(`Text/photo mismatch: ${imageAnalysis.mismatchReason}`);
       score += 20;
     }
   }
@@ -680,23 +685,23 @@ function detectScamFlags(
     // Find the most extreme one
     const worst = veryLowItems.reduce((a, b) => (a.percent > b.percent ? a : b));
     if (veryLowItems.length === 1) {
-      flags.push(`Подозрительно низкая цена: ${worst.name} (на ${worst.percent}% ниже рынка)`);
+      flags.push(`Suspiciously low price: ${worst.name} (${worst.percent}% below market)`);
     } else {
-      flags.push(`Подозрительно низкие цены на ${pluralItems(veryLowItems.length)} (до ${worst.percent}% ниже рынка)`);
+      flags.push(`Suspiciously low prices on ${pluralItems(veryLowItems.length)} (up to ${worst.percent}% below market)`);
     }
     score += 35;
   } else if (lowItems.length > 0) {
     // Only show "below market" if there's no "suspiciously low"
     const worst = lowItems.reduce((a, b) => (a.percent > b.percent ? a : b));
     if (lowItems.length === 1) {
-      flags.push(`Цена ниже рынка: ${worst.name} (на ${worst.percent}% дешевле)`);
+      flags.push(`Below market price: ${worst.name} (${worst.percent}% cheaper)`);
     } else {
-      flags.push(`Цены ниже рынка на ${pluralItems(lowItems.length)} (до ${worst.percent}% дешевле)`);
+      flags.push(`Below market prices on ${pluralItems(lowItems.length)} (up to ${worst.percent}% cheaper)`);
     }
     score += 15;
   }
 
-  // 2. Urgency keywords
+  // 2. Urgency keywords (Russian/English)
   const urgencyPatterns = [
     /срочно/i,
     /только сегодня/i,
@@ -705,30 +710,44 @@ function detectScamFlags(
     /последний день/i,
     /быстр(о|ая|ый)/i,
     /горящ/i,
+    /urgent/i,
+    /today only/i,
+    /last day/i,
+    /leaving/i,
+    /must sell/i,
   ];
   for (const pattern of urgencyPatterns) {
     if (pattern.test(textLower)) {
-      flags.push("Срочность в тексте");
+      flags.push("Urgency language in text");
       score += 15;
       break;
     }
   }
 
-  // 3. Prepayment requests
-  const prepaymentPatterns = [/предоплат/i, /аванс/i, /залог/i, /переве(ди|сти)/i];
+  // 3. Prepayment requests (Russian/English)
+  const prepaymentPatterns = [
+    /предоплат/i,
+    /аванс/i,
+    /залог/i,
+    /переве(ди|сти)/i,
+    /prepay/i,
+    /advance payment/i,
+    /deposit required/i,
+    /wire transfer/i,
+  ];
   for (const pattern of prepaymentPatterns) {
     if (pattern.test(textLower)) {
-      flags.push("Упоминание предоплаты");
+      flags.push("Prepayment mentioned");
       score += 20;
       break;
     }
   }
 
   // 4. Suspicious payment methods
-  const cryptoPatterns = [/крипт/i, /bitcoin|btc|eth|usdt/i, /binance/i];
+  const cryptoPatterns = [/крипт/i, /crypto/i, /bitcoin|btc|eth|usdt/i, /binance/i];
   for (const pattern of cryptoPatterns) {
     if (pattern.test(textLower)) {
-      flags.push("Криптовалюта как способ оплаты");
+      flags.push("Cryptocurrency as payment method");
       score += 25;
       break;
     }
@@ -736,7 +755,7 @@ function detectScamFlags(
 
   // 5. No specific details (very short text)
   if (text.length < 100) {
-    flags.push("Очень короткое описание");
+    flags.push("Very short description");
     score += 10;
   }
 
@@ -754,15 +773,15 @@ function calculateScamLevel(score: number): "low" | "medium" | "high" {
 
 function generateScamRecommendation(level: "low" | "medium" | "high", flags: string[]): string {
   if (level === "high") {
-    return "⛔ ВЫСОКИЙ РИСК МОШЕННИЧЕСТВА. НЕ ПЕРЕВОДИТЕ НИКАКИХ ДЕНЕГ! Ни предоплату, ни залог, ни «комиссию». Настаивайте на личной встрече и проверке товара перед оплатой.";
+    return "⛔ HIGH SCAM RISK. DO NOT SEND ANY MONEY! No prepayment, no deposit, no \"commission\". Insist on meeting in person and inspecting the item before payment.";
   }
   if (level === "medium") {
-    return "⚠️ Будьте осторожны. Не переводите деньги заранее. Проверьте продавца, договоритесь о безопасном способе сделки.";
+    return "⚠️ Be careful. Do not transfer money in advance. Verify the seller, agree on a safe transaction method.";
   }
   if (flags.length > 0) {
-    return "Незначительные риски. Соблюдайте стандартные меры предосторожности.";
+    return "Minor risks. Follow standard safety precautions.";
   }
-  return "Явных рисков не обнаружено. Стандартные меры предосторожности при онлайн-сделках.";
+  return "No obvious risks detected. Standard precautions for online transactions.";
 }
 
 // ============= Similar Products =============
@@ -869,13 +888,13 @@ function formatPhotoSection(img: ListingImageAnalysis | undefined): string | nul
   if (!img) return null;
 
   const qualityMap: Record<string, string> = {
-    real_photo: "Реальное фото",
-    stock_photo: "Возможно stock-фото ⚠️",
-    screenshot: "Скриншот ⚠️",
-    unknown: "Фото",
+    real_photo: "Real photo",
+    stock_photo: "Possibly stock photo ⚠️",
+    screenshot: "Screenshot ⚠️",
+    unknown: "Photo",
   };
 
-  const quality = qualityMap[img.quality] || "Фото";
+  const quality = qualityMap[img.quality] || "Photo";
   const lines = [`📷 ${quality}`];
 
   if (img.description) {
@@ -902,9 +921,9 @@ function formatPriceSection(item: ItemAnalysis): string {
     unknown: "❓",
   };
   const verdictText: Record<string, string> = {
-    good_deal: "выгодная цена",
-    overpriced: "завышена",
-    fair: "адекватная цена",
+    good_deal: "good price",
+    overpriced: "overpriced",
+    fair: "fair price",
     unknown: "",
   };
 
@@ -922,7 +941,7 @@ function formatPriceSection(item: ItemAnalysis): string {
   if (priceStr) {
     lines.push(`💰 ${item.name}: ${priceStr}${verdict ? ` — ${verdict}` : ""} ${emoji}`);
   } else {
-    lines.push(`💰 ${item.name}: цена не указана ${emoji}`);
+    lines.push(`💰 ${item.name}: price not specified ${emoji}`);
   }
 
   // Market price range
@@ -940,13 +959,13 @@ function formatPriceSection(item: ItemAnalysis): string {
         ? formatNumber(item.marketPriceAvg)
         : null;
 
-    let marketLine = `   └ Рынок: ${min}–${max} ${marketCurrency}`;
+    let marketLine = `   └ Market: ${min}–${max} ${marketCurrency}`;
     if (avg) {
       marketLine += ` (avg ${avg})`;
     }
     lines.push(marketLine);
   } else if (!item.priceDataFound) {
-    lines.push("   └ Рыночные данные не найдены");
+    lines.push("   └ No market data found");
   }
 
   // Not recommended reason
@@ -968,13 +987,13 @@ function formatHistorySection(similar: SimilarProduct[] | undefined): string | n
   const maxPrice = Math.max(...prices);
   const currency = withPrice[0]?.currency || "";
 
-  return `📜 История: ${withPrice.length} похожих за ${formatNumber(minPrice)}–${formatNumber(maxPrice)} ${currency}`;
+  return `📜 History: ${withPrice.length} similar for ${formatNumber(minPrice)}–${formatNumber(maxPrice)} ${currency}`;
 }
 
 function formatFlagsSection(flags: string[]): string | null {
   if (!flags || flags.length === 0) return null;
 
-  const lines = ["⚠️ Обрати внимание:"];
+  const lines = ["⚠️ Pay attention:"];
   for (const flag of flags) {
     lines.push(`   • ${flag}`);
   }
@@ -983,11 +1002,11 @@ function formatFlagsSection(flags: string[]): string | null {
 
 function generateFinalConclusion(items: ItemAnalysis[], scamRisk: ScamRisk, listingType: string | null): string {
   if (scamRisk.level === "high") {
-    return "🚫 Высокий риск мошенничества — не рекомендуется";
+    return "🚫 High scam risk — not recommended";
   }
 
   if (scamRisk.level === "medium") {
-    return "⚡ Умеренный риск — проверьте продавца и товар лично";
+    return "⚡ Moderate risk — verify seller and inspect item in person";
   }
 
   const goodDeals = items.filter((i) => i.priceVerdict === "good_deal");
@@ -995,22 +1014,22 @@ function generateFinalConclusion(items: ItemAnalysis[], scamRisk: ScamRisk, list
   const noData = items.filter((i) => !i.priceDataFound);
 
   if (goodDeals.length > 0 && overpriced.length === 0) {
-    return "✅ Хорошее предложение";
+    return "✅ Good deal";
   }
 
   if (overpriced.length > 0) {
-    return "💸 Цена завышена — можно поторговаться";
+    return "💸 Price is high — consider negotiating";
   }
 
   if (noData.length === items.length) {
-    return "❓ Недостаточно данных для оценки цены";
+    return "❓ Not enough data to evaluate price";
   }
 
   if (listingType === "rent") {
-    return "🏠 Проверьте документы и осмотрите объект лично";
+    return "🏠 Check documents and inspect property in person";
   }
 
-  return "➖ Адекватное предложение";
+  return "➖ Fair offer";
 }
 
 // ============= Overall Verdict =============
@@ -1096,7 +1115,7 @@ export async function deepAnalyze(
   apiLog.debug({ listingInfo }, "Listing info extracted");
 
   if (!listingInfo.isListing) {
-    const reason = listingInfo.notListingReason || "Не удалось определить тип объявления";
+    const reason = listingInfo.notListingReason || "Could not determine listing type";
     return {
       isListing: false,
       listingType: null,
@@ -1108,7 +1127,7 @@ export async function deepAnalyze(
         flags: [],
         recommendation: reason,
       },
-      overallVerdict: `Это не объявление: ${reason}`,
+      overallVerdict: `Not a listing: ${reason}`,
       similarItems: [],
       imageAnalysis,
       groupCountry: groupMetadata?.country ?? null,

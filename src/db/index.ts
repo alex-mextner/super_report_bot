@@ -91,6 +91,12 @@ const stmts = {
   setUserMode: db.prepare<void, [string, number]>(
     "UPDATE users SET mode = ? WHERE telegram_id = ?"
   ),
+  getUserLanguage: db.prepare<{ language: string | null }, [number]>(
+    "SELECT language FROM users WHERE telegram_id = ?"
+  ),
+  setUserLanguage: db.prepare<void, [string, number]>(
+    "UPDATE users SET language = ? WHERE telegram_id = ?"
+  ),
 
   // Subscriptions
   getActiveSubscriptions: db.prepare<Subscription, []>(
@@ -514,6 +520,15 @@ export const queries = {
 
   setUserMode(telegramId: number, mode: UserMode): void {
     stmts.setUserMode.run(mode, telegramId);
+  },
+
+  getUserLanguage(telegramId: number): string | null {
+    const result = stmts.getUserLanguage.get(telegramId);
+    return result?.language ?? null;
+  },
+
+  setUserLanguage(telegramId: number, language: string): void {
+    stmts.setUserLanguage.run(language, telegramId);
   },
 
   // Subscriptions

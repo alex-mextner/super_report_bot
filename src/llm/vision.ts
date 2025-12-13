@@ -21,11 +21,13 @@ export interface VisionVerificationResult {
  * @param imageBuffer - Photo data to analyze
  * @param subscriptionDescription - What user is searching for (e.g. "стеллаж IKEA белый")
  * @param listingText - Original listing text to understand context (e.g. "Продаю 3к квартиру...")
+ * @param language - Language for the response reasoning (default: Russian)
  */
 export async function verifyWithVision(
   imageBuffer: Uint8Array,
   subscriptionDescription: string,
-  listingText?: string
+  listingText?: string,
+  language: string = "Russian"
 ): Promise<VisionVerificationResult> {
   const base64Image = Buffer.from(imageBuffer).toString("base64");
   const imageDataUrl = `data:image/jpeg;base64,${base64Image}`;
@@ -44,7 +46,7 @@ Rules:
 - The item must be the MAIN product for sale, not just visible in the image
 - Use the listing text to understand WHAT is being sold. Objects visible in the photo but NOT mentioned as the product in listing are likely just background/staging
 
-Respond ONLY with JSON: {"match": true/false, "confidence": 0.0-1.0, "reason": "brief explanation in Russian"}
+Respond ONLY with JSON: {"match": true/false, "confidence": 0.0-1.0, "reason": "brief explanation in ${language}"}
 
 Search criteria: "${subscriptionDescription}"
 ${listingContext}`;
@@ -166,46 +168,48 @@ export interface ListingImageAnalysis {
  * Analyze listing image to describe product and detect suspicious signs
  * @param imageBuffer - image data
  * @param listingText - optional listing text for context and comparison
+ * @param language - language for response text (default: Russian)
  */
 export async function analyzeListingImage(
   imageBuffer: Uint8Array,
-  listingText?: string
+  listingText?: string,
+  language: string = "Russian"
 ): Promise<ListingImageAnalysis> {
   const base64Image = Buffer.from(imageBuffer).toString("base64");
   const imageDataUrl = `data:image/jpeg;base64,${base64Image}`;
 
   const textContext = listingText
-    ? `Текст объявления:
+    ? `Listing text:
 ${listingText.slice(0, 1000)}
 
 `
     : "";
 
-  const prompt = `Ты анализируешь фото товара из объявления о продаже.
+  const prompt = `You are analyzing a product photo from a sales listing.
 
-${textContext}Проанализируй фото и определи:
-1. Что за товар (краткое описание)
-2. Состояние товара: new/used/unknown
-3. Детали состояния: царапины, потёртости, сколы, недостающие части, признаки использования
-4. Качество фото: real_photo/stock_photo/screenshot
-5. Соответствует ли фото описанию в тексте (если текст предоставлен)?
+${textContext}Analyze the photo and determine:
+1. What product is it (brief description)
+2. Product condition: new/used/unknown
+3. Condition details: scratches, scuffs, chips, missing parts, signs of use
+4. Photo quality: real_photo/stock_photo/screenshot
+5. Does the photo match the description in the text (if provided)?
 
-Особое внимание:
-- Если текст говорит "новый/new", а на фото видны признаки использования — это расхождение
-- Если текст говорит "б/у" но фото явно стоковое — это подозрительно
-- Если не видно товар чётко — это подозрительно
-- Стоковое фото: профессиональное освещение, белый фон, водяные знаки
-- Скриншот: UI телефона, элементы браузера
+Pay special attention:
+- If text says "new" but photo shows signs of use — this is a mismatch
+- If text says "used" but photo is clearly stock — this is suspicious
+- If product is not clearly visible — this is suspicious
+- Stock photo: professional lighting, white background, watermarks
+- Screenshot: phone UI, browser elements
 
-Верни ТОЛЬКО JSON:
+Respond ONLY with JSON:
 {
-  "description": "краткое описание товара по-русски (бренд, тип, цвет)",
+  "description": "brief product description in ${language} (brand, type, color)",
   "condition": "new" | "used" | "unknown",
-  "conditionDetails": "детальное описание состояния по-русски (царапины, потёртости, комплектность)",
+  "conditionDetails": "detailed condition description in ${language} (scratches, scuffs, completeness)",
   "conditionMismatch": true/false,
-  "mismatchReason": "объяснение расхождения по-русски или null если нет расхождения",
+  "mismatchReason": "explanation of mismatch in ${language} or null if no mismatch",
   "quality": "real_photo" | "stock_photo" | "screenshot" | "unknown",
-  "suspiciousFlags": ["список подозрительных признаков по-русски, пустой если нет"]
+  "suspiciousFlags": ["list of suspicious signs in ${language}, empty if none"]
 }`;
 
   try {
@@ -297,15 +301,15 @@ export async function matchPhotoToItem(
     .map((desc, i) => `${i + 1}. ${desc.slice(0, 300)}`)
     .join("\n\n");
 
-  const prompt = `На этом фото товар из объявления. К какому из этих описаний он относится?
+  const prompt = `This photo shows a product from a listing. Which of these descriptions does it belong to?
 
 ${itemsList}
 
-ВАЖНО:
-- Если товар на фото явно соответствует одному из описаний, укажи его номер
-- Если не можешь определить точно, ответь 0
+IMPORTANT:
+- If the product in the photo clearly matches one of the descriptions, provide its number
+- If you cannot determine exactly, answer 0
 
-Ответь ТОЛЬКО JSON: {"item": номер (1-${itemDescriptions.length}) или 0, "confidence": 0.0-1.0}`;
+Respond ONLY with JSON: {"item": number (1-${itemDescriptions.length}) or 0, "confidence": 0.0-1.0}`;
 
   try {
     const response = await withRetry(() =>

@@ -1,36 +1,36 @@
 import { hf, MODELS, withRetry } from "./index.ts";
 import { llmLog } from "../logger.ts";
 
-const SYSTEM_PROMPT = `Ты помощник для классификации товаров из сообщений в Telegram группах.
+const SYSTEM_PROMPT = `You are an assistant for classifying products from Telegram group messages.
 
-## Задача
-Получаешь массив сообщений, для каждого определи:
-1. Категорию товара (code)
-2. Контакт продавца если есть в тексте
+## Task
+You receive an array of messages. For each one, determine:
+1. Product category (code)
+2. Seller contact if present in text
 
-## Категории (используй только эти коды или предложи новые)
-- electronics: Электроника (телефоны, компьютеры, ТВ, наушники)
-- clothing: Одежда и обувь
-- auto: Авто (машины, мото, запчасти)
-- realty: Недвижимость (квартиры, дома, аренда)
-- furniture: Мебель
-- appliances: Бытовая техника (холодильник, стиралка)
-- kids: Детские товары
-- sports: Спорт и отдых
-- beauty: Красота и здоровье
-- pets: Животные и товары для них
-- services: Услуги
-- jobs: Работа, вакансии
-- other: Прочее
+## Categories (use only these codes or suggest new ones)
+- electronics: Electronics (phones, computers, TV, headphones)
+- clothing: Clothing and footwear
+- auto: Auto (cars, motorcycles, parts)
+- realty: Real estate (apartments, houses, rental)
+- furniture: Furniture
+- appliances: Home appliances (refrigerator, washing machine)
+- kids: Kids products
+- sports: Sports and leisure
+- beauty: Beauty and health
+- pets: Animals and pet supplies
+- services: Services
+- jobs: Jobs, vacancies
+- other: Other
 
-## Контакты
-Ищи в тексте:
-- Телефоны: +7, 8, форматы типа 89001234567
+## Contacts
+Look for in text:
+- Phone numbers: +7, 8, formats like 89001234567
 - Telegram: @username, t.me/xxx
 - WhatsApp: wa.me/xxx
 
-## Формат ответа
-JSON без дополнительного текста:
+## Response format
+JSON without additional text:
 {
   "items": [
     {
@@ -43,12 +43,12 @@ JSON без дополнительного текста:
     }
   ],
   "new_categories": [
-    { "code": "new_code", "name_ru": "Название" }
+    { "code": "new_code", "name_ru": "Name in Russian" }
   ]
 }
 
-Если сообщение НЕ товар (чат, вопрос, спам, приветствие) — пропусти его (не включай в items).
-Будь строгим: только реальные объявления о продаже/услугах.`;
+If message is NOT a product (chat, question, spam, greeting) — skip it (don't include in items).
+Be strict: only real sales/service listings.`;
 
 export interface ClassificationInput {
   id: number;

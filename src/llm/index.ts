@@ -264,11 +264,13 @@ export interface BatchVerificationResult {
 /**
  * Verify if a message matches a subscription description
  * @param hasPhoto - if true, the message contains photo(s) that LLM cannot see
+ * @param language - language for the response (default: Russian)
  */
 export async function verifyMessage(
   messageText: string,
   subscriptionDescription: string,
-  hasPhoto?: boolean
+  hasPhoto?: boolean,
+  language: string = "Russian"
 ): Promise<VerificationResult> {
   const photoWarning = hasPhoto
     ? "\n\nIMPORTANT: This message contains photo(s) that you CANNOT see. Do NOT guess about photo content based on emojis or text descriptions. Focus ONLY on analyzing the text content itself."
@@ -277,7 +279,7 @@ export async function verifyMessage(
   const systemPrompt = `You are a message classifier. Your task is to determine if a message matches a search criteria.
 
 Respond ONLY with a JSON object in this exact format:
-{"match": true/false, "confidence": 0.0-1.0, "reason": "brief explanation in Russian"}
+{"match": true/false, "confidence": 0.0-1.0, "reason": "brief explanation in ${language}"}
 
 Be strict but reasonable:
 - Match if the message is clearly relevant to the search criteria
@@ -285,12 +287,14 @@ Be strict but reasonable:
 - Consider synonyms and related concepts
 - Ignore formatting, emoji, typos
 - Don't match if item is sold as part of something larger (e.g. "keyboard" in laptop listing, "wheels" in car listing - impractical to buy whole thing for a component)
-- Don't match SOLD items: if item name is strikethrough (~~название~~), or text contains "Продано", "SOLD", "продан". Note: strikethrough price is OK (just discount).
+- Don't match SOLD items: if item name is strikethrough (~~name~~), or text contains "Sold", "SOLD", "Продано", "продан". Note: strikethrough price is OK (just discount).
 
 CRITICAL - Check listing type (buy vs sell):
-- If search criteria implies BUYING (looking for a product) → DON'T match "куплю/ищу/нужен" listings (those are also buyers!)
-- If search criteria implies SELLING → DON'T match "продам/продаю" listings (those are also sellers!)
-- Match only opposite types: buyer searches → seller listings, seller searches → buyer listings${photoWarning}`;
+- If search criteria implies BUYING (looking for a product) → DON'T match "looking for/want to buy/need" listings (those are also buyers!)
+- If search criteria implies SELLING → DON'T match "selling/for sale" listings (those are also sellers!)
+- Match only opposite types: buyer searches → seller listings, seller searches → buyer listings
+- Common buyer keywords: куплю, ищу, нужен, looking for, want to buy, WTB
+- Common seller keywords: продам, продаю, selling, for sale, WTS${photoWarning}`;
 
   const userPrompt = `Search criteria: "${subscriptionDescription}"
 
@@ -347,10 +351,12 @@ function parseVerificationResponse(content: string): VerificationResult {
 /**
  * Verify multiple messages in a single API call (batch)
  * Much faster than individual calls for history scanning
+ * @param language - language for the response (default: Russian)
  */
 export async function verifyMessageBatch(
   messages: BatchVerificationInput[],
-  subscriptionDescription: string
+  subscriptionDescription: string,
+  language: string = "Russian"
 ): Promise<BatchVerificationResult[]> {
   if (messages.length === 0) {
     return [];
@@ -359,7 +365,7 @@ export async function verifyMessageBatch(
   const systemPrompt = `You are a message classifier. Your task is to classify MULTIPLE messages against a search criteria.
 
 Respond ONLY with a JSON array. For each message, return:
-[{"index": 0, "match": true/false, "confidence": 0.0-1.0, "reason": "brief explanation in Russian"}, ...]
+[{"index": 0, "match": true/false, "confidence": 0.0-1.0, "reason": "brief explanation in ${language}"}, ...]
 
 Be strict but reasonable:
 - Match if the message is clearly relevant to the search criteria
@@ -369,8 +375,8 @@ Be strict but reasonable:
 - Don't match if item is sold as part of something larger (e.g. "keyboard" in laptop listing - impractical to buy whole thing for a component)
 
 CRITICAL - Check listing type (buy vs sell):
-- If search criteria implies BUYING → DON'T match "куплю/ищу/нужен" listings (those are also buyers!)
-- If search criteria implies SELLING → DON'T match "продам/продаю" listings (those are also sellers!)`;
+- If search criteria implies BUYING → DON'T match buyer listings (куплю/ищу/нужен, looking for/want to buy/WTB)
+- If search criteria implies SELLING → DON'T match seller listings (продам/продаю, selling/for sale/WTS)`;
 
   const messagesJson = messages
     .map((m) => `[${m.index}]: ${m.text.slice(0, 500)}`)

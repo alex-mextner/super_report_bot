@@ -11,12 +11,12 @@ interface CurrencyPattern {
 }
 
 const CURRENCY_PATTERNS: CurrencyPattern[] = [
-  // Rubles: "50000 руб", "50 000₽", "50000р"
+  // Russian Rubles: "50000 руб", "50 000₽", "50000р"
   {
     pattern: /(\d{1,3}(?:[\s\u00A0]?\d{3})*)\s*(?:руб\.?|₽|р\.?|рублей)/gi,
     currency: "RUB",
   },
-  // Thousands (RUB): "50к", "50 тыс", "50т"
+  // Russian thousands (RUB): "50к" (50k), "50 тыс" (50 thousand), "50т"
   {
     pattern: /(\d{1,3}(?:[\s\u00A0]?\d{3})*)\s*(?:тыс\.?|т\.?|к)\b/gi,
     currency: "RUB",
@@ -31,7 +31,7 @@ const CURRENCY_PATTERNS: CurrencyPattern[] = [
     pattern: /(\d{1,3}(?:[\s\u00A0,]?\d{3})*)\s*\$/gi,
     currency: "USD",
   },
-  // EUR: "€500", "500€", "500 евро"
+  // EUR: "€500", "500€", "500 евро" (Russian word for euro)
   {
     pattern: /€\s*(\d{1,3}(?:[\s\u00A0,]?\d{3})*)/gi,
     currency: "EUR",
@@ -40,12 +40,12 @@ const CURRENCY_PATTERNS: CurrencyPattern[] = [
     pattern: /(\d{1,3}(?:[\s\u00A0,]?\d{3})*)\s*(?:€|евро)/gi,
     currency: "EUR",
   },
-  // RSD (Serbian Dinar): "500 din", "500 дин", "500 RSD"
+  // Serbian Dinar (RSD): "500 din", "500 дин" (Cyrillic), "500 RSD"
   {
     pattern: /(\d{1,3}(?:[\s\u00A0.]?\d{3})*)\s*(?:din|дин|rsd)/gi,
     currency: "RSD",
   },
-  // Price label (default RUB): "цена: 50000", "цена 50000"
+  // Russian price label (default RUB): "цена: 50000" (price: 50000)
   {
     pattern: /цена[:\s]+(\d{1,3}(?:[\s\u00A0]?\d{3})*)/gi,
     currency: "RUB",

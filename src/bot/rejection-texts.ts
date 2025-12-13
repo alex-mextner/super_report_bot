@@ -3,26 +3,29 @@
  */
 
 import type { FoundPostAnalysis, AnalysisResult } from "../types.ts";
+import { getTranslator, getTranslatorForLocale, getUserLocale } from "../i18n/index.ts";
 
 /**
  * Format rejection reason for display to user
  */
-export function formatRejectionReason(post: FoundPostAnalysis): string {
+export function formatRejectionReason(post: FoundPostAnalysis, userId?: number): string {
+  const tr = userId ? getTranslator(userId) : getTranslatorForLocale("ru");
+
   switch (post.result) {
     case "rejected_negative":
-      return `Содержит исключающее слово "${post.rejection_keyword}"`;
+      return tr("reject_negative_kw", { keyword: post.rejection_keyword || "" });
 
     case "rejected_ngram": {
       const score = Math.round((post.ngram_score ?? 0) * 100);
-      return `Текст далёк от запроса (сходство ${score}%)`;
+      return tr("reject_ngram", { score });
     }
 
     case "rejected_semantic": {
       const sem = Math.round((post.semantic_score ?? 0) * 100);
       if (post.rejection_keyword) {
-        return `Заблокировано семантическим фильтром: "${post.rejection_keyword}"`;
+        return tr("reject_semantic_kw", { keyword: post.rejection_keyword });
       }
-      return `Семантика не совпала (${sem}%)`;
+      return tr("reject_semantic", { score: sem });
     }
 
     case "rejected_llm": {
@@ -31,47 +34,53 @@ export function formatRejectionReason(post: FoundPostAnalysis): string {
         const reason = post.llm_reasoning.length > 200
           ? post.llm_reasoning.slice(0, 200) + "..."
           : post.llm_reasoning;
-        return `ИИ отклонил: ${reason}`;
+        return tr("reject_llm_reason", { reason });
       }
-      const conf = post.llm_confidence
-        ? ` (уверенность ${Math.round(post.llm_confidence * 100)}%)`
-        : "";
-      return `ИИ не подтвердил соответствие${conf}`;
+      if (post.llm_confidence) {
+        const score = Math.round(post.llm_confidence * 100);
+        return tr("reject_llm_confidence", { score });
+      }
+      return tr("reject_llm");
     }
 
     case "matched":
-      return "Сообщение соответствует критериям";
+      return tr("reject_matched");
 
     default:
-      return "Причина не определена";
+      return tr("reject_unknown");
   }
 }
 
 /**
  * Get short status text for analysis result
  */
-export function getStatusText(result: AnalysisResult): string {
+export function getStatusText(result: AnalysisResult, userId?: number): string {
+  const tr = userId ? getTranslator(userId) : getTranslatorForLocale("ru");
+
   switch (result) {
     case "matched":
-      return "Совпадение";
+      return tr("status_matched");
     case "rejected_negative":
-      return "Исключено";
+      return tr("status_excluded");
     case "rejected_ngram":
-      return "Не совпало";
+      return tr("status_ngram");
     case "rejected_semantic":
-      return "Семантика";
+      return tr("status_semantic");
     case "rejected_llm":
-      return "ИИ отклонил";
+      return tr("status_llm");
     default:
-      return "Неизвестно";
+      return tr("status_unknown");
   }
 }
 
 /**
  * Format unix timestamp as human-readable date
  */
-export function formatDate(timestamp: number | null): string {
-  if (!timestamp) return "неизвестно";
+export function formatDate(timestamp: number | null, userId?: number): string {
+  const tr = userId ? getTranslator(userId) : getTranslatorForLocale("ru");
+  const locale = userId ? getUserLocale(userId) : "ru";
+
+  if (!timestamp) return tr("date_unknown");
 
   const date = new Date(timestamp * 1000);
   const now = new Date();
@@ -80,20 +89,24 @@ export function formatDate(timestamp: number | null): string {
 
   if (diffDays === 0) {
     // Today - show time
-    return `сегодня в ${date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+    const localeCode = locale === "rs" ? "sr" : locale;
+    const time = date.toLocaleTimeString(localeCode, { hour: "2-digit", minute: "2-digit" });
+    return tr("date_today", { time });
   } else if (diffDays === 1) {
-    return "вчера";
+    return tr("date_yesterday");
   } else if (diffDays < 7) {
-    return `${diffDays} дней назад`;
+    return tr("date_days_ago", { days: diffDays });
   } else {
-    return date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+    const localeCode = locale === "rs" ? "sr" : locale;
+    return date.toLocaleDateString(localeCode, { day: "numeric", month: "short" });
   }
 }
 
 /**
  * Format detailed analysis info for advanced users
  */
-export function formatDetailedAnalysis(post: FoundPostAnalysis): string {
+export function formatDetailedAnalysis(post: FoundPostAnalysis, userId?: number): string {
+  const tr = userId ? getTranslator(userId) : getTranslatorForLocale("ru");
   const lines: string[] = [];
 
   if (post.ngram_score !== null) {
@@ -101,7 +114,7 @@ export function formatDetailedAnalysis(post: FoundPostAnalysis): string {
   }
 
   if (post.semantic_score !== null) {
-    lines.push(`Семантика: ${Math.round(post.semantic_score * 100)}%`);
+    lines.push(tr("analysis_semantic", { score: Math.round(post.semantic_score * 100) }));
   }
 
   if (post.llm_confidence !== null) {
@@ -112,5 +125,5 @@ export function formatDetailedAnalysis(post: FoundPostAnalysis): string {
     return "";
   }
 
-  return `Скоры: ${lines.join(" | ")}`;
+  return tr("analysis_scores", { scores: lines.join(" | ") });
 }

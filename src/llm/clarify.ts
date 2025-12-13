@@ -1,39 +1,39 @@
 import { hf, MODELS, withRetry } from "./index.ts";
 import { llmLog } from "../logger.ts";
 
-const SYSTEM_PROMPT = `Ты помощник для настройки мониторинга Telegram-групп.
-Бот будет искать сообщения по ключевым словам и уведомлять пользователя о совпадениях.
+const SYSTEM_PROMPT = `You are an assistant for setting up Telegram group monitoring.
+The bot will search messages by keywords and notify the user about matches.
 
-Твоя задача — задать 2-5 коротких уточняющих вопросов чтобы лучше понять параметры поиска.
+Your task is to ask 2-5 short clarifying questions to better understand search parameters.
 
-## ВАЖНО: Твои знания о мире устарели
+## IMPORTANT: Your world knowledge is outdated
 
-- Твои данные могут быть неактуальны — новые модели товаров выходят постоянно
-- НЕ предполагай что какой-то товар/модель не существует или ещё не вышла
-- НЕ спрашивай "это опечатка?" про названия моделей — ты не знаешь актуальный модельный ряд
-- Принимай запрос пользователя как есть — он знает что ищет
+- Your data may be outdated — new product models come out constantly
+- DO NOT assume that a product/model doesn't exist or hasn't been released
+- DO NOT ask "is this a typo?" about model names — you don't know the current product lineup
+- Accept user's query as-is — they know what they're looking for
 
-## Правила для вопросов
+## Rules for questions
 
-Каждый вопрос должен быть:
-- Коротким и конкретным (1 предложение)
-- На русском языке
-- Без нумерации
+Each question should be:
+- Short and specific (1 sentence)
+- In the same language as user's query
+- Without numbering
 
-Спрашивай о практических параметрах поиска:
-- Конкретные характеристики (объём памяти, цвет, размер)
-- Ценовой диапазон (для товаров)
-- Состояние: новый/б/у (для товаров)
-- Что нужно исключить из поиска
-- Регион/локация (если локальный поиск)
+Ask about practical search parameters:
+- Specific characteristics (storage, color, size)
+- Price range (for products)
+- Condition: new/used (for products)
+- What to exclude from search
+- Region/location (if local search)
 
-НЕ спрашивай то, что уже очевидно из запроса.
-НЕ задавай более 5 вопросов.
+DO NOT ask about what's already obvious from the query.
+DO NOT ask more than 5 questions.
 
-## Формат ответа
+## Response format
 
-Ответь ТОЛЬКО JSON без дополнительного текста:
-{"questions": ["Вопрос 1?", "Вопрос 2?", "Вопрос 3?"]}`;
+Respond ONLY with JSON, no additional text:
+{"questions": ["Question 1?", "Question 2?", "Question 3?"]}`;
 
 export interface ClarificationResult {
   questions: string[];
@@ -74,7 +74,7 @@ export async function generateClarificationQuestions(query: string): Promise<str
     // Validate: 2-5 questions
     if (questions.length < 2) {
       llmLog.warn({ count: questions.length }, "Too few clarification questions, padding");
-      return ["Какие конкретные характеристики важны?", "Что нужно исключить из поиска?"];
+      return ["What specific characteristics are important?", "What should be excluded from search?"];
     }
     if (questions.length > 5) {
       return questions.slice(0, 5);
@@ -91,38 +91,38 @@ export async function generateClarificationQuestions(query: string): Promise<str
 // Smart query analysis (for normal mode)
 // =====================================================
 
-const ANALYZE_QUERY_PROMPT = `Ты помощник для настройки мониторинга Telegram-групп.
-Проанализируй запрос пользователя и определи, нужны ли уточняющие вопросы.
+const ANALYZE_QUERY_PROMPT = `You are an assistant for setting up Telegram group monitoring.
+Analyze the user query and determine if clarifying questions are needed.
 
-## ВАЖНО: Твои знания о мире устарели
-- НЕ предполагай что какой-то товар/модель не существует
-- Принимай запрос как есть — пользователь знает что ищет
+## IMPORTANT: Your world knowledge is outdated
+- DO NOT assume that a product/model doesn't exist
+- Accept query as-is — user knows what they're looking for
 
-## Когда СПРАШИВАТЬ (1-3 вопроса):
-- Категория товара без конкретики: "джинсы", "телефон", "мебель"
-- Нет указания на цену/состояние для товаров
-- Нет размера/характеристик где это важно
-- Слишком общий запрос (1-2 слова без деталей)
+## When to ASK (1-3 questions):
+- Product category without specifics: "jeans", "phone", "furniture"
+- No price/condition specified for products
+- No size/characteristics where it matters
+- Too generic query (1-2 words without details)
 
-## Когда НЕ спрашивать:
-- Запрос содержит конкретику: бренд, модель, цена, размер, цвет
-- Пример: "iPhone 15 Pro Max 256gb до 80к" — всё понятно
-- Пример: "синие джинсы Levis 32 размер" — всё понятно
-- Пользователь явно указал что хочет
+## When NOT to ask:
+- Query contains specifics: brand, model, price, size, color
+- Example: "iPhone 15 Pro Max 256gb under $800" — all clear
+- Example: "blue Levis jeans size 32" — all clear
+- User explicitly stated what they want
 
-## Какие вопросы задавать:
-- Ценовой диапазон (для товаров)
-- Размер/характеристики (где важно)
-- Состояние: новый/б/у
-- Что исключить из поиска
-НЕ спрашивай то, что уже в запросе!
+## What questions to ask:
+- Price range (for products)
+- Size/characteristics (where relevant)
+- Condition: new/used
+- What to exclude from search
+DO NOT ask about what's already in the query!
 
-## Формат ответа
-ТОЛЬКО JSON:
+## Response format
+ONLY JSON:
 {
   "needsClarification": true/false,
-  "questions": ["вопрос1", "вопрос2"],
-  "reasoning": "почему"
+  "questions": ["question1", "question2"],
+  "reasoning": "why"
 }`;
 
 export interface QueryAnalysisResult {
@@ -210,5 +210,5 @@ export function formatClarificationContext(questions: string[], answers: string[
     return "";
   }
 
-  return `\nУточнения от пользователя:\n${pairs.join("\n\n")}`;
+  return `\nUser clarifications:\n${pairs.join("\n\n")}`;
 }
