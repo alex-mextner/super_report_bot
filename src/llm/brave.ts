@@ -1,6 +1,6 @@
 import { llmLog } from "../logger.ts";
 import type { RatingExample } from "../types.ts";
-import { hf, withRetry, MODELS } from "./index.ts";
+import { llmThink } from "./index.ts";
 
 const BRAVE_API_KEY = process.env.BRAVE_API_KEY;
 
@@ -98,22 +98,16 @@ Generate 3 example listings.
 IMPORTANT: Write all listings in ${language}.`;
 
   try {
-    const response = await withRetry(async () => {
-      const result = await hf.chatCompletion({
-        model: MODELS.DEEPSEEK_R1,
-        provider: "novita",
-        messages: [
-          { role: "system", content: BRAVE_EXAMPLES_PROMPT },
-          { role: "user", content: userMessage },
-        ],
-        max_tokens: 1500,
-        temperature: 0.7,
-      });
-      return result.choices[0]?.message?.content || "";
+    const response = await llmThink({
+      messages: [
+        { role: "system", content: BRAVE_EXAMPLES_PROMPT },
+        { role: "user", content: userMessage },
+      ],
+      maxTokens: 1500,
+      temperature: 0.7,
     });
 
-    // Strip thinking tags
-    const cleaned = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+    const cleaned = response.trim();
 
     // Parse JSON
     const match = cleaned.match(/\[[\s\S]*\]/);

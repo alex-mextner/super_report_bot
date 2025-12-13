@@ -1,7 +1,7 @@
 /**
  * Deep product analysis using:
  * 1. Brave Search API for market prices (with source links)
- * 2. DeepSeek for analysis
+ * 2. GLM-4.6 (Z.AI) for analysis
  * 3. Deterministic scam risk assessment (not LLM-based where possible)
  * 4. Currency conversion via open.er-api.com
  * 5. Multi-item support with separate searches
@@ -15,7 +15,7 @@ import { analyzeListingImage, type ListingImageAnalysis } from "./vision.ts";
 import { semanticSearch } from "../embeddings/search.ts";
 import type { GroupMetadata } from "../types.ts";
 import { getTranslatorForLocale } from "../i18n/index.ts";
-import { withRetry } from "./index.ts";
+import { withRetry, callZAI, MODELS, type LLMMessage } from "./index.ts";
 
 // Simple English pluralization for items count
 const pluralItems = (n: number): string => {
@@ -24,9 +24,6 @@ const pluralItems = (n: number): string => {
 
 const BRAVE_API = "https://api.search.brave.com/res/v1/web/search";
 const BRAVE_KEY = process.env.BRAVE_API_KEY;
-
-const DEEPSEEK_API = "https://api.deepseek.com/chat/completions";
-const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY;
 
 const EXCHANGE_API = "https://open.er-api.com/v6/latest/EUR";
 
@@ -292,40 +289,14 @@ async function searchWeb(query: string): Promise<BraveResult[]> {
 
 // ============= LLM Calls =============
 
-async function callDeepSeek(systemPrompt: string, userPrompt: string, maxTokens = 2000): Promise<string> {
-  if (!DEEPSEEK_KEY) {
-    throw new Error("DEEPSEEK_API_KEY not set");
-  }
+async function callLLM(systemPrompt: string, userPrompt: string, maxTokens = 2000): Promise<string> {
+  const messages: LLMMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userPrompt },
+  ];
 
   return withRetry(
-    async () => {
-      const response = await fetch(DEEPSEEK_API, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${DEEPSEEK_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "deepseek-chat",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          temperature: 0.3,
-          max_tokens: maxTokens,
-        }),
-        signal: AbortSignal.timeout(30000),
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        apiLog.warn({ status: response.status, text }, "DeepSeek request failed");
-        throw new Error(`DeepSeek API error: ${response.status}`);
-      }
-
-      const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-      return data.choices?.[0]?.message?.content || "";
-    },
+    () => callZAI(MODELS.GLM_46, messages, maxTokens, 0.3),
     3, // 3 retries
     2000 // 2s base delay
   );
@@ -385,7 +356,7 @@ Return JSON:
 }`;
 
   try {
-    const response = await callDeepSeek(systemPrompt, userPrompt);
+    const response = await callLLM(systemPrompt, userPrompt);
     const jsonMatch = response.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       return JSON.parse(jsonMatch[0]);
@@ -499,7 +470,7 @@ Return JSON:
 }`;
 
   try {
-    const response = await callDeepSeek(systemPrompt, userPrompt);
+    const response = await callLLM(systemPrompt, userPrompt);
     const jsonMatch = response.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);

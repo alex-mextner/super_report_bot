@@ -1,4 +1,4 @@
-import { hf, MODELS, withRetry } from "./index.ts";
+import { llmThink } from "./index.ts";
 import { llmLog } from "../logger.ts";
 
 const SYSTEM_PROMPT = `You are an assistant for classifying products from Telegram group messages.
@@ -85,22 +85,16 @@ export async function classifyBatch(
 
   llmLog.debug({ count: messages.length }, "Classifying batch");
 
-  const response = await withRetry(async () => {
-    const result = await hf.chatCompletion({
-      model: MODELS.DEEPSEEK_R1,
-      provider: "novita",
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userMessage },
-      ],
-      max_tokens: 4000,
-      temperature: 0.3,
-    });
-    return result.choices[0]?.message?.content || "";
+  const response = await llmThink({
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: userMessage },
+    ],
+    maxTokens: 4000,
+    temperature: 0.3,
   });
 
-  // Strip DeepSeek R1 thinking blocks
-  const cleanedResponse = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  const cleanedResponse = response.trim();
 
   // Parse JSON from response
   const jsonMatch = cleanedResponse.match(/\{[\s\S]*\}/);

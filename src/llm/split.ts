@@ -17,7 +17,7 @@ export interface SplitResult {
 const MIN_LENGTH_FOR_SPLIT = 200;
 
 /**
- * Split message text into separate items/products using DeepSeek
+ * Split message text into separate items/products using LLM
  *
  * @param text - Original message text
  * @returns Array of item texts and whether it was a single item
@@ -85,7 +85,7 @@ Split into items or return as single.`;
 }
 
 /**
- * Parse DeepSeek response for split result
+ * Parse LLM response for split result
  */
 function parseSplitResponse(content: string, originalText: string): SplitResult {
   const defaultResult: SplitResult = { items: [originalText], isSingleItem: true };

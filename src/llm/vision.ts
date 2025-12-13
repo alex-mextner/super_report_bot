@@ -1,13 +1,11 @@
 /**
- * Vision LLM verification using Qwen VL via HuggingFace Inference API
+ * Vision LLM verification using GLM-4.6V via Z.AI
  *
  * Uses the image to verify if product matches subscription description
  */
 
 import { llmLog } from "../logger.ts";
-import { hf, withRetry } from "./index.ts";
-
-const QWEN_VL_MODEL = "Qwen/Qwen3-VL-235B-A22B-Thinking";
+import { callZAI, withRetry, MODELS, type LLMMessage } from "./index.ts";
 
 export interface VisionVerificationResult {
   isMatch: boolean;
@@ -52,25 +50,21 @@ Search criteria: "${subscriptionDescription}"
 ${listingContext}`;
 
   try {
-    const response = await withRetry(() =>
-      hf.chatCompletion({
-        model: QWEN_VL_MODEL,
-        provider: "novita",
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "image_url", image_url: { url: imageDataUrl } },
-              { type: "text", text: prompt },
-            ],
-          },
+    const messages: LLMMessage[] = [
+      {
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: imageDataUrl } },
+          { type: "text", text: prompt },
         ],
-        max_tokens: 300,
-        temperature: 0.1,
-      })
-    );
+      },
+    ];
 
-    const content = response.choices[0]?.message?.content;
+    const content = await withRetry(
+      () => callZAI(MODELS.GLM_46V, messages, 300, 0.1),
+      3,
+      1000
+    );
 
     if (!content) {
       throw new Error("Empty response from vision model");
@@ -140,13 +134,9 @@ function parseVisionResponse(content: string): VisionVerificationResult {
 export async function checkVisionHealth(): Promise<boolean> {
   try {
     // Quick test with minimal request
-    const response = await hf.chatCompletion({
-      model: QWEN_VL_MODEL,
-      provider: "novita",
-      messages: [{ role: "user", content: "ping" }],
-      max_tokens: 1,
-    });
-    return !!response.choices[0]?.message?.content;
+    const messages: LLMMessage[] = [{ role: "user", content: "ping" }];
+    const content = await callZAI(MODELS.GLM_46V, messages, 1, 0.1);
+    return !!content;
   } catch {
     return false;
   }
@@ -213,25 +203,21 @@ Respond ONLY with JSON:
 }`;
 
   try {
-    const response = await withRetry(() =>
-      hf.chatCompletion({
-        model: QWEN_VL_MODEL,
-        provider: "novita",
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "image_url", image_url: { url: imageDataUrl } },
-              { type: "text", text: prompt },
-            ],
-          },
+    const messages: LLMMessage[] = [
+      {
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: imageDataUrl } },
+          { type: "text", text: prompt },
         ],
-        max_tokens: 400,
-        temperature: 0.1,
-      })
-    );
+      },
+    ];
 
-    const content = response.choices[0]?.message?.content;
+    const content = await withRetry(
+      () => callZAI(MODELS.GLM_46V, messages, 400, 0.1),
+      3,
+      1000
+    );
 
     if (!content) {
       throw new Error("Empty response from vision model");
@@ -312,25 +298,21 @@ IMPORTANT:
 Respond ONLY with JSON: {"item": number (1-${itemDescriptions.length}) or 0, "confidence": 0.0-1.0}`;
 
   try {
-    const response = await withRetry(() =>
-      hf.chatCompletion({
-        model: QWEN_VL_MODEL,
-        provider: "novita",
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "image_url", image_url: { url: imageDataUrl } },
-              { type: "text", text: prompt },
-            ],
-          },
+    const messages: LLMMessage[] = [
+      {
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: imageDataUrl } },
+          { type: "text", text: prompt },
         ],
-        max_tokens: 100,
-        temperature: 0.1,
-      })
-    );
+      },
+    ];
 
-    const content = response.choices[0]?.message?.content;
+    const content = await withRetry(
+      () => callZAI(MODELS.GLM_46V, messages, 100, 0.1),
+      3,
+      1000
+    );
 
     if (!content) {
       return { itemIndex: null, confidence: 0 };

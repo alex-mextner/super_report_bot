@@ -1,4 +1,4 @@
-import { hf, MODELS, withRetry } from "./index.ts";
+import { llmThink } from "./index.ts";
 import { llmLog } from "../logger.ts";
 
 export interface AnalysisResult {
@@ -51,18 +51,12 @@ export async function analyzeMessagesBatch(
     .map((item, i) => `[${i + 1}] ID=${item.id}\n${item.text.slice(0, 500)}`)
     .join("\n\n---\n\n");
 
-  const response = await withRetry(async () => {
-    const result = await hf.chatCompletion({
-      model: MODELS.DEEPSEEK_R1,
-      messages: [
-        { role: "system", content: getBatchSystemPrompt(language) },
-        { role: "user", content: batchPrompt },
-      ],
-      max_tokens: 3000,
-      provider: "novita",
-    });
-
-    return result.choices[0]?.message?.content || "";
+  const response = await llmThink({
+    messages: [
+      { role: "system", content: getBatchSystemPrompt(language) },
+      { role: "user", content: batchPrompt },
+    ],
+    maxTokens: 3000,
   });
 
   llmLog.debug({ count: items.length }, "Batch analyzed");
@@ -137,18 +131,12 @@ export async function analyzeMessage(
     throw new Error("HF_TOKEN not configured");
   }
 
-  const response = await withRetry(async () => {
-    const result = await hf.chatCompletion({
-      model: MODELS.DEEPSEEK_R1,
-      messages: [
-        { role: "system", content: getSystemPrompt(language) },
-        { role: "user", content: text },
-      ],
-      max_tokens: 500,
-      provider: "novita",
-    });
-
-    return result.choices[0]?.message?.content || "";
+  const response = await llmThink({
+    messages: [
+      { role: "system", content: getSystemPrompt(language) },
+      { role: "user", content: text },
+    ],
+    maxTokens: 500,
   });
 
   llmLog.debug({ textLength: text.length }, "Message analyzed");

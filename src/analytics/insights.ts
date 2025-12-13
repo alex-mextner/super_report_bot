@@ -1,4 +1,4 @@
-import { hf, MODELS, withRetry } from "../llm/index.ts";
+import { llmThink } from "../llm/index.ts";
 import { llmLog } from "../logger.ts";
 import type { GroupStats } from "./compute.ts";
 
@@ -90,19 +90,12 @@ export async function generateInsights(stats: GroupStats): Promise<string | null
   const prompt = buildPrompt(stats);
 
   try {
-    const response = await withRetry(async () => {
-      const result = await hf.chatCompletion({
-        model: MODELS.DEEPSEEK_R1,
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: 500,
-        provider: "novita",
-      });
-      return result.choices[0]?.message?.content || "";
+    const response = await llmThink({
+      messages: [{ role: "user", content: prompt }],
+      maxTokens: 500,
     });
 
-    // Clean up response (remove thinking tags if present)
-    let cleaned = response.trim();
-    cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+    const cleaned = response.trim();
 
     llmLog.info({ statsTotal: stats.totalMessages }, "Insights generated");
     return cleaned;

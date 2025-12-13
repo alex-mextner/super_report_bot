@@ -1,21 +1,27 @@
 /**
  * Unified LLM Client
  *
- * All LLM calls go through HuggingFace Inference API with automatic retries and fallbacks.
+ * Primary: Z.AI GLM models with HuggingFace fallbacks.
  * Models are grouped by use case:
  * - llmLight: Fast simple tasks (Qwen 72B → Qwen 4B fallback)
- * - llmThink: Reasoning tasks (DeepSeek R1)
- * - llmFast: Classification/verification (DeepSeek V3.2 - faster & cheaper than R1)
- * - llmVision: Image analysis (Qwen-VL)
+ * - llmThink: Reasoning tasks (GLM-4.6 → Qwen 72B fallback)
+ * - llmFast: Classification/verification (GLM-4.6 → Qwen fallbacks)
+ * - llmVision: Image analysis (GLM-4.6V)
  */
 
 import { InferenceClient } from "@huggingface/inference";
 import { llmLog } from "../logger.ts";
 
 const HF_TOKEN = process.env.HF_TOKEN;
+const ZAI_API_KEY = process.env.ZAI_API_KEY;
+const ZAI_BASE_URL = process.env.ZAI_BASE_URL || "https://api.z.ai/api/paas/v4";
 
 if (!HF_TOKEN) {
-  llmLog.warn("HF_TOKEN not set. LLM features will not work.");
+  llmLog.warn("HF_TOKEN not set. HuggingFace fallback will not work.");
+}
+
+if (!ZAI_API_KEY) {
+  llmLog.warn("ZAI_API_KEY not set. Primary LLM (GLM) will not work.");
 }
 
 export const hf = new InferenceClient(HF_TOKEN);
@@ -25,25 +31,22 @@ export const hf = new InferenceClient(HF_TOKEN);
 // =====================================================
 
 export const MODELS = {
-  // Reasoning model (DeepSeek R1 via Novita) - $0.56/$2.00 per 1M
-  DEEPSEEK_R1: "deepseek-ai/DeepSeek-R1",
-  // Fast chat model (DeepSeek V3 via Novita) - $0.27/$0.40 per 1M
-  DEEPSEEK_V3: "deepseek-ai/DeepSeek-V3",
-  // Light model (Qwen 2.5 72B via Nebius)
+  // Z.AI models (primary) - $5/$10 per 1M
+  GLM_46: "glm-4.6",
+  GLM_46V: "glm-4.6v",
+  // HuggingFace fallbacks
   QWEN_FAST: "Qwen/Qwen2.5-72B-Instruct",
-  // Small fallback (Qwen3 4B via nscale)
   QWEN_SMALL: "Qwen/Qwen3-4B-Instruct-2507",
-  // Vision model (Qwen-VL via Novita)
-  QWEN_VL: "Qwen/Qwen2.5-VL-72B-Instruct",
   // Zero-shot classification
   BART_MNLI: "facebook/bart-large-mnli",
 } as const;
 
 type HFProvider = "nebius" | "nscale" | "novita" | "fireworks-ai" | "together" | "groq" | "sambanova";
+type Provider = HFProvider | "zai";
 
 interface ProviderConfig {
   model: string;
-  provider: HFProvider;
+  provider: Provider;
   retries: number;
 }
 
@@ -54,18 +57,18 @@ const LIGHT_PROVIDERS: ProviderConfig[] = [
 ];
 
 const THINK_PROVIDERS: ProviderConfig[] = [
-  { model: MODELS.DEEPSEEK_R1, provider: "novita", retries: 3 },
+  { model: MODELS.GLM_46, provider: "zai", retries: 3 },
   { model: MODELS.QWEN_FAST, provider: "nebius", retries: 2 }, // fallback to non-reasoning
 ];
 
 const FAST_PROVIDERS: ProviderConfig[] = [
-  { model: MODELS.DEEPSEEK_V3, provider: "novita", retries: 3 },
+  { model: MODELS.GLM_46, provider: "zai", retries: 3 },
   { model: MODELS.QWEN_FAST, provider: "nebius", retries: 2 },
   { model: MODELS.QWEN_SMALL, provider: "nscale", retries: 2 },
 ];
 
 const VISION_PROVIDERS: ProviderConfig[] = [
-  { model: MODELS.QWEN_VL, provider: "novita", retries: 3 },
+  { model: MODELS.GLM_46V, provider: "zai", retries: 3 },
 ];
 
 // =====================================================
@@ -152,6 +155,52 @@ export interface LLMOptions {
 }
 
 // =====================================================
+// Z.AI Client
+// =====================================================
+
+interface ZAIResponse {
+  choices: Array<{
+    message: {
+      content: string;
+    };
+  }>;
+}
+
+export async function callZAI(
+  model: string,
+  messages: LLMMessage[],
+  maxTokens: number,
+  temperature: number
+): Promise<string> {
+  if (!ZAI_API_KEY) {
+    throw new Error("ZAI_API_KEY not set");
+  }
+
+  const response = await fetch(`${ZAI_BASE_URL}/v1/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${ZAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      max_tokens: maxTokens,
+      temperature,
+    }),
+    signal: AbortSignal.timeout(60000), // 60s timeout
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Z.AI error ${response.status}: ${text.slice(0, 200)}`);
+  }
+
+  const data = (await response.json()) as ZAIResponse;
+  return data.choices[0]?.message?.content || "";
+}
+
+// =====================================================
 // Core LLM Functions
 // =====================================================
 
@@ -168,14 +217,20 @@ async function callWithFallback(
     try {
       const result = await withRetry(
         async () => {
-          const response = await hf.chatCompletion({
-            model: config.model,
-            provider: config.provider,
-            messages: messages as Parameters<typeof hf.chatCompletion>[0]["messages"],
-            max_tokens: maxTokens,
-            temperature,
-          });
-          return response.choices[0]?.message?.content || "";
+          if (config.provider === "zai") {
+            // Z.AI direct call
+            return await callZAI(config.model, messages, maxTokens, temperature);
+          } else {
+            // HuggingFace provider call
+            const response = await hf.chatCompletion({
+              model: config.model,
+              provider: config.provider as HFProvider,
+              messages: messages as Parameters<typeof hf.chatCompletion>[0]["messages"],
+              max_tokens: maxTokens,
+              temperature,
+            });
+            return response.choices[0]?.message?.content || "";
+          }
         },
         config.retries,
         1000
@@ -210,33 +265,37 @@ export async function llmLight(options: LLMOptions): Promise<string> {
 /**
  * Think tasks: reasoning with chain-of-thought
  * Best for: keyword generation, complex analysis, planning
- * Models: DeepSeek R1 → Qwen 72B
+ * Models: GLM-4.6 → Qwen 72B
  */
 export async function llmThink(options: LLMOptions): Promise<string> {
   const { messages, maxTokens = 2500, temperature = 0.6 } = options;
   const response = await callWithFallback(THINK_PROVIDERS, messages, maxTokens, temperature, "think");
-  // Strip <think>...</think> blocks from DeepSeek R1
+  // Strip <think>...</think> blocks from reasoning models
   return response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 }
 
 /**
  * Fast tasks: quick classification/verification
  * Best for: message verification, yes/no decisions, simple classification
- * Models: DeepSeek V3.2 → Qwen 72B → Qwen 4B
+ * Models: GLM-4.6 → Qwen 72B → Qwen 4B
  */
 export async function llmFast(options: LLMOptions): Promise<string> {
   const { messages, maxTokens = 500, temperature = 0.1 } = options;
-  return callWithFallback(FAST_PROVIDERS, messages, maxTokens, temperature, "fast");
+  const response = await callWithFallback(FAST_PROVIDERS, messages, maxTokens, temperature, "fast");
+  // Strip <think>...</think> blocks (GLM may include them)
+  return response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 }
 
 /**
  * Vision tasks: image analysis
  * Best for: photo verification, image description
- * Models: Qwen-VL
+ * Models: GLM-4.6V
  */
 export async function llmVision(options: LLMOptions): Promise<string> {
   const { messages, maxTokens = 1000, temperature = 0.3 } = options;
-  return callWithFallback(VISION_PROVIDERS, messages, maxTokens, temperature, "vision");
+  const response = await callWithFallback(VISION_PROVIDERS, messages, maxTokens, temperature, "vision");
+  // Strip <think>...</think> blocks (GLM-V may include them)
+  return response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 }
 
 // =====================================================
@@ -479,10 +538,10 @@ export async function checkLLMHealth(): Promise<boolean> {
 export const llmChat = llmLight;
 
 /** @deprecated Use verifyMessage instead */
-export const verifyWithDeepSeek = verifyMessage;
+export const verifyWithLLM = verifyMessage;
 
 /** @deprecated Use verifyMessageBatch instead */
-export const verifyBatchWithDeepSeek = verifyMessageBatch;
+export const verifyBatchWithLLM = verifyMessageBatch;
 
 /** @deprecated Use LLMMessage instead */
 export type ChatMessage = LLMMessage;

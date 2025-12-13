@@ -1,4 +1,4 @@
-import { hf, MODELS, withRetry } from "./index.ts";
+import { llmThink } from "./index.ts";
 import { llmLog } from "../logger.ts";
 
 const SYSTEM_PROMPT = `You are an assistant for setting up Telegram group monitoring.
@@ -40,25 +40,19 @@ export interface ClarificationResult {
 }
 
 /**
- * Generate clarification questions for a user query using DeepSeek R1
+ * Generate clarification questions for a user query using GLM-4.6
  */
 export async function generateClarificationQuestions(query: string): Promise<string[]> {
-  const response = await withRetry(async () => {
-    const result = await hf.chatCompletion({
-      model: MODELS.DEEPSEEK_R1,
-      provider: "novita",
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: query },
-      ],
-      max_tokens: 1000,
-      temperature: 0.7,
-    });
-    return result.choices[0]?.message?.content || "";
+  const response = await llmThink({
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: query },
+    ],
+    maxTokens: 1000,
+    temperature: 0.7,
   });
 
-  // DeepSeek R1 may include <think>...</think> reasoning blocks — strip them
-  const cleanedResponse = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  const cleanedResponse = response.trim();
 
   // Parse JSON from response
   const jsonMatch = cleanedResponse.match(/\{[\s\S]*\}/);
@@ -138,22 +132,16 @@ export interface QueryAnalysisResult {
 export async function analyzeQueryAndGenerateQuestions(
   query: string
 ): Promise<QueryAnalysisResult> {
-  const response = await withRetry(async () => {
-    const result = await hf.chatCompletion({
-      model: MODELS.DEEPSEEK_R1,
-      provider: "novita",
-      messages: [
-        { role: "system", content: ANALYZE_QUERY_PROMPT },
-        { role: "user", content: query },
-      ],
-      max_tokens: 800,
-      temperature: 0.5,
-    });
-    return result.choices[0]?.message?.content || "";
+  const response = await llmThink({
+    messages: [
+      { role: "system", content: ANALYZE_QUERY_PROMPT },
+      { role: "user", content: query },
+    ],
+    maxTokens: 800,
+    temperature: 0.5,
   });
 
-  // Strip thinking tags
-  const cleaned = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  const cleaned = response.trim();
 
   llmLog.debug({ query, response: cleaned.slice(0, 400) }, "analyzeQuery raw response");
 
