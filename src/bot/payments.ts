@@ -14,6 +14,58 @@ import { botLog } from "../logger.ts";
 import { startInteractivePublication } from "../publisher/interactive.ts";
 import { getTranslator, getTranslatorForLocale, getUserLocale } from "../i18n/index.ts";
 
+/**
+ * Process referral bonus for a payment
+ * Awards 10% (ceil) of the payment amount to the referrer
+ */
+async function processReferralBonus(
+  bot: Bot,
+  telegramId: number,
+  chargeId: string,
+  amount: number
+): Promise<void> {
+  try {
+    // Get user's referrer
+    const userId = queries.getUserIdByTelegramId(telegramId);
+    if (!userId) return;
+
+    const referrer = queries.getReferrerByUserId(userId);
+    if (!referrer) return;
+
+    // Calculate bonus (10% rounded up)
+    const bonus = Math.ceil(amount * 0.1);
+    if (bonus <= 0) return;
+
+    // Get payment ID
+    const payment = queries.getPaymentByChargeId(chargeId);
+    if (!payment) return;
+
+    // Add bonus to referrer's balance
+    queries.addBonus(referrer.telegram_id, bonus);
+
+    // Log the earning
+    queries.logReferralEarning(referrer.id, userId, payment.id, bonus);
+
+    // Notify referrer
+    const referrerTr = getTranslator(referrer.telegram_id);
+    const payerUser = queries.getUserByTelegramId(telegramId);
+    const payerName = payerUser?.first_name || payerUser?.username || "User";
+
+    try {
+      await bot.api.sendMessage({
+        chat_id: referrer.telegram_id,
+        text: referrerTr("referral_earned", { amount: bonus, name: payerName }),
+      });
+    } catch {
+      // Referrer may have blocked the bot
+    }
+
+    botLog.info({ referrerId: referrer.telegram_id, refereeId: telegramId, bonus }, "Referral bonus awarded");
+  } catch (error) {
+    botLog.error({ error, telegramId, chargeId }, "Failed to process referral bonus");
+  }
+}
+
 // Plan prices in Stars
 export const PLAN_PRICES = {
   basic: 50,
@@ -114,7 +166,16 @@ export function checkGroupLimits(
 }
 
 /**
+ * Result of payment attempt - either paid with bonus or invoice sent
+ */
+export type PaymentResult =
+  | { type: "bonus_paid"; amountUsed: number; remaining: number }
+  | { type: "invoice_sent" }
+  | { type: "error"; message: string };
+
+/**
  * Create invoice for one-time payment
+ * If user has enough bonus balance, uses bonus instead and returns immediately
  */
 export async function sendPaymentInvoice(
   bot: Bot,
@@ -126,7 +187,38 @@ export async function sendPaymentInvoice(
     amount: number;
     payload: PaymentPayload;
   }
-): Promise<void> {
+): Promise<PaymentResult> {
+  const tr = getTranslator(chatId);
+
+  // Check if user has enough bonus to cover the payment
+  const bonusBalance = queries.getBonusBalance(chatId);
+
+  if (bonusBalance >= options.amount) {
+    // Use bonus instead of creating invoice
+    queries.subtractBonus(chatId, options.amount);
+
+    // Log as "free" payment (bonus)
+    queries.logPayment({
+      telegramId: chatId,
+      chargeId: `bonus_${Date.now()}_${chatId}`,
+      type: options.payload.type,
+      amount: 0, // No real Stars paid
+      payload: { ...options.payload, bonusUsed: options.amount },
+    });
+
+    const remaining = bonusBalance - options.amount;
+
+    // Send confirmation message
+    await bot.api.sendMessage({
+      chat_id: chatId,
+      text: tr("bonus_applied", { amount: options.amount }) + "\n" +
+            tr("referral_balance", { amount: remaining }),
+    });
+
+    return { type: "bonus_paid", amountUsed: options.amount, remaining };
+  }
+
+  // Not enough bonus, send regular invoice
   await bot.api.sendInvoice({
     chat_id: chatId,
     title: options.title,
@@ -135,6 +227,8 @@ export async function sendPaymentInvoice(
     currency: "XTR",
     prices: [{ label: options.title, amount: options.amount }],
   });
+
+  return { type: "invoice_sent" };
 }
 
 /**
@@ -253,6 +347,9 @@ export async function handleSuccessfulPayment(
       amount,
       payload: { ...payload },
     });
+
+    // Process referral bonus
+    await processReferralBonus(bot, telegramId, chargeId, amount);
 
     switch (payload.type) {
       case "subscription": {

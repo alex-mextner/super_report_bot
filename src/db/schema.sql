@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS users (
   language TEXT DEFAULT 'ru' CHECK (language IN ('ru', 'en', 'rs')),
   region_code TEXT,                 -- 'belgrade', 'novi_sad', etc.
   free_pub_credits INTEGER DEFAULT 0, -- free publication credits (given when all posts fail)
+  -- Referral fields
+  referred_by INTEGER REFERENCES users(id),  -- who invited this user
+  bonus_balance INTEGER DEFAULT 0,           -- bonus Stars from referrals
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -310,6 +313,19 @@ CREATE TABLE IF NOT EXISTS payments (
 
 CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
 CREATE INDEX IF NOT EXISTS idx_payments_type ON payments(type);
+
+-- Referral earnings (bonus from referral purchases)
+CREATE TABLE IF NOT EXISTS referral_earnings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  referrer_id INTEGER NOT NULL REFERENCES users(id),
+  referee_id INTEGER NOT NULL REFERENCES users(id),
+  payment_id INTEGER NOT NULL REFERENCES payments(id),
+  amount INTEGER NOT NULL,              -- bonus amount in Stars
+  created_at INTEGER DEFAULT (unixepoch())
+);
+
+CREATE INDEX IF NOT EXISTS idx_referral_earnings_referrer ON referral_earnings(referrer_id);
+CREATE INDEX IF NOT EXISTS idx_referral_earnings_referee ON referral_earnings(referee_id);
 
 -- ===========================================
 -- Region Presets (flea markets by region)

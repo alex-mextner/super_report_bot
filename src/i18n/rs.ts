@@ -645,6 +645,26 @@ Bot koristi AI, ključne reči i semantičku analizu — pronalazi objave sa gre
   recovery_examples_skipped: "⏳ Bot je restartovan. Preskačemo primere, ključne reči su spremne:",
 
   // Deep analysis plurals (format: one|few|many)
+
+  // Referrals
+  referral_new_user: "🎉 Novi korisnik se pridružio preko tvog linka: {name}",
+  referral_title: "🔗 *Referalni program*",
+  referral_link: "Tvoj link: `{link}`",
+  referral_balance: "💰 Bonus stanje: {amount}⭐",
+  referral_stats: "👥 Pozvano: {count} | Zarađeno: {total}⭐",
+  referral_info: "Pozovi prijatelje i zaradi 10% od njihovih kupovina!",
+  referral_earned: "🎁 Zaradio si {amount}⭐ bonus od kupovine korisnika {name}!",
+  bonus_applied: "✅ Iskorišćeno {amount}⭐ bonusa",
+  bonus_offer: "💰 Imaš {balance}⭐ bonusa. Iskoristiti?",
+  bonus_use_full: "Iskoristi {amount}⭐ (besplatno)",
+  bonus_use_partial: "Iskoristi {bonus}⭐ (plati {remaining}⭐)",
+  bonus_skip: "Ne koristi bonus",
+
+  // Tips (shown during LLM processing)
+  tip_referral: "💡 Pozovi prijatelje i zaradi 10% od njihovih kupovina! /referral",
+  tip_plans: "💡 Na Pro planu analiza košta samo 10⭐ umesto 20⭐",
+  tip_usecase_rare: "💡 Bot je odličan za pronalaženje retkih stvari — prati grupe 24/7",
+  tip_usecase_price: "💡 Prati cene: napravi pretplatu za 'iPhone ispod 300€'",
 };
 
 export default rs;

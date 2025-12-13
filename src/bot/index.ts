@@ -216,9 +216,18 @@ function buildPromoLink(groupId: number, messageId: number): string {
   return `https://t.me/c/${cleanChatId}/${messageId}`;
 }
 
+// Tips to show during LLM processing (20% chance if no promo)
+const TIP_KEYS = [
+  "tip_referral",
+  "tip_plans",
+  "tip_usecase_rare",
+  "tip_usecase_price",
+] as const;
+
 /**
- * Send progress message with optional promotion
+ * Send progress message with optional promotion or tip
  * Shows unseen promotion to user while they wait for LLM response
+ * If no promo, 20% chance to show a random tip
  */
 async function sendProgressWithPromo(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -248,6 +257,15 @@ async function sendProgressWithPromo(
       `👉 ${link}`;
 
     return context.send(fullText, { link_preview_options: { is_disabled: true } });
+  }
+
+  // No promo - 20% chance to show a random tip
+  if (Math.random() < 0.2) {
+    const tipIndex = Math.floor(Math.random() * TIP_KEYS.length);
+    const tipKey = TIP_KEYS[tipIndex]!;
+    const tip = tr(tipKey);
+    const fullText = `${text}\n\n${tip}`;
+    return context.send(fullText);
   }
 
   return context.send(text);
@@ -668,11 +686,68 @@ bot.command("start", async (context) => {
   const userId = context.from?.id;
   if (!userId) return;
 
+  // Check if this is a new user before creating
+  const existingUser = queries.getUserByTelegramId(userId);
+  const isNewUser = !existingUser;
+
   queries.getOrCreateUser(userId, context.from?.firstName, context.from?.username);
   ensureIdle(userId);
 
   const tr = getTranslator(userId);
+
+  // Handle referral deep link: /start ref_123456789
+  const args = context.args;
+  if (isNewUser && args?.startsWith("ref_")) {
+    const referrerTelegramIdStr = args.slice(4); // Remove "ref_" prefix
+    const referrerTelegramId = parseInt(referrerTelegramIdStr, 10);
+
+    if (!isNaN(referrerTelegramId) && referrerTelegramId !== userId) {
+      const referrerExists = queries.getUserByTelegramId(referrerTelegramId);
+      if (referrerExists) {
+        const success = queries.setReferrer(userId, referrerTelegramId);
+        if (success) {
+          // Notify referrer about new user
+          const referrerTr = getTranslator(referrerTelegramId);
+          const newUserName = context.from?.firstName || context.from?.username || "User";
+          try {
+            await bot.api.sendMessage({
+              chat_id: referrerTelegramId,
+              text: referrerTr("referral_new_user", { name: newUserName }),
+            });
+          } catch {
+            // Referrer may have blocked the bot
+          }
+        }
+      }
+    }
+  }
+
   await context.send(tr("cmd_start_welcome"));
+});
+
+// /referral command - show referral link and stats
+bot.command("referral", async (context) => {
+  const userId = context.from?.id;
+  if (!userId) return;
+
+  queries.getOrCreateUser(userId, context.from?.firstName, context.from?.username);
+  const tr = getTranslator(userId);
+
+  // Get bot username for the link
+  const botInfo = await bot.api.getMe({});
+  const botUsername = botInfo.username;
+
+  const referralLink = `https://t.me/${botUsername}?start=ref_${userId}`;
+  const balance = queries.getBonusBalance(userId);
+  const stats = queries.getReferralStats(userId);
+
+  const message = `${tr("referral_title")}\n\n` +
+    `${tr("referral_link", { link: referralLink })}\n\n` +
+    `${tr("referral_balance", { amount: balance })}\n` +
+    `${tr("referral_stats", { count: stats.referral_count, total: stats.total_earned })}\n\n` +
+    `${tr("referral_info")}`;
+
+  await context.send(message, { parse_mode: "Markdown" });
 });
 
 // /list command - show user subscriptions
@@ -4428,7 +4503,7 @@ ${tr("miss_clarify_or_apply")}`,
       await context.answer({ text: tr("pay_creating_invoice") });
 
       try {
-        await sendPaymentInvoice(bot, userId, {
+        const result = await sendPaymentInvoice(bot, userId, {
           type: "preset",
           title: tr("preset_buy_title", { name: preset.region_name }),
           description: accessType === "lifetime"
@@ -4441,6 +4516,20 @@ ${tr("miss_clarify_or_apply")}`,
             accessType,
           },
         });
+
+        // If paid with bonus, grant access immediately
+        if (result.type === "bonus_paid") {
+          const expiresAt =
+            accessType === "subscription"
+              ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+              : null;
+          queries.grantPresetAccess(userId, presetId, accessType, expiresAt);
+          await context.editText(
+            accessType === "subscription"
+              ? tr("pay_preset_access_month", { name: preset.region_name })
+              : tr("pay_preset_access_lifetime", { name: preset.region_name })
+          );
+        }
       } catch (error) {
         botLog.error({ error }, "Failed to send preset invoice");
         await context.editText(tr("pay_invoice_error"));
@@ -4540,10 +4629,10 @@ ${tr("miss_clarify_or_apply")}`,
           await editCallbackMessage(context, tr("analysis_error"));
         }
       } else {
-        // Paid analysis - send invoice
+        // Paid analysis - send invoice or use bonus
         await context.answer({ text: tr("promo_opening_payment") });
 
-        await sendPaymentInvoice(bot, userId, {
+        const result = await sendPaymentInvoice(bot, userId, {
           type: "analyze",
           title: tr("analysis_title"),
           description: tr("analysis_desc"),
@@ -4554,6 +4643,31 @@ ${tr("miss_clarify_or_apply")}`,
             groupId,
           },
         });
+
+        // If paid with bonus, run analysis immediately
+        if (result.type === "bonus_paid") {
+          await editCallbackMessage(context, tr("analysis_product_analyzing"));
+
+          try {
+            const { analyzeWithMedia } = await import("../llm/deep-analyze.ts");
+            const { formatDeepAnalysisHtml } = await import("./formatters.ts");
+
+            const analysisResult = await analyzeWithMedia({
+              text: msg.text,
+              messageId,
+              groupId,
+              groupTitle: msg.group_title,
+            });
+
+            const resultText = formatDeepAnalysisHtml(analysisResult);
+            await editCallbackMessage(context, resultText, { parse_mode: "HTML", link_preview_options: { is_disabled: true } });
+
+            botLog.info({ userId, messageId, groupId }, "Product analyzed (bonus)");
+          } catch (error) {
+            botLog.error({ error, userId }, "Deep analysis failed (bonus)");
+            await editCallbackMessage(context, tr("analysis_error"));
+          }
+        }
       }
       break;
     }
@@ -4704,7 +4818,7 @@ ${tr("miss_clarify_or_apply")}`,
 
       await context.answer({ text: tr("promo_opening_payment") });
 
-      await sendPaymentInvoice(bot, userId, {
+      const result = await sendPaymentInvoice(bot, userId, {
         type: "promotion_product",
         title: tr("promo_product_title", { days }),
         description: tr("promo_product_desc"),
@@ -4716,6 +4830,18 @@ ${tr("miss_clarify_or_apply")}`,
           days,
         },
       });
+
+      // If paid with bonus, create promotion immediately
+      if (result.type === "bonus_paid") {
+        queries.createPromotion({
+          telegramId: userId,
+          type: "product",
+          messageId,
+          productGroupId: groupId,
+          durationDays: days,
+        });
+        await context.editText(tr("pay_product_promo_activated", { days }));
+      }
       break;
     }
 
@@ -4745,7 +4871,7 @@ ${tr("miss_clarify_or_apply")}`,
 
       await context.answer({ text: tr("promo_opening_payment") });
 
-      await sendPaymentInvoice(bot, userId, {
+      const result = await sendPaymentInvoice(bot, userId, {
         type: "promotion_group",
         title: tr("promo_group_title_days", { days }),
         description: tr("promo_group_desc"),
@@ -4756,6 +4882,17 @@ ${tr("miss_clarify_or_apply")}`,
           days,
         },
       });
+
+      // If paid with bonus, create promotion immediately
+      if (result.type === "bonus_paid") {
+        queries.createPromotion({
+          telegramId: userId,
+          type: "group",
+          groupId,
+          durationDays: days,
+        });
+        await context.editText(tr("pay_group_promo_activated", { days }));
+      }
       break;
     }
 

@@ -645,6 +645,26 @@ The bot uses AI, keywords and semantic analysis — it finds posts with typos, i
   recovery_examples_skipped: "⏳ Bot was restarted. Skipping examples, keywords ready:",
 
   // Deep analysis plurals (format: one|other)
+
+  // Referrals
+  referral_new_user: "🎉 New user joined via your link: {name}",
+  referral_title: "🔗 *Referral Program*",
+  referral_link: "Your link: `{link}`",
+  referral_balance: "💰 Bonus balance: {amount}⭐",
+  referral_stats: "👥 Referred: {count} | Earned: {total}⭐",
+  referral_info: "Invite friends and earn 10% from their purchases!",
+  referral_earned: "🎁 You earned {amount}⭐ bonus from {name}'s purchase!",
+  bonus_applied: "✅ Used {amount}⭐ bonus",
+  bonus_offer: "💰 You have {balance}⭐ bonus. Use it?",
+  bonus_use_full: "Use {amount}⭐ (free)",
+  bonus_use_partial: "Use {bonus}⭐ (pay {remaining}⭐)",
+  bonus_skip: "Don't use bonus",
+
+  // Tips (shown during LLM processing)
+  tip_referral: "💡 Invite friends and earn 10% from their purchases! /referral",
+  tip_plans: "💡 On Pro plan, analysis costs only 10⭐ instead of 20⭐",
+  tip_usecase_rare: "💡 Bot is great for finding rare items — monitors groups 24/7",
+  tip_usecase_price: "💡 Track prices: create a subscription for 'iPhone under €300'",
 };
 
 export default en;

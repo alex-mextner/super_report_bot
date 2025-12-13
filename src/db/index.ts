@@ -484,6 +484,51 @@ const stmts = {
     `INSERT INTO subscription_feedback (subscription_id, user_id, outcome, review)
      VALUES (?, (SELECT id FROM users WHERE telegram_id = ?), ?, ?)`
   ),
+
+  // Referrals
+  setReferrer: db.prepare<void, [number, number]>(
+    `UPDATE users SET referred_by = (SELECT id FROM users WHERE telegram_id = ?)
+     WHERE telegram_id = ? AND referred_by IS NULL`
+  ),
+  getReferrer: db.prepare<{ referrer_telegram_id: number; first_name: string | null } | null, [number]>(
+    `SELECT r.telegram_id as referrer_telegram_id, r.first_name
+     FROM users u
+     JOIN users r ON u.referred_by = r.id
+     WHERE u.telegram_id = ?`
+  ),
+  getReferrerByUserId: db.prepare<{ id: number; telegram_id: number } | null, [number]>(
+    `SELECT r.id, r.telegram_id
+     FROM users u
+     JOIN users r ON u.referred_by = r.id
+     WHERE u.id = ?`
+  ),
+  getBonusBalance: db.prepare<{ bonus_balance: number }, [number]>(
+    `SELECT COALESCE(bonus_balance, 0) as bonus_balance FROM users WHERE telegram_id = ?`
+  ),
+  addBonus: db.prepare<void, [number, number]>(
+    `UPDATE users SET bonus_balance = COALESCE(bonus_balance, 0) + ? WHERE telegram_id = ?`
+  ),
+  subtractBonus: db.prepare<void, [number, number]>(
+    `UPDATE users SET bonus_balance = COALESCE(bonus_balance, 0) - ? WHERE telegram_id = ?`
+  ),
+  logReferralEarning: db.prepare<void, [number, number, number, number]>(
+    `INSERT INTO referral_earnings (referrer_id, referee_id, payment_id, amount)
+     VALUES (?, ?, ?, ?)`
+  ),
+  getReferralStats: db.prepare<{ referral_count: number; total_earned: number }, [number]>(
+    `SELECT
+       COUNT(DISTINCT re.referee_id) as referral_count,
+       COALESCE(SUM(re.amount), 0) as total_earned
+     FROM users u
+     LEFT JOIN referral_earnings re ON re.referrer_id = u.id
+     WHERE u.telegram_id = ?`
+  ),
+  getUserIdByTelegramId: db.prepare<{ id: number } | null, [number]>(
+    `SELECT id FROM users WHERE telegram_id = ?`
+  ),
+  getLastPaymentId: db.prepare<{ id: number }, []>(
+    `SELECT id FROM payments ORDER BY id DESC LIMIT 1`
+  ),
 };
 
 // Helper to parse JSON fields from subscription
@@ -2367,6 +2412,52 @@ export const queries = {
       WHERE telegram_id = ? AND free_pub_credits > 0
     `).run(telegramId);
     return result.changes > 0;
+  },
+
+  // --- Referrals ---
+
+  setReferrer(newUserTelegramId: number, referrerTelegramId: number): boolean {
+    // Don't allow self-referral
+    if (newUserTelegramId === referrerTelegramId) return false;
+
+    const result = stmts.setReferrer.run(referrerTelegramId, newUserTelegramId);
+    return result.changes > 0;
+  },
+
+  getReferrer(telegramId: number): { referrer_telegram_id: number; first_name: string | null } | null {
+    return stmts.getReferrer.get(telegramId) ?? null;
+  },
+
+  getReferrerByUserId(userId: number): { id: number; telegram_id: number } | null {
+    return stmts.getReferrerByUserId.get(userId) ?? null;
+  },
+
+  getBonusBalance(telegramId: number): number {
+    return stmts.getBonusBalance.get(telegramId)?.bonus_balance ?? 0;
+  },
+
+  addBonus(telegramId: number, amount: number): void {
+    stmts.addBonus.run(amount, telegramId);
+  },
+
+  subtractBonus(telegramId: number, amount: number): void {
+    stmts.subtractBonus.run(amount, telegramId);
+  },
+
+  logReferralEarning(referrerId: number, refereeId: number, paymentId: number, amount: number): void {
+    stmts.logReferralEarning.run(referrerId, refereeId, paymentId, amount);
+  },
+
+  getReferralStats(telegramId: number): { referral_count: number; total_earned: number } {
+    return stmts.getReferralStats.get(telegramId) ?? { referral_count: 0, total_earned: 0 };
+  },
+
+  getUserIdByTelegramId(telegramId: number): number | null {
+    return stmts.getUserIdByTelegramId.get(telegramId)?.id ?? null;
+  },
+
+  getLastPaymentId(): number | null {
+    return stmts.getLastPaymentId.get()?.id ?? null;
   },
 };
 

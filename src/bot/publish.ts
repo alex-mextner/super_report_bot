@@ -441,8 +441,8 @@ export async function handleConfirmPublication(
     return;
   }
 
-  // Send payment invoice
-  await sendPaymentInvoice(bot, userId, {
+  // Send payment invoice or use bonus
+  const result = await sendPaymentInvoice(bot, userId, {
     type: "publication",
     title: tr("pub_invoice_title"),
     description: tr("pub_invoice_desc"),
@@ -452,6 +452,12 @@ export async function handleConfirmPublication(
       publicationId,
     },
   });
+
+  // If paid with bonus, start publication immediately
+  if (result.type === "bonus_paid") {
+    const { startInteractivePublication } = await import("../publisher/interactive.ts");
+    await startInteractivePublication(bot, userId, publicationId);
+  }
 
   publicationStates.delete(userId);
 }
