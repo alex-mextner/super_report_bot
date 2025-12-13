@@ -186,6 +186,7 @@ const ru = {
   groups_none: "У тебя нет добавленных групп. Используй /addgroup для добавления.",
   groups_list_header: "Твои группы для мониторинга:",
   groups_already_added: "Эта группа уже добавлена!",
+  groups_error_already_added: "Уже добавлена",
   groups_private_need_link: "Приватная группа \"{title}\".\n\nБот не может присоединиться без invite link.\nОтправь ссылку вида t.me/+XXX или нажми Пропустить.",
   groups_select_more: "Выбери ещё группу или нажми \"Готово\":",
   groups_not_added: "Группы не добавлены. Используй /addgroup когда будешь готов.",

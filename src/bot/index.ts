@@ -971,7 +971,10 @@ bot.command("addgroup", async (context) => {
       results.push(`✅ ${result.title}`);
       addedGroups.push({ groupId: result.groupId!, groupTitle: result.title! });
     } else {
-      results.push(`❌ ${displayValue}: ${result.error}`);
+      const errorText = result.error === "already_added"
+        ? tr("groups_error_already_added")
+        : result.error;
+      results.push(`❎ ${displayValue}: ${errorText}`);
     }
   }
 
