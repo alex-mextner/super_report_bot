@@ -2223,8 +2223,31 @@ bot.on("callback_query", async (context) => {
       // Get user's groups from DB
       const userGroups = queries.getUserGroups(userId);
 
-      if (userGroups.length === 0) {
-        // No groups - create subscription without them
+      // Get region presets for user's region
+      const regionPresets = getUserRegionPresets(userId);
+
+      // Get preset group IDs and their titles
+      const presetGroupIds = new Set<number>();
+      const presetGroups: { id: number; title: string }[] = [];
+      for (const preset of regionPresets) {
+        for (const groupId of preset.groupIds) {
+          if (!presetGroupIds.has(groupId)) {
+            presetGroupIds.add(groupId);
+            const title = queries.getGroupTitle(groupId) ?? `Group ${groupId}`;
+            presetGroups.push({ id: groupId, title });
+          }
+        }
+      }
+
+      // Combine user groups + preset groups (preset groups that user hasn't added)
+      const userGroupIds = new Set(userGroups.map((g) => g.id));
+      const allGroups = [
+        ...userGroups.map((g) => ({ id: g.id, title: g.title })),
+        ...presetGroups.filter((g) => !userGroupIds.has(g.id)),
+      ];
+
+      if (allGroups.length === 0) {
+        // No groups at all - create subscription without them
         const { originalQuery, positiveKeywords, negativeKeywords, llmDescription } =
           c.pendingSub;
 
@@ -2252,22 +2275,18 @@ bot.on("callback_query", async (context) => {
         return;
       }
 
-      // Move to group selection
-      const groups = userGroups.map((g) => ({ id: g.id, title: g.title }));
-      send(userId, { type: "START_GROUP_SELECTION", available: groups });
-
-      // Get region presets for user's country
-      const regionPresets = getUserRegionPresets(userId);
+      // Move to group selection (all groups available, but UI will hide preset groups)
+      send(userId, { type: "START_GROUP_SELECTION", available: allGroups });
 
       await context.answer({ text: tr("cb_select_groups") });
       await context.editText(
         format`
 ${bold(tr("sub_select_groups"))}
 
-${groups.length}
+${allGroups.length}
         `,
         {
-          reply_markup: groupsKeyboard(groups, new Set(), regionPresets, tr),
+          reply_markup: groupsKeyboard(allGroups, new Set(), regionPresets, tr),
         }
       );
       break;

@@ -136,19 +136,24 @@ export function groupsKeyboard(
 ): InlineKeyboard {
   const kb = new InlineKeyboard();
 
+  // Collect all preset group IDs to hide them from main list
+  const presetGroupIds = new Set(regionPresets?.flatMap((p) => p.groupIds) ?? []);
+
+  // Show presets at the top with 📂 icon
   if (regionPresets && regionPresets.length > 0) {
     for (const preset of regionPresets) {
-      const availablePresetGroups = preset.groupIds.filter((id) => groups.some((g) => g.id === id));
-      const selectedPresetGroups = availablePresetGroups.filter((id) => selectedIds.has(id));
-      const allSelected = availablePresetGroups.length > 0 && selectedPresetGroups.length === availablePresetGroups.length;
+      const selectedPresetGroups = preset.groupIds.filter((id) => selectedIds.has(id));
+      const allSelected = preset.groupIds.length > 0 && selectedPresetGroups.length === preset.groupIds.length;
 
       const icon = allSelected ? "✅" : "📂";
-      kb.text(`${icon} ${preset.region_name} (${availablePresetGroups.length})`, JSON.stringify({ action: "toggle_preset", id: preset.id }));
+      kb.text(`${icon} ${preset.region_name} (${preset.groupIds.length})`, JSON.stringify({ action: "toggle_preset", id: preset.id }));
       kb.row();
     }
   }
 
+  // Show only groups that are NOT in any preset
   for (const group of groups) {
+    if (presetGroupIds.has(group.id)) continue;
     const isSelected = selectedIds.has(group.id);
     const label = isSelected ? `✅ ${group.title}` : group.title;
     kb.text(label, JSON.stringify({ action: "toggle_group", id: group.id }));
