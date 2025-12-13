@@ -85,7 +85,7 @@ import {
 } from "../utils/geo.ts";
 
 /**
- * Get region presets for user's country (for groupsKeyboard)
+ * Get region preset for user's region (for groupsKeyboard)
  */
 function getUserRegionPresets(userId: number): Array<{
   id: number;
@@ -94,7 +94,16 @@ function getUserRegionPresets(userId: number): Array<{
 }> {
   const userPlan = queries.getUserPlan(userId);
   if (!userPlan.region_code) return [];
-  return queries.getPresetsByCountry(userPlan.region_code);
+
+  const preset = queries.getPresetByCode(userPlan.region_code);
+  if (!preset) return [];
+
+  const groups = queries.getPresetGroups(preset.id);
+  return [{
+    id: preset.id,
+    region_name: preset.region_name,
+    groupIds: groups.map((g) => g.group_id),
+  }];
 }
 
 /**
@@ -4248,32 +4257,22 @@ ${tr("miss_clarify_or_apply")}`,
           await bot.api.deleteMessage({ chat_id: userId, message_id: context.message.id });
         }
 
-        if (regionCode === "rs_belgrade" || regionCode === "rs_novi_sad") {
-          // Show presets for Belgrade/Novi Sad
-          await context.answer({ text: "✅" });
-          // Map to preset code (region_presets uses belgrade/novi_sad)
-          const presetCode = regionCode === "rs_belgrade" ? "belgrade" : "novi_sad";
-          const preset = queries.getPresetByCode(presetCode);
-          if (preset) {
-            const presetGroups = queries.getPresetGroups(preset.id);
-            const groupIds = presetGroups.map((pg) => pg.group_id);
-            await bot.api.sendMessage({
-              chat_id: userId,
-              text: tr("region_saved_with_presets"),
-              reply_markup: presetsListKeyboard(
-                [{ id: preset.id, region_code: preset.region_code, region_name: preset.region_name, group_count: groupIds.length, hasAccess: true }],
-                tr
-              ),
-            });
-          } else {
-            await bot.api.sendMessage({
-              chat_id: userId,
-              text: tr("region_saved_with_presets"),
-            });
-          }
+        await context.answer({ text: "✅" });
+        const preset = queries.getPresetByCode(regionCode);
+        if (preset) {
+          // Show preset for this region
+          const presetGroups = queries.getPresetGroups(preset.id);
+          const groupIds = presetGroups.map((pg) => pg.group_id);
+          await bot.api.sendMessage({
+            chat_id: userId,
+            text: tr("region_saved_with_presets"),
+            reply_markup: presetsListKeyboard(
+              [{ id: preset.id, region_code: preset.region_code, region_name: preset.region_name, group_count: groupIds.length, hasAccess: true }],
+              tr
+            ),
+          });
         } else {
-          // "other" region - ask to use /addgroup
-          await context.answer({ text: "✅" });
+          // No preset for this region - ask to use /addgroup
           await bot.api.sendMessage({
             chat_id: userId,
             text: tr("region_other_addgroup"),
