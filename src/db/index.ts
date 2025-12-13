@@ -139,6 +139,38 @@ const stmts = {
   adminUpdateKeywords: db.prepare<void, [string, string, number]>(
     `UPDATE subscriptions SET positive_keywords = ?, negative_keywords = ? WHERE id = ?`
   ),
+  getSubscriptionMatchCounts: db.prepare<{ subscription_id: number; match_count: number }, []>(
+    `SELECT subscription_id, COUNT(*) as match_count
+     FROM found_posts_analyzes
+     WHERE result = 'matched'
+     GROUP BY subscription_id`
+  ),
+  getSubscriptionMatches: db.prepare<
+    {
+      message_id: number;
+      group_id: number;
+      group_title: string | null;
+      text: string;
+      sender_name: string | null;
+      timestamp: number;
+      analyzed_at: number;
+    },
+    [number]
+  >(
+    `SELECT
+       m.message_id,
+       m.group_id,
+       m.group_title,
+       m.text,
+       m.sender_name,
+       m.timestamp,
+       fpa.analyzed_at
+     FROM found_posts_analyzes fpa
+     JOIN messages m ON m.message_id = fpa.message_id AND m.group_id = fpa.group_id
+     WHERE fpa.subscription_id = ? AND fpa.result = 'matched'
+     ORDER BY fpa.analyzed_at DESC
+     LIMIT 50`
+  ),
 
   // Monitored groups
   getMonitoredGroups: db.prepare<MonitoredGroup, []>("SELECT * FROM monitored_groups"),
@@ -631,6 +663,23 @@ export const queries = {
 
   adminUpdateKeywords(subscriptionId: number, positive: string[], negative: string[]): void {
     stmts.adminUpdateKeywords.run(JSON.stringify(positive), JSON.stringify(negative), subscriptionId);
+  },
+
+  getSubscriptionMatchCounts(): Map<number, number> {
+    const rows = stmts.getSubscriptionMatchCounts.all();
+    return new Map(rows.map((r) => [r.subscription_id, r.match_count]));
+  },
+
+  getSubscriptionMatches(subscriptionId: number): Array<{
+    message_id: number;
+    group_id: number;
+    group_title: string | null;
+    text: string;
+    sender_name: string | null;
+    timestamp: number;
+    analyzed_at: number;
+  }> {
+    return stmts.getSubscriptionMatches.all(subscriptionId);
   },
 
   // Groups

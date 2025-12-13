@@ -6,7 +6,7 @@ import { useTelegram } from "../hooks/useTelegram";
 import { useLocale } from "../context/LocaleContext";
 import { KeywordsDisplay } from "../components/KeywordsDisplay";
 import { KeywordEditor } from "../components/KeywordEditor";
-import type { AdminSubscription, SubscriptionGroup } from "../types";
+import type { AdminSubscription, SubscriptionGroup, MatchedMessage } from "../types";
 import type { TranslationKey } from "../i18n";
 import "./AdminPage.css";
 
@@ -19,6 +19,22 @@ function formatDate(dateStr: string, locale: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatTimestamp(ts: number, locale: string): string {
+  const date = new Date(ts * 1000);
+  return date.toLocaleDateString(locale, {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function getMessageLink(groupId: number, messageId: number): string {
+  // Convert group_id to string for link (negative for supergroups)
+  const chatId = groupId < 0 ? String(groupId).replace("-100", "") : String(groupId);
+  return `https://t.me/c/${chatId}/${messageId}`;
 }
 
 function formatUser(sub: AdminSubscription): string {
@@ -101,15 +117,19 @@ interface SubscriptionRowProps {
   intlLocale: string;
   onUpdateKeywords: (id: number, positive: string[], negative: string[]) => Promise<boolean>;
   onUpdateGroups: (id: number, groups: SubscriptionGroup[]) => Promise<boolean>;
+  onFetchMatches: (id: number) => Promise<MatchedMessage[]>;
   t: (key: TranslationKey, params?: Record<string, string | number>) => string;
 }
 
-function SubscriptionRow({ sub, availableGroups, intlLocale, onUpdateKeywords, onUpdateGroups, t }: SubscriptionRowProps) {
+function SubscriptionRow({ sub, availableGroups, intlLocale, onUpdateKeywords, onUpdateGroups, onFetchMatches, t }: SubscriptionRowProps) {
   const [expanded, setExpanded] = useState(false);
   const [positive, setPositive] = useState(sub.positive_keywords);
   const [negative, setNegative] = useState(sub.negative_keywords);
   const [groups, setGroups] = useState(sub.groups);
   const [saving, setSaving] = useState(false);
+  const [matches, setMatches] = useState<MatchedMessage[] | null>(null);
+  const [loadingMatches, setLoadingMatches] = useState(false);
+  const [showMatches, setShowMatches] = useState(false);
 
   const hasChanges =
     JSON.stringify(positive) !== JSON.stringify(sub.positive_keywords) ||
@@ -138,11 +158,26 @@ function SubscriptionRow({ sub, availableGroups, intlLocale, onUpdateKeywords, o
     setGroups(sub.groups);
   };
 
+  const handleShowMatches = async () => {
+    if (showMatches) {
+      setShowMatches(false);
+      return;
+    }
+    setShowMatches(true);
+    if (matches === null) {
+      setLoadingMatches(true);
+      const data = await onFetchMatches(sub.id);
+      setMatches(data);
+      setLoadingMatches(false);
+    }
+  };
+
   return (
     <div className={`admin-sub-row ${sub.is_active ? "" : "inactive"}`}>
       <div className="admin-sub-header" onClick={() => setExpanded(!expanded)}>
         <span className="admin-sub-user">{formatUser(sub)}</span>
         <span className="admin-sub-date">{formatDate(sub.created_at, intlLocale)}</span>
+        {sub.match_count > 0 && <span className="admin-sub-badge matches">{sub.match_count}</span>}
         {!sub.is_active && <span className="admin-sub-badge inactive">OFF</span>}
         <span className={`expand-icon ${expanded ? "expanded" : ""}`}>▼</span>
       </div>
@@ -178,6 +213,41 @@ function SubscriptionRow({ sub, availableGroups, intlLocale, onUpdateKeywords, o
             <GroupEditor groups={groups} availableGroups={availableGroups} onChange={setGroups} t={t} />
           </div>
 
+          {sub.match_count > 0 && (
+            <div className="editor-section">
+              <button className="matches-toggle-btn" onClick={handleShowMatches}>
+                {showMatches ? t("hideMatches") : t("showMatches", { count: sub.match_count })}
+              </button>
+              {showMatches && (
+                <div className="matches-list">
+                  {loadingMatches ? (
+                    <div className="matches-loading">{t("loading")}</div>
+                  ) : matches && matches.length > 0 ? (
+                    matches.map((m) => (
+                      <a
+                        key={`${m.group_id}-${m.message_id}`}
+                        href={getMessageLink(m.group_id, m.message_id)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="match-item"
+                      >
+                        <div className="match-meta">
+                          <span className="match-group">{m.group_title || `#${m.group_id}`}</span>
+                          <span className="match-date">{formatTimestamp(m.timestamp, intlLocale)}</span>
+                        </div>
+                        <div className="match-text">
+                          {m.text.length > 150 ? m.text.slice(0, 150) + "..." : m.text}
+                        </div>
+                      </a>
+                    ))
+                  ) : (
+                    <div className="matches-empty">{t("noMatches")}</div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {hasChanges && (
             <div className="editor-actions">
               <button className="save-btn" onClick={handleSave} disabled={saving}>
@@ -198,7 +268,7 @@ export function AdminPage() {
   const navigate = useNavigate();
   const { webApp } = useTelegram();
   const { intlLocale, t } = useLocale();
-  const { subscriptions, loading, error, updateKeywords, updateGroups } = useAdminSubscriptions();
+  const { subscriptions, loading, error, updateKeywords, updateGroups, fetchMatches } = useAdminSubscriptions();
   const { groups: availableGroups, loading: groupsLoading, error: groupsError } = useAdminGroups();
 
   // Setup Telegram BackButton
@@ -249,6 +319,7 @@ export function AdminPage() {
             intlLocale={intlLocale}
             onUpdateKeywords={updateKeywords}
             onUpdateGroups={updateGroups}
+            onFetchMatches={fetchMatches}
             t={t}
           />
         ))}

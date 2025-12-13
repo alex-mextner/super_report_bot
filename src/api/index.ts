@@ -377,6 +377,7 @@ api.get("/admin/subscriptions", (c) => {
   }
 
   const subscriptions = queries.getAllSubscriptionsWithUsers();
+  const matchCounts = queries.getSubscriptionMatchCounts();
 
   const items = subscriptions.map((sub) => {
     const groups = queries.getSubscriptionGroups(sub.id);
@@ -395,6 +396,7 @@ api.get("/admin/subscriptions", (c) => {
         id: g.group_id,
         title: g.group_title,
       })),
+      match_count: matchCounts.get(sub.id) ?? 0,
     };
   });
 
@@ -438,6 +440,19 @@ api.put("/admin/subscriptions/:id/groups", async (c) => {
   apiLog.info({ subscriptionId: id, groupCount: body.groups.length }, "Admin updated groups");
 
   return c.json({ success: true });
+});
+
+// GET /api/admin/subscriptions/:id/matches - get matched messages (admin only)
+api.get("/admin/subscriptions/:id/matches", (c) => {
+  if (!c.get("isAdmin")) {
+    return c.json({ error: "Admin only" }, 403);
+  }
+
+  const id = Number(c.req.param("id"));
+  const matches = queries.getSubscriptionMatches(id);
+
+  apiLog.debug({ subscriptionId: id, count: matches.length }, "GET /api/admin/subscriptions/:id/matches");
+  return c.json({ items: matches });
 });
 
 // === Admin Users API ===

@@ -82,6 +82,9 @@ export const en: Translations = {
   activeCount: "{count} active",
   usersCount: "{count} users",
   groups: "Groups",
+  showMatches: "Show matches ({count})",
+  hideMatches: "Hide matches",
+  noMatches: "No matches found",
 
   // AnalyticsPage
   generatingAnalytics: "Generating analytics...",

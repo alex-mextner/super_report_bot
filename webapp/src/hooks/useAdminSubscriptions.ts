@@ -4,6 +4,8 @@ import type {
   AdminSubscription,
   AdminSubscriptionsResponse,
   SubscriptionGroup,
+  MatchedMessage,
+  MatchedMessagesResponse,
 } from "../types";
 
 export function useAdminSubscriptions() {
@@ -78,6 +80,18 @@ export function useAdminSubscriptions() {
     []
   );
 
+  const fetchMatches = useCallback(async (subscriptionId: number): Promise<MatchedMessage[]> => {
+    try {
+      const data = await apiClient<MatchedMessagesResponse>(
+        `/api/admin/subscriptions/${subscriptionId}/matches`
+      );
+      return data.items;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load matches");
+      return [];
+    }
+  }, []);
+
   return {
     subscriptions,
     loading,
@@ -85,5 +99,6 @@ export function useAdminSubscriptions() {
     refetch: fetchSubscriptions,
     updateKeywords,
     updateGroups,
+    fetchMatches,
   };
 }

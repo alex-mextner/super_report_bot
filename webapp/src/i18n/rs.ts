@@ -82,6 +82,9 @@ export const rs: Translations = {
   activeCount: "{count} aktivnih",
   usersCount: "{count} korisnika",
   groups: "Grupe",
+  showMatches: "Prikaži ({count})",
+  hideMatches: "Sakrij",
+  noMatches: "Nema pronađenih",
 
   // AnalyticsPage
   generatingAnalytics: "Generisanje analitike...",

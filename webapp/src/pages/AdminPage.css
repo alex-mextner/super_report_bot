@@ -97,6 +97,11 @@
   color: #fff;
 }
 
+.admin-sub-badge.matches {
+  background: var(--tg-theme-button-color, #007aff);
+  color: var(--tg-theme-button-text-color, #fff);
+}
+
 .expand-icon {
   font-size: 10px;
   color: var(--tg-theme-hint-color, #999);
@@ -297,4 +302,77 @@
 .reset-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* Matches section */
+.matches-toggle-btn {
+  padding: 8px 12px;
+  border: 1px solid var(--tg-theme-button-color, #007aff);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--tg-theme-button-color, #007aff);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.matches-toggle-btn:hover {
+  background: var(--tg-theme-button-color, #007aff);
+  color: var(--tg-theme-button-text-color, #fff);
+}
+
+.matches-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.matches-loading,
+.matches-empty {
+  font-size: 13px;
+  color: var(--tg-theme-hint-color, #999);
+  font-style: italic;
+  padding: 8px;
+  text-align: center;
+}
+
+.match-item {
+  display: block;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--tg-theme-bg-color, #fff);
+  text-decoration: none;
+  border: 1px solid var(--tg-theme-hint-color, #ddd);
+}
+
+.match-item:hover {
+  border-color: var(--tg-theme-button-color, #007aff);
+}
+
+.match-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.match-group {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--tg-theme-link-color, #007aff);
+}
+
+.match-date {
+  font-size: 11px;
+  color: var(--tg-theme-hint-color, #999);
+}
+
+.match-text {
+  font-size: 13px;
+  color: var(--tg-theme-text-color, #000);
+  line-height: 1.4;
+  word-break: break-word;
 }

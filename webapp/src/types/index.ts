@@ -84,8 +84,23 @@ export interface AdminSubscription extends Subscription {
   telegram_id: number;
   first_name: string | null;
   username: string | null;
+  match_count: number;
 }
 
 export interface AdminSubscriptionsResponse {
   items: AdminSubscription[];
+}
+
+export interface MatchedMessage {
+  message_id: number;
+  group_id: number;
+  group_title: string | null;
+  text: string;
+  sender_name: string | null;
+  timestamp: number;
+  analyzed_at: number;
+}
+
+export interface MatchedMessagesResponse {
+  items: MatchedMessage[];
 }

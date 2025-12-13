@@ -81,6 +81,9 @@ export const ru = {
   activeCount: "{count} активных",
   usersCount: "{count} пользователей",
   groups: "Группы",
+  showMatches: "Показать ({count})",
+  hideMatches: "Скрыть",
+  noMatches: "Совпадений нет",
 
   // AnalyticsPage
   generatingAnalytics: "Генерация аналитики...",
