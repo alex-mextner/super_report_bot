@@ -32,8 +32,8 @@ export const MODELS = {
   // Fallbacks
   QWEN_FAST: "Qwen/Qwen2.5-72B-Instruct",
   QWEN_SMALL: "Qwen/Qwen3-4B-Instruct-2507",
-  // Vision model ($0.15/M input)
-  QWEN_VL: "Qwen/Qwen2.5-VL-32B-Instruct",
+  // Vision model ($0.18/M tokens)
+  LLAMA_VISION: "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
   // Zero-shot classification (free, multilingual incl. Russian)
   XLM_ROBERTA_XNLI: "joeddav/xlm-roberta-large-xnli",
 } as const;
@@ -64,7 +64,7 @@ const FAST_PROVIDERS: ProviderConfig[] = [
 ];
 
 const VISION_PROVIDERS: ProviderConfig[] = [
-  { model: MODELS.QWEN_VL, provider: "together", retries: 3 },
+  { model: MODELS.LLAMA_VISION, provider: "together", retries: 3 },
 ];
 
 // =====================================================
@@ -233,7 +233,7 @@ export async function llmFast(options: LLMOptions): Promise<string> {
 /**
  * Vision tasks: image analysis
  * Best for: photo verification, image description
- * Models: Qwen3-VL 32B ($0.15/M input)
+ * Models: Llama 3.2 11B Vision ($0.18/M tokens)
  */
 export async function llmVision(options: LLMOptions): Promise<string> {
   const { messages, maxTokens = 1000, temperature = 0.3 } = options;

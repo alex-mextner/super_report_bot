@@ -7,7 +7,7 @@ describe("MODELS", () => {
     expect(MODELS.QWEN_7B).toBe("Qwen/Qwen2.5-7B-Instruct");
     expect(MODELS.QWEN_FAST).toBe("Qwen/Qwen2.5-72B-Instruct");
     expect(MODELS.QWEN_SMALL).toBe("Qwen/Qwen3-4B-Instruct-2507");
-    expect(MODELS.QWEN_VL).toBe("Qwen/Qwen2.5-VL-32B-Instruct");
+    expect(MODELS.LLAMA_VISION).toBe("meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo");
     expect(MODELS.XLM_ROBERTA_XNLI).toBe("joeddav/xlm-roberta-large-xnli");
   });
 });
