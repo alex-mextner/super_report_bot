@@ -5,8 +5,6 @@ const en: Translations = {
   // Language selection
   lang_select: "Choose language:",
   lang_changed: "Language changed",
-  lang_current: "Current language: {name}",
-
   // Commands
   cmd_start_welcome: `Hi! I'll help you find listings in Telegram groups.
 
@@ -21,15 +19,12 @@ Describe what you're looking for — I'll generate keywords and monitor groups.`
   // Subscription flow
   sub_generating_keywords: "Generating keywords...",
   sub_no_examples: "No examples found, generating keywords...",
-  sub_keywords_generated: "Keywords generated:",
-  sub_confirm_keywords: "Confirm keywords or adjust:",
   sub_confirm_or_cancel: "Confirm or cancel:",
   sub_confirm_or_adjust: "Confirm or adjust parameters:",
   sub_select_groups: "Select groups to monitor:",
   sub_created: "Subscription created!",
   sub_paused: "Subscription paused",
   sub_resumed: "Subscription resumed",
-  sub_deleted: "Subscription deleted",
   sub_not_found: "Subscription not found",
   sub_session_expired: "Session expired. Send a new query.",
 
@@ -102,7 +97,6 @@ Describe what you're looking for — I'll generate keywords and monitor groups.`
   kb_promote_price: "🚀 Promote — {n}⭐",
   kb_promote_group_admin: "🚀 Promote group (admin)",
   kb_promote_group_price: "🚀 Promote group — {n}⭐",
-  kb_days: "{n} day|{n} days",
   kb_days_price: "{days} — {price}⭐",
 
   // Keyboards - presets
@@ -120,32 +114,15 @@ Describe what you're looking for — I'll generate keywords and monitor groups.`
   kb_use_free_pub: "🎁 Use free publication",
 
   // Notifications
-  notif_match_found: "Match found!",
   notif_delayed: "This notification was delayed by {minutes} min. Get instant with Basic!",
 
   // Errors
-  err_unauthorized: "Access denied",
-  err_something_wrong: "Something went wrong. Try again.",
-  err_group_not_found: "Group not found",
-  err_already_monitoring: "This group is already being monitored",
-
   // Plurals (format: one|other)
   groups_count: "{n} group|{n} groups",
-  groups_added_count: "{n} group added|{n} groups added",
   messages_count: "{n} message|{n} messages",
-  subscriptions_count: "{n} subscription|{n} subscriptions",
-
   // Recovery
-  recovery_bot_restarted: "Bot was restarted, resuming operation...",
-
   // Payments
-  pay_premium_info: "Premium gives unlimited subscriptions and instant notifications.",
-  pay_success: "Payment successful!",
-  pay_cancelled: "Payment cancelled",
-
   // Misc
-  loading: "Loading...",
-  empty_list: "List is empty",
   yes: "Yes",
   no: "No",
 
@@ -160,29 +137,6 @@ Describe what you're looking for — I'll generate keywords and monitor groups.`
   analysis_generating_with_ratings: "Generating keywords based on your ratings...",
 
   // Commands extended
-  cmd_help_extended: `Usage examples:
-
-• Finding clients — "looking for a repair technician"
-• Monitoring news — "frontend developer vacancies"
-
-How to start:
-Just describe what you're looking for, and the bot will create a subscription.
-
-Commands:
-/start — start
-/list — my subscriptions
-/addgroup — add group
-/groups — my groups
-/lang — change language
-/settings — settings
-/premium — pricing`,
-
-  cmd_how_it_works: `How the bot works:
-1. Describe what you're looking for
-2. Bot generates keywords
-3. Select groups to monitor
-4. Receive match notifications`,
-
   // List command
   list_no_subscriptions: "You don't have any subscriptions yet. Describe what you're looking for.",
   list_sub_header: "Subscription #{id}{pause}",
@@ -220,9 +174,7 @@ Commands:
   groups_none: "You don't have any groups added. Use /addgroup to add.",
   groups_list_header: "Your groups for monitoring:",
   groups_already_added: "This group is already added!",
-  groups_need_invite: "Bot cannot join without invite link.\nSend a link like t.me/+XXX or click Skip.",
   groups_private_need_link: "Private group \"{title}\".\n\nBot cannot join without invite link.\nSend a link like t.me/+XXX or click Skip.",
-  groups_already_exists: "Already added",
   groups_select_more: "Select another group or click \"Done\":",
   groups_not_added: "No groups added. Use /addgroup when ready.",
   groups_added_processing: "{n} group added. Processing your request...|{n} groups added. Processing your request...",
@@ -232,7 +184,6 @@ Commands:
   groups_skipped: "Group skipped.",
   groups_select_for_monitoring: "Select groups to monitor:",
   groups_selected_count: "Selected: {selected} of {total}",
-  groups_add_error: "Failed to add group. Use /addgroup.",
   groups_adding: "Adding group...",
 
   // Metadata
@@ -247,10 +198,6 @@ Commands:
   meta_currency_error: "Can't recognize the currency. Try the code (EUR, RSD) or name (euro, dinar)",
   meta_confirmed: "Confirmed",
   meta_enter_value: "Enter value",
-  meta_enter_country: "Enter country (e.g., Serbia, Russia, Montenegro):",
-  meta_enter_city: "Enter city (e.g., Belgrade, Moscow):",
-  meta_enter_currency: "Enter currency (e.g., dinar, euro, ruble):",
-
   // Subscription limits
   sub_limit_reached: "⚠️ Subscription limit reached",
   sub_limit_your_plan: "Your plan: {plan}",
@@ -272,15 +219,8 @@ Commands:
   kw_word_deleted: "Word deleted",
   kw_added: "✅ Added: {added}\nCurrent: {current}",
   kw_description_updated: "✅ Description updated",
-  kw_current: "Current:",
-  kw_send_to_add: "Send words to add, separated by comma:",
   kw_no_words_to_delete: "No words to delete",
   kw_select_words: "Select words",
-  kw_description_llm: "LLM Description:",
-  kw_regenerated: "Regenerated keywords:",
-  kw_description: "Description:",
-  kw_keywords: "Keywords:",
-
   // AI edit
   ai_correcting: "Adjusting (may take up to a minute)...",
   ai_changes: "Changes:",
@@ -288,7 +228,6 @@ Commands:
   ai_comment: "AI:",
   ai_example_messages: "Example messages:",
   ai_error: "Processing error. Try rephrasing.",
-  ai_thanks_feedback: "Thanks for feedback!",
   ai_new_description: "New description:",
   ai_edit_mode: "AI Editing Mode",
   ai_current_params: "Current parameters:",
@@ -303,7 +242,6 @@ Commands:
 • "add word rental"
 • "remove word sale"
 • "add office to exclusions"`,
-  ai_correction_mode: "Correction mode",
   ai_clarify_query: "Clarify query",
   ai_current_description: "Current description:",
   ai_clarify_examples: `Examples:
@@ -312,7 +250,6 @@ Commands:
 • "add that delivery is needed"`,
   ai_correction_mode_full: "AI Correction Mode",
   ai_applied: "Applied!",
-  ai_cancelled: "Cancelled",
   ai_cancelled_full: "Editing cancelled.",
   ai_generating: "Generating...",
   ai_generation_error: "Generation error. Try later.",
@@ -401,14 +338,9 @@ Commands:
   cb_select_action: "Select action",
   cb_send_words: "Send words",
   cb_cancelled: "Cancelled",
-  cb_cancelled_full: "Cancelled. Send a new query when ready.",
-
   // Subscription callbacks
   sub_disabled: "Subscription disabled",
-  sub_disabled_full: "Subscription disabled.\n\nDid you manage to buy?",
-  sub_unknown_query: "Unknown query",
   sub_no_groups_created: "Subscription created!\n\nYou have no groups added. Use /addgroup to add.",
-  sub_no_groups_monitoring: "Subscription created! No groups selected, monitoring will cover all available.",
   sub_need_groups_first: "First, you need to add at least one group to monitor.\n\nSelect a group:",
 
   // Rating
@@ -481,8 +413,6 @@ The bot uses AI, keywords and semantic analysis — it finds posts with typos, i
   preset_all_deselected: "All deselected",
 
   // Promotion
-  promo_title: "🚀 Product Promotion",
-  promo_group_title: "🚀 Group Promotion",
   promo_only_own_posts: "You can only promote your own posts",
   promo_only_admin_groups: "You can only promote groups where you're an admin",
   promo_already_promoted: "Group is already being promoted",
@@ -576,7 +506,6 @@ The bot uses AI, keywords and semantic analysis — it finds posts with typos, i
 
   // Miss analysis
   miss_no_changes: "No changes",
-  miss_suggestion_prompt: "Miss! Analyzing message...",
   miss_clarify_or_apply: "You can clarify or apply:",
   miss_error_describe: "Analysis error. Describe in your own words what to change in subscription \"{query}\":",
   miss_text_unavailable: "[text unavailable]",
@@ -610,9 +539,6 @@ The bot uses AI, keywords and semantic analysis — it finds posts with typos, i
   preset_region: "Region: {name}",
 
   // Promotion detailed
-  promo_select_duration: "Choose promotion duration:",
-  promo_product_benefit: "• Product will rank higher in WebApp search\n• Shown while waiting for analysis",
-  promo_group_benefit: "• Group will be recommended to users",
   promo_already_until: "Already promoted until {date}",
   promo_status: "Promoted until {date} ({days} days)",
   promo_product_title: "Product promotion ({days} days)",
@@ -719,7 +645,6 @@ The bot uses AI, keywords and semantic analysis — it finds posts with typos, i
   recovery_examples_skipped: "⏳ Bot was restarted. Skipping examples, keywords ready:",
 
   // Deep analysis plurals (format: one|other)
-  items_count: "{n} item|{n} items",
 };
 
 export default en;

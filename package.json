@@ -11,7 +11,8 @@
     "test": "NODE_ENV=test bun test",
     "webapp:dev": "cd webapp && bun run dev",
     "webapp:build": "cd webapp && bun run build",
-    "backfill:embeddings": "bun run src/scripts/backfill-embeddings.ts"
+    "backfill:embeddings": "bun run src/scripts/backfill-embeddings.ts",
+    "lint:i18n": "bun scripts/lint-i18n.ts"
   },
   "dependencies": {
     "@huggingface/inference": "^4.13.4",

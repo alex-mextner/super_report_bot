@@ -5,8 +5,6 @@ const rs: Translations = {
   // Language selection
   lang_select: "Izaberi jezik:",
   lang_changed: "Jezik je promenjen",
-  lang_current: "Trenutni jezik: {name}",
-
   // Commands
   cmd_start_welcome: `Zdravo! Pomoći ću ti da pronađeš oglase u Telegram grupama.
 
@@ -21,15 +19,12 @@ Opiši šta tražiš — generisaću ključne reči i pratiti grupe.`,
   // Subscription flow
   sub_generating_keywords: "Generišem ključne reči...",
   sub_no_examples: "Primeri nisu pronađeni, generišem ključne reči...",
-  sub_keywords_generated: "Ključne reči su generisane:",
-  sub_confirm_keywords: "Potvrdi ključne reči ili koriguj:",
   sub_confirm_or_cancel: "Potvrdi ili otkaži:",
   sub_confirm_or_adjust: "Potvrdi ili izmeni parametre:",
   sub_select_groups: "Izaberi grupe za praćenje:",
   sub_created: "Pretplata je kreirana!",
   sub_paused: "Pretplata je pauzirana",
   sub_resumed: "Pretplata je nastavljena",
-  sub_deleted: "Pretplata je obrisana",
   sub_not_found: "Pretplata nije pronađena",
   sub_session_expired: "Sesija je istekla. Pošalji novi upit.",
 
@@ -102,7 +97,6 @@ Opiši šta tražiš — generisaću ključne reči i pratiti grupe.`,
   kb_promote_price: "🚀 Promoviši — {n}⭐",
   kb_promote_group_admin: "🚀 Promoviši grupu (admin)",
   kb_promote_group_price: "🚀 Promoviši grupu — {n}⭐",
-  kb_days: "{n} dan|{n} dana|{n} dana",
   kb_days_price: "{days} — {price}⭐",
 
   // Keyboards - presets
@@ -120,32 +114,15 @@ Opiši šta tražiš — generisaću ključne reči i pratiti grupe.`,
   kb_use_free_pub: "🎁 Koristi besplatnu publikaciju",
 
   // Notifications
-  notif_match_found: "Pronađeno podudaranje!",
   notif_delayed: "Ovo obaveštenje je kasnilo {minutes} min. Dobij trenutno sa Basic!",
 
   // Errors
-  err_unauthorized: "Pristup odbijen",
-  err_something_wrong: "Nešto nije u redu. Pokušaj ponovo.",
-  err_group_not_found: "Grupa nije pronađena",
-  err_already_monitoring: "Ova grupa se već prati",
-
   // Plurals (format: one|few|many)
   groups_count: "{n} grupa|{n} grupe|{n} grupa",
-  groups_added_count: "Dodata {n} grupa|Dodate {n} grupe|Dodato {n} grupa",
   messages_count: "{n} poruka|{n} poruke|{n} poruka",
-  subscriptions_count: "{n} pretplata|{n} pretplate|{n} pretplata",
-
   // Recovery
-  recovery_bot_restarted: "Bot je restartovan, nastavljam operaciju...",
-
   // Payments
-  pay_premium_info: "Premium daje neograničene pretplate i trenutna obaveštenja.",
-  pay_success: "Plaćanje uspešno!",
-  pay_cancelled: "Plaćanje otkazano",
-
   // Misc
-  loading: "Učitavanje...",
-  empty_list: "Lista je prazna",
   yes: "Da",
   no: "Ne",
 
@@ -160,29 +137,6 @@ Opiši šta tražiš — generisaću ključne reči i pratiti grupe.`,
   analysis_generating_with_ratings: "Generišem ključne reči na osnovu tvojih ocena...",
 
   // Commands extended
-  cmd_help_extended: `Primeri korišćenja:
-
-• Traženje klijenata — "tražim majstora za popravku"
-• Praćenje vesti — "frontend developer poslovi"
-
-Kako početi:
-Samo opiši šta tražiš, i bot će kreirati pretplatu.
-
-Komande:
-/start — početak
-/list — moje pretplate
-/addgroup — dodaj grupu
-/groups — moje grupe
-/lang — promeni jezik
-/settings — podešavanja
-/premium — cenovnik`,
-
-  cmd_how_it_works: `Kako bot funkcioniše:
-1. Opiši šta tražiš
-2. Bot generiše ključne reči
-3. Izaberi grupe za praćenje
-4. Dobijaj obaveštenja o podudaranjima`,
-
   // List command
   list_no_subscriptions: "Nemaš još pretplata. Opiši šta tražiš.",
   list_sub_header: "Pretplata #{id}{pause}",
@@ -220,9 +174,7 @@ Komande:
   groups_none: "Nemaš dodanih grupa. Koristi /addgroup za dodavanje.",
   groups_list_header: "Tvoje grupe za praćenje:",
   groups_already_added: "Ova grupa je već dodata!",
-  groups_need_invite: "Bot ne može da se pridruži bez invite linka.\nPošalji link tipa t.me/+XXX ili klikni Preskoči.",
   groups_private_need_link: "Privatna grupa \"{title}\".\n\nBot ne može da se pridruži bez invite linka.\nPošalji link tipa t.me/+XXX ili klikni Preskoči.",
-  groups_already_exists: "Već dodato",
   groups_select_more: "Izaberi još grupu ili klikni \"Gotovo\":",
   groups_not_added: "Grupe nisu dodate. Koristi /addgroup kada budeš spreman.",
   groups_added_processing: "Dodata {n} grupa. Obrađujem zahtev...|Dodate {n} grupe. Obrađujem zahtev...|Dodato {n} grupa. Obrađujem zahtev...",
@@ -232,7 +184,6 @@ Komande:
   groups_skipped: "Grupa preskočena.",
   groups_select_for_monitoring: "Izaberi grupe za praćenje:",
   groups_selected_count: "Izabrano: {selected} od {total}",
-  groups_add_error: "Nije uspelo dodavanje grupe. Koristi /addgroup.",
   groups_adding: "Dodajem grupu...",
 
   // Metadata
@@ -247,10 +198,6 @@ Komande:
   meta_currency_error: "Ne mogu da prepoznam valutu. Pokušaj kod (EUR, RSD) ili ime (evro, dinar)",
   meta_confirmed: "Potvrđeno",
   meta_enter_value: "Unesi vrednost",
-  meta_enter_country: "Unesi državu (npr. Srbija, Rusija, Crna Gora):",
-  meta_enter_city: "Unesi grad (npr. Beograd, Moskva):",
-  meta_enter_currency: "Unesi valutu (npr. dinar, evro, rublja):",
-
   // Subscription limits
   sub_limit_reached: "⚠️ Limit pretplata dostignut",
   sub_limit_your_plan: "Tvoj plan: {plan}",
@@ -272,15 +219,8 @@ Komande:
   kw_word_deleted: "Reč obrisana",
   kw_added: "✅ Dodato: {added}\nTrenutne: {current}",
   kw_description_updated: "✅ Opis ažuriran",
-  kw_current: "Trenutne:",
-  kw_send_to_add: "Pošalji reči za dodavanje, odvojene zarezom:",
   kw_no_words_to_delete: "Nema reči za brisanje",
   kw_select_words: "Izaberi reči",
-  kw_description_llm: "LLM opis:",
-  kw_regenerated: "Regenerisane ključne reči:",
-  kw_description: "Opis:",
-  kw_keywords: "Ključne reči:",
-
   // AI edit
   ai_correcting: "Korigovanja (može potrajati do minut)...",
   ai_changes: "Izmene:",
@@ -288,7 +228,6 @@ Komande:
   ai_comment: "AI:",
   ai_example_messages: "Primeri poruka:",
   ai_error: "Greška obrade. Pokušaj preformulisati.",
-  ai_thanks_feedback: "Hvala na povratnoj informaciji!",
   ai_new_description: "Novi opis:",
   ai_edit_mode: "AI režim uređivanja",
   ai_current_params: "Trenutni parametri:",
@@ -303,7 +242,6 @@ Komande:
 • "dodaj reč iznajmljivanje"
 • "ukloni reč prodaja"
 • "dodaj kancelarija u izuzetke"`,
-  ai_correction_mode: "Režim korekcije",
   ai_clarify_query: "Pojasni upit",
   ai_current_description: "Trenutni opis:",
   ai_clarify_examples: `Primeri:
@@ -312,7 +250,6 @@ Komande:
 • "dodaj da je potrebna dostava"`,
   ai_correction_mode_full: "AI režim korekcije",
   ai_applied: "Primenjeno!",
-  ai_cancelled: "Otkazano",
   ai_cancelled_full: "Uređivanje otkazano.",
   ai_generating: "Generišem...",
   ai_generation_error: "Greška generisanja. Pokušaj kasnije.",
@@ -401,14 +338,9 @@ Komande:
   cb_select_action: "Izaberi akciju",
   cb_send_words: "Pošalji reči",
   cb_cancelled: "Otkazano",
-  cb_cancelled_full: "Otkazano. Pošalji novi upit kada budeš spreman.",
-
   // Subscription callbacks
   sub_disabled: "Pretplata onemogućena",
-  sub_disabled_full: "Pretplata onemogućena.\n\nDa li si uspeo da kupiš?",
-  sub_unknown_query: "Nepoznat upit",
   sub_no_groups_created: "Pretplata kreirana!\n\nNemaš dodanih grupa. Koristi /addgroup za dodavanje.",
-  sub_no_groups_monitoring: "Pretplata kreirana! Grupe nisu izabrane, praćenje će obuhvatiti sve dostupne.",
   sub_need_groups_first: "Prvo treba da dodaš bar jednu grupu za praćenje.\n\nIzaberi grupu:",
 
   // Rating
@@ -481,8 +413,6 @@ Bot koristi AI, ključne reči i semantičku analizu — pronalazi objave sa gre
   preset_all_deselected: "Sve poništeno",
 
   // Promotion
-  promo_title: "🚀 Promocija proizvoda",
-  promo_group_title: "🚀 Promocija grupe",
   promo_only_own_posts: "Možeš promovisati samo svoje objave",
   promo_only_admin_groups: "Možeš promovisati samo grupe gde si admin",
   promo_already_promoted: "Grupa se već promoviše",
@@ -576,7 +506,6 @@ Bot koristi AI, ključne reči i semantičku analizu — pronalazi objave sa gre
 
   // Miss analysis
   miss_no_changes: "Bez promena",
-  miss_suggestion_prompt: "Promašaj! Analiziram poruku...",
   miss_clarify_or_apply: "Možeš pojasniti ili primeniti:",
   miss_error_describe: "Greška analize. Opiši svojim rečima šta promeniti u pretplati \"{query}\":",
   miss_text_unavailable: "[tekst nedostupan]",
@@ -610,9 +539,6 @@ Bot koristi AI, ključne reči i semantičku analizu — pronalazi objave sa gre
   preset_region: "Region: {name}",
 
   // Promotion detailed
-  promo_select_duration: "Izaberi trajanje promocije:",
-  promo_product_benefit: "• Proizvod će biti viši u WebApp pretrazi\n• Prikazuje se dok se čeka analiza",
-  promo_group_benefit: "• Grupa će biti preporučena korisnicima",
   promo_already_until: "Već se promoviše do {date}",
   promo_status: "Promocija do {date} ({days} dana)",
   promo_product_title: "Promocija proizvoda ({days} dana)",
@@ -719,7 +645,6 @@ Bot koristi AI, ključne reči i semantičku analizu — pronalazi objave sa gre
   recovery_examples_skipped: "⏳ Bot je restartovan. Preskačemo primere, ključne reči su spremne:",
 
   // Deep analysis plurals (format: one|few|many)
-  items_count: "{n} proizvod|{n} proizvoda|{n} proizvoda",
 };
 
 export default rs;
