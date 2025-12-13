@@ -151,8 +151,6 @@ const ru = {
   // Commands extended
   // List command
   list_no_subscriptions: "У тебя пока нет подписок. Опиши что хочешь мониторить в группах.",
-  list_sub_header: "Подписка #{id}{pause}",
-  list_sub_header_paused: "Подписка #{id} ⏸️",
   list_query: "Запрос:",
   list_keywords: "Ключевые слова:",
   list_exclusions: "Исключения:",

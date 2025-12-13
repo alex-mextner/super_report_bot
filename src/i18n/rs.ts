@@ -151,8 +151,6 @@ Opiši kao osoba koja objavljuje — kako izgleda post koji ti treba?`,
   // Commands extended
   // List command
   list_no_subscriptions: "Nemaš još pretplata. Opiši šta tražiš.",
-  list_sub_header: "Pretplata #{id}{pause}",
-  list_sub_header_paused: "Pretplata #{id} ⏸️",
   list_query: "Upit:",
   list_keywords: "Ključne reči:",
   list_exclusions: "Izuzeci:",

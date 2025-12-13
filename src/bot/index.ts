@@ -805,14 +805,12 @@ bot.command("list", async (context) => {
       }
 
       messageText = format`
-${bold(tr("list_sub_header", { id: sub.id, pause: pauseLabel }))}
 ${bold(tr("list_query"))} ${sub.original_query}
 ${bold(tr("list_keywords"))} ${code(sub.positive_keywords.join(", "))}
 ${bold(tr("list_exclusions"))} ${code(exclusionsText)}
       `;
     } else {
       messageText = format`
-${bold(tr("list_sub_header", { id: sub.id, pause: pauseLabel }))}
 ${bold(tr("list_query"))} ${sub.original_query}
       `;
     }
@@ -2611,14 +2609,12 @@ ${c.pendingSub.llmDescription}
             exclusionsText = tr("list_exclusions_disabled_list", { list: sub.disabled_negative_keywords!.join(", ") });
           }
           messageText = format`
-${bold(tr("list_sub_header_paused", { id: sub.id }))}
 ${bold(tr("list_query"))} ${sub.original_query}
 ${bold(tr("list_keywords"))} ${code(sub.positive_keywords.join(", "))}
 ${bold(tr("list_exclusions"))} ${code(exclusionsText)}
           `;
         } else {
           messageText = format`
-${bold(tr("list_sub_header_paused", { id: sub.id }))}
 ${bold(tr("list_query"))} ${sub.original_query}
           `;
         }
@@ -2651,14 +2647,12 @@ ${bold(tr("list_query"))} ${sub.original_query}
             exclusionsText = tr("list_exclusions_disabled_list", { list: sub.disabled_negative_keywords!.join(", ") });
           }
           messageText = format`
-${bold(tr("list_sub_header", { id: sub.id, pause: "" }))}
 ${bold(tr("list_query"))} ${sub.original_query}
 ${bold(tr("list_keywords"))} ${code(sub.positive_keywords.join(", "))}
 ${bold(tr("list_exclusions"))} ${code(exclusionsText)}
           `;
         } else {
           messageText = format`
-${bold(tr("list_sub_header", { id: sub.id, pause: "" }))}
 ${bold(tr("list_query"))} ${sub.original_query}
           `;
         }
@@ -2794,7 +2788,6 @@ ${bold(tr("list_query"))} ${sub.original_query}
       const mode = queries.getUserMode(userId);
       await context.editText(
         format`
-${bold(tr("list_sub_header", { id: updated.id, pause: "" }))}
 ${bold(tr("list_query"))} ${updated.original_query}
 ${bold(tr("list_keywords"))} ${code(updated.positive_keywords.join(", "))}
 ${bold(tr("list_exclusions"))} ${code(exclusionsText)}
@@ -3139,7 +3132,6 @@ ${tr("ai_confirm_or_change")}
       const mode = queries.getUserMode(userId);
       await context.editText(
         format`
-${bold(tr("list_sub_header", { id: sub.id, pause: "" }))}
 ${bold(tr("list_query"))} ${sub.original_query}
 ${bold(tr("list_keywords"))} ${code(sub.positive_keywords.join(", "))}
 ${bold(tr("list_exclusions"))} ${code(exclusionsText)}
@@ -3287,7 +3279,6 @@ ${bold(tr("list_exclusions"))} ${code(exclusionsText)}
         }
         await context.editText(
           format`
-${bold(tr("list_sub_header", { id: updated.id, pause: "" }))}
 ${bold(tr("list_query"))} ${updated.original_query}
 ${bold(tr("list_keywords"))} ${code(updated.positive_keywords.join(", "))}
 ${bold(tr("list_exclusions"))} ${code(exclusionsText)}

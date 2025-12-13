@@ -151,8 +151,6 @@ Describe as the person posting — what does the post you need look like?`,
   // Commands extended
   // List command
   list_no_subscriptions: "You don't have any subscriptions yet. Describe what you're looking for.",
-  list_sub_header: "Subscription #{id}{pause}",
-  list_sub_header_paused: "Subscription #{id} ⏸️",
   list_query: "Query:",
   list_keywords: "Keywords:",
   list_exclusions: "Exclusions:",
