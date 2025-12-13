@@ -3,6 +3,7 @@ import ru from "./ru";
 import en from "./en";
 import rs from "./rs";
 import { queries } from "../db/index.ts";
+import pluralRu from "plural-ru";
 
 export type { Locale, TranslationKey, Translator } from "./types";
 
@@ -57,6 +58,11 @@ function interpolate(
   return template.replace(/\{(\w+)\}/g, (_, key) => String(params[key] ?? ""));
 }
 
+// English plural: simple 1 vs other
+function pluralEn(n: number, one: string, other: string): string {
+  return Math.abs(n) === 1 ? one : other;
+}
+
 // Create translation function for a locale
 export function createTranslator(locale: Locale): Translator {
   const trans = translations[locale] ?? translations[defaultLocale];
@@ -65,8 +71,24 @@ export function createTranslator(locale: Locale): Translator {
     key: TranslationKey,
     params?: Record<string, string | number>
   ): string {
-    const template = trans[key];
+    let template = trans[key];
     if (!template) return String(key);
+
+    // Auto-pluralize: if template has | and params.n is a number
+    if (template.includes("|") && params && typeof params.n === "number") {
+      const forms = template.split("|");
+      const f0 = forms[0] ?? template;
+      const f1 = forms[1] ?? f0;
+      const f2 = forms[2] ?? f1;
+      if (locale === "en") {
+        // English: 2 forms (one|other)
+        template = pluralEn(params.n, f0, f1);
+      } else {
+        // Russian/Serbian: 3 forms via plural-ru
+        template = pluralRu(params.n, f0, f1, f2);
+      }
+    }
+
     if (!params) return template;
     return interpolate(template, params);
   };
@@ -123,48 +145,6 @@ export function setUserLanguage(telegramId: number, locale: Locale): Translator 
   return getTranslatorForLocale(locale);
 }
 
-/**
- * Get plural form index for a number
- * Russian/Serbian: 3 forms (1, 2-4, 5+)
- * English: 2 forms (1, other)
- */
-function getPluralForm(n: number, locale: Locale): number {
-  const absN = Math.abs(n);
-
-  if (locale === "en") {
-    return absN === 1 ? 0 : 1;
-  }
-
-  // Russian and Serbian have same plural rules
-  const mod10 = absN % 10;
-  const mod100 = absN % 100;
-
-  if (mod10 === 1 && mod100 !== 11) return 0;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 1;
-  return 2;
-}
-
-/**
- * Pluralize with translations
- * Format in translations: "one|few|many" (ru/rs) or "one|other" (en)
- */
-export function plural(
-  telegramId: number,
-  key: TranslationKey,
-  count: number
-): string {
-  const locale = getUserLocale(telegramId);
-  const trans = translations[locale] ?? translations[defaultLocale];
-  const template = trans[key];
-
-  if (!template) return String(count);
-
-  const forms = template.split("|");
-  const formIndex = getPluralForm(count, locale);
-  const form = forms[Math.min(formIndex, forms.length - 1)] ?? forms[0] ?? template;
-
-  return form.replace("{n}", String(count));
-}
 
 /**
  * Get language name for LLM prompts

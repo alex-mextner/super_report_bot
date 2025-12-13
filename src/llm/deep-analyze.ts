@@ -14,7 +14,7 @@ import { fetchMediaForMessage } from "../listener/index.ts";
 import { analyzeListingImage, type ListingImageAnalysis } from "./vision.ts";
 import { semanticSearch } from "../embeddings/search.ts";
 import type { GroupMetadata } from "../types.ts";
-import { getTranslatorForLocale, plural as i18nPlural } from "../i18n/index.ts";
+import { getTranslatorForLocale } from "../i18n/index.ts";
 import { withRetry } from "./index.ts";
 
 // Simple English pluralization for items count

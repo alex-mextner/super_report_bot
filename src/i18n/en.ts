@@ -131,6 +131,7 @@ Describe what you're looking for — I'll generate keywords and monitor groups.`
 
   // Plurals (format: one|other)
   groups_count: "{n} group|{n} groups",
+  groups_added_count: "{n} group added|{n} groups added",
   messages_count: "{n} message|{n} messages",
   subscriptions_count: "{n} subscription|{n} subscriptions",
 
@@ -224,8 +225,8 @@ Commands:
   groups_already_exists: "Already added",
   groups_select_more: "Select another group or click \"Done\":",
   groups_not_added: "No groups added. Use /addgroup when ready.",
-  groups_added_processing: "{n} groups added. Processing your request...",
-  groups_added_ready: "{n} groups added. Now describe what you want to monitor.",
+  groups_added_processing: "{n} group added. Processing your request...|{n} groups added. Processing your request...",
+  groups_added_ready: "{n} group added. Now describe what you want to monitor.|{n} groups added. Now describe what you want to monitor.",
   groups_joining: "Link received, trying to join...",
   groups_invalid_format: "Invalid format. Send a link like t.me/+XXX or click Skip.",
   groups_skipped: "Group skipped.",

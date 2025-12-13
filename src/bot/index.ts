@@ -77,7 +77,6 @@ import {
 import { runWithRecovery } from "./operations.ts";
 import { interpretEditCommand } from "../llm/edit.ts";
 import { generateKeywordEmbeddings, checkBgeHealth } from "../llm/embeddings.ts";
-import { plural } from "../i18n/index.ts";
 import {
   parseGroupTitle,
   matchCountry,
@@ -861,7 +860,7 @@ bot.command("addgroup", async (context) => {
   }
 
   // Process links
-  await context.send(tr("group_adding_count", { count: plural(userId, "groups_count", links.length) }));
+  await context.send(tr("group_adding_count", { count: tr("groups_count", { n: links.length }) }));
 
   const results: string[] = [];
   const addedGroups: Array<{ groupId: number; groupTitle: string }> = [];
@@ -3601,7 +3600,7 @@ ${tr("groups_selected_count", { selected: 0, total: c.availableGroups.length })}
             botLog.info({ total: result.total, subscriptionId }, "Cache scan complete");
             let resultText: string;
             if (result.total > 0) {
-              resultText = tr("sub_created_found", { groups: groupNames, count: plural(userId, "messages_count", result.total) });
+              resultText = tr("sub_created_found", { groups: groupNames, count: tr("messages_count", { n: result.total }) });
               if (result.total > 5) {
                 resultText += tr("sub_created_sent_partial", { total: result.total });
               }

@@ -131,6 +131,7 @@ Opiši šta tražiš — generisaću ključne reči i pratiti grupe.`,
 
   // Plurals (format: one|few|many)
   groups_count: "{n} grupa|{n} grupe|{n} grupa",
+  groups_added_count: "Dodata {n} grupa|Dodate {n} grupe|Dodato {n} grupa",
   messages_count: "{n} poruka|{n} poruke|{n} poruka",
   subscriptions_count: "{n} pretplata|{n} pretplate|{n} pretplata",
 
@@ -224,8 +225,8 @@ Komande:
   groups_already_exists: "Već dodato",
   groups_select_more: "Izaberi još grupu ili klikni \"Gotovo\":",
   groups_not_added: "Grupe nisu dodate. Koristi /addgroup kada budeš spreman.",
-  groups_added_processing: "Grupe dodate ({n}). Obrađujem zahtev...",
-  groups_added_ready: "Grupe dodate ({n}). Sada opiši šta želiš da pratiš.",
+  groups_added_processing: "Dodata {n} grupa. Obrađujem zahtev...|Dodate {n} grupe. Obrađujem zahtev...|Dodato {n} grupa. Obrađujem zahtev...",
+  groups_added_ready: "Dodata {n} grupa. Sada opiši šta želiš da pratiš.|Dodate {n} grupe. Sada opiši šta želiš da pratiš.|Dodato {n} grupa. Sada opiši šta želiš da pratiš.",
   groups_joining: "Link primljen, pokušavam da se pridružim...",
   groups_invalid_format: "Neispravan format. Pošalji link tipa t.me/+XXX ili klikni Preskoči.",
   groups_skipped: "Grupa preskočena.",
