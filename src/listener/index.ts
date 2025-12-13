@@ -112,7 +112,7 @@ logMgr.handler = (color: number, level: number, tag: string, fmt: string, args: 
   const enrichedArgs = args.map((arg) => {
     // If arg looks like a channel ID (large number), try to find group name
     if (typeof arg === "number" && arg > 1000000) {
-      const title = queries.getGroupTitleById(arg);
+      const title = queries.getGroupTitle(arg);
       if (title) {
         return `${arg} (${title})`;
       }
