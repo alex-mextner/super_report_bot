@@ -4,7 +4,7 @@ import { useAdminGroupsWithMetadata, type AdminGroupWithMetadata, type GroupMeta
 import { useTelegram } from "../hooks/useTelegram";
 import { useLocale } from "../context/LocaleContext";
 import type { TranslationKey } from "../i18n";
-import { COUNTRIES, CITIES, CURRENCIES } from "../constants/geo";
+import { COUNTRIES, CITIES, CURRENCIES, COUNTRY_CURRENCY_MAP } from "../constants/geo";
 import "./AdminGroupsPage.css";
 
 interface GroupRowProps {
@@ -47,6 +47,15 @@ function GroupRow({ group, onUpdate, t }: GroupRowProps) {
     setCity(group.city || "");
     setCurrency(group.currency || "");
     setIsMarketplace(group.is_marketplace);
+  };
+
+  const handleCountryChange = (newCountry: string) => {
+    const upperCountry = newCountry.toUpperCase();
+    setCountry(upperCountry);
+    // Auto-fill currency when country changes and currency is empty
+    if (upperCountry && !currency && COUNTRY_CURRENCY_MAP[upperCountry]) {
+      setCurrency(COUNTRY_CURRENCY_MAP[upperCountry]);
+    }
   };
 
   // Sync state when group prop changes
@@ -94,7 +103,7 @@ function GroupRow({ group, onUpdate, t }: GroupRowProps) {
               <input
                 type="text"
                 value={country}
-                onChange={(e) => setCountry(e.target.value.toUpperCase())}
+                onChange={(e) => handleCountryChange(e.target.value)}
                 placeholder="RS, RU..."
                 maxLength={2}
                 list="countries-list"
