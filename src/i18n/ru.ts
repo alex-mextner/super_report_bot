@@ -183,7 +183,7 @@ const ru = {
 4. Получай уведомления о совпадениях`,
 
   // List command
-  list_no_subscriptions: "У тебя пока нет подписок. Отправь описание того, что хочешь найти.",
+  list_no_subscriptions: "У тебя пока нет подписок. Опиши что хочешь мониторить в группах.",
   list_sub_header: "Подписка #{id}{pause}",
   list_sub_header_paused: "Подписка #{id} ⏸️",
   list_query: "Запрос:",
@@ -224,8 +224,8 @@ const ru = {
   groups_already_exists: "Уже добавлена",
   groups_select_more: "Выбери ещё группу или нажми \"Готово\":",
   groups_not_added: "Группы не добавлены. Используй /addgroup когда будешь готов.",
-  groups_added_processing: "Добавлено групп: {n}. Обрабатываю твой запрос...",
-  groups_added_ready: "Добавлено групп: {n}. Теперь отправь описание того, что ищешь.",
+  groups_added_processing: "Группы добавлены ({n}). Обрабатываю запрос...",
+  groups_added_ready: "Группы добавлены ({n}). Теперь опиши что хочешь мониторить.",
   groups_joining: "Ссылка получена, пробую присоединиться...",
   groups_invalid_format: "Неверный формат. Отправь ссылку вида t.me/+XXX или нажми Пропустить.",
   groups_skipped: "Группа пропущена.",

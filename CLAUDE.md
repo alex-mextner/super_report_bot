@@ -141,3 +141,13 @@ ADMIN_ID=        # Telegram user ID for admin features
 ```
 
 Bun loads `.env` automatically.
+
+## i18n (IMPORTANT)
+
+When changing any text in `src/i18n/`, **ALWAYS update ALL language files**:
+
+- `src/i18n/ru.ts` — Russian
+- `src/i18n/en.ts` — English
+- `src/i18n/rs.ts` — Serbian
+
+Never change just one language file.
