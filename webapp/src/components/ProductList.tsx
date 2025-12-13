@@ -1,5 +1,6 @@
 import { useRef, useCallback, useMemo } from "react";
 import { ProductCard } from "./ProductCard";
+import { useLocale } from "../context/LocaleContext";
 import type { Product, SearchStats } from "../types";
 import "./ProductList.css";
 
@@ -28,6 +29,7 @@ export function ProductList({
   searchStats,
   isSearching
 }: Props) {
+  const { t } = useLocale();
   const observerRef = useRef<IntersectionObserver | null>(null);
 
   const lastElementRef = useCallback(
@@ -63,34 +65,34 @@ export function ProductList({
 
     const result: ProductGroup[] = [];
     if (exact.length > 0) {
-      result.push({ type: "exact", label: "Точные совпадения", products: exact });
+      result.push({ type: "exact", label: t("exactMatches"), products: exact });
     }
     if (good.length > 0) {
-      result.push({ type: "good", label: "Похожие", products: good });
+      result.push({ type: "good", label: t("goodMatches"), products: good });
     }
     if (partial.length > 0) {
-      result.push({ type: "partial", label: "Возможно подходит", products: partial });
+      result.push({ type: "partial", label: t("partialMatches"), products: partial });
     }
     return result;
-  }, [products, isSearching]);
+  }, [products, isSearching, t]);
 
   if (products.length === 0 && !loading) {
-    return <div className="product-list-empty">Ничего не найдено</div>;
+    return <div className="product-list-empty">{t("nothingFound")}</div>;
   }
 
   return (
     <div className="product-list">
       {isSearching && searchStats && (
         <div className="search-stats">
-          Найдено: {total}
+          {t("foundCount", { total: total ?? 0 })}
           {searchStats.exactCount > 0 && (
-            <span className="stat-exact"> · {searchStats.exactCount} точных</span>
+            <span className="stat-exact"> · {t("exactCount", { count: searchStats.exactCount })}</span>
           )}
           {searchStats.goodCount > 0 && (
-            <span className="stat-good"> · {searchStats.goodCount} похожих</span>
+            <span className="stat-good"> · {t("goodCount", { count: searchStats.goodCount })}</span>
           )}
           {searchStats.partialCount > 0 && (
-            <span className="stat-partial"> · {searchStats.partialCount} частичных</span>
+            <span className="stat-partial"> · {t("partialCount", { count: searchStats.partialCount })}</span>
           )}
         </div>
       )}
@@ -114,7 +116,7 @@ export function ProductList({
         </div>
       ))}
 
-      {loading && <div className="product-list-loading">Загрузка...</div>}
+      {loading && <div className="product-list-loading">{t("loading")}</div>}
     </div>
   );
 }

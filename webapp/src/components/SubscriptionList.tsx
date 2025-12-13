@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { SubscriptionCard } from "./SubscriptionCard";
+import { useLocale } from "../context/LocaleContext";
 import type { Subscription } from "../types";
 import "./SubscriptionList.css";
 
@@ -18,6 +19,7 @@ export function SubscriptionList({
   onDelete,
   onUpdateKeywords,
 }: SubscriptionListProps) {
+  const { t } = useLocale();
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const handleDelete = async (id: number) => {
@@ -29,7 +31,7 @@ export function SubscriptionList({
   if (loading) {
     return (
       <div className="subscription-list-loading">
-        Загрузка...
+        {t("loading")}
       </div>
     );
   }
@@ -46,9 +48,9 @@ export function SubscriptionList({
     return (
       <div className="subscription-list-empty">
         <div className="empty-icon">📋</div>
-        <div className="empty-text">Нет активных подписок</div>
+        <div className="empty-text">{t("noActiveSubscriptions")}</div>
         <div className="empty-hint">
-          Создайте подписку в боте командой /new
+          {t("createInBot")}
         </div>
       </div>
     );

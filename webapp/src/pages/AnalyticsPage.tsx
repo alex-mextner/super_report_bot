@@ -12,7 +12,7 @@ export function AnalyticsPage() {
   const navigate = useNavigate();
   const { webApp } = useTelegram();
   const { isAdmin } = useUser();
-  const { intlLocale } = useLocale();
+  const { intlLocale, t } = useLocale();
   const { analytics, loading, error, refetch } = useGroupAnalytics(groupId ? Number(groupId) : null);
   const [generating, setGenerating] = useState(false);
 
@@ -48,7 +48,7 @@ export function AnalyticsPage() {
     return (
       <div className="analytics-page">
         <div className="analytics-loading">
-          {generating ? "Генерация аналитики..." : "Загрузка..."}
+          {generating ? t("generatingAnalytics") : t("loading")}
         </div>
       </div>
     );
@@ -58,11 +58,11 @@ export function AnalyticsPage() {
     return (
       <div className="analytics-page">
         <div className="analytics-error">
-          <p>Аналитика пока не сгенерирована</p>
-          <p className="analytics-hint">Автоматическая генерация в 3:00</p>
+          <p>{t("analyticsNotGenerated")}</p>
+          <p className="analytics-hint">{t("autoGeneration")}</p>
           {isAdmin && (
             <button className="generate-btn" onClick={handleGenerate}>
-              Сгенерировать сейчас
+              {t("generateNow")}
             </button>
           )}
         </div>
@@ -77,7 +77,7 @@ export function AnalyticsPage() {
       <div className="analytics-header">
         <h1>{groupTitle}</h1>
         <div className="updated-at">
-          Обновлено: {new Date(computedAt * 1000).toLocaleDateString(intlLocale)}
+          {t("updatedAt", { date: new Date(computedAt * 1000).toLocaleDateString(intlLocale) })}
         </div>
       </div>
 
@@ -85,22 +85,22 @@ export function AnalyticsPage() {
       <div className="stats-summary">
         <div className="stat-card">
           <div className="stat-value">{stats.uniqueSellersCount}</div>
-          <div className="stat-label">Продавцов</div>
+          <div className="stat-label">{t("sellers")}</div>
         </div>
         <div className="stat-card">
           <div className="stat-value">{stats.totalMessages}</div>
-          <div className="stat-label">Сообщений</div>
+          <div className="stat-label">{t("messages")}</div>
         </div>
         <div className="stat-card">
           <div className="stat-value">{stats.botFoundPosts.notified}</div>
-          <div className="stat-label">Найдено ботом</div>
+          <div className="stat-label">{t("foundByBot")}</div>
         </div>
       </div>
 
       {/* AI Insights */}
       {insights && (
         <div className="insights-card">
-          <h3>AI-инсайты</h3>
+          <h3>{t("aiInsights")}</h3>
           <p>{insights}</p>
         </div>
       )}
@@ -108,7 +108,7 @@ export function AnalyticsPage() {
       {/* Activity chart */}
       {stats.activityByDay.length > 0 && (
         <div className="section-card">
-          <h3>Активность ({stats.periodDays} дн.)</h3>
+          <h3>{t("activity", { days: stats.periodDays })}</h3>
           <div className="activity-chart">
             {stats.activityByDay.map((d) => {
               const maxCount = Math.max(...stats.activityByDay.map((x) => x.count));
@@ -127,7 +127,7 @@ export function AnalyticsPage() {
       {/* Top sellers */}
       {stats.topSellers.length > 0 && (
         <div className="section-card">
-          <h3>Топ продавцов</h3>
+          <h3>{t("topSellers")}</h3>
           <div className="top-list">
             {stats.topSellers.slice(0, 5).map((seller, i) => (
               <div key={seller.senderId} className="top-item">
@@ -145,7 +145,7 @@ export function AnalyticsPage() {
       {/* Categories */}
       {stats.categoryCounts.length > 0 && (
         <div className="section-card">
-          <h3>Категории</h3>
+          <h3>{t("categories")}</h3>
           <div className="top-list">
             {stats.categoryCounts.slice(0, 5).map((cat, i) => (
               <div key={cat.categoryCode} className="top-item">
@@ -161,7 +161,7 @@ export function AnalyticsPage() {
       {/* Price stats */}
       {stats.pricesByCategory.length > 0 && (
         <div className="section-card">
-          <h3>Цены</h3>
+          <h3>{t("prices")}</h3>
           <div className="price-list">
             {stats.pricesByCategory.slice(0, 5).map((price) => (
               <div key={`${price.categoryCode}-${price.currency}`} className="price-item">
@@ -171,7 +171,7 @@ export function AnalyticsPage() {
                     {formatPrice(price.min, price.currency, intlLocale)} – {formatPrice(price.max, price.currency, intlLocale)}
                   </span>
                   <span className="price-avg">
-                    сред: {formatPrice(price.avg, price.currency, intlLocale)}
+                    {t("avgPrice", { price: formatPrice(price.avg, price.currency, intlLocale) })}
                   </span>
                 </div>
               </div>

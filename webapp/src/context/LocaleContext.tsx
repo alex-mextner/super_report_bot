@@ -1,16 +1,17 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { apiClient } from "../api/client";
-
-type Locale = "ru" | "en" | "rs";
+import { translate, type Locale, type TranslationKey } from "../i18n";
 
 interface LocaleContextType {
   locale: Locale;
   intlLocale: string; // "ru-RU", "en-US", "sr-RS"
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
 }
 
 const LocaleContext = createContext<LocaleContextType>({
   locale: "en",
   intlLocale: "en-US",
+  t: (key) => key,
 });
 
 interface LocaleResponse {
@@ -33,8 +34,15 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
       });
   }, []);
 
+  const t = useCallback(
+    (key: TranslationKey, params?: Record<string, string | number>) => {
+      return translate(locale, key, params);
+    },
+    [locale]
+  );
+
   return (
-    <LocaleContext.Provider value={{ locale, intlLocale }}>
+    <LocaleContext.Provider value={{ locale, intlLocale, t }}>
       {children}
     </LocaleContext.Provider>
   );

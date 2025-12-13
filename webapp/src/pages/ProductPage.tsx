@@ -32,7 +32,7 @@ export function ProductPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { webApp, openLink } = useTelegram();
-  const { intlLocale } = useLocale();
+  const { intlLocale, t } = useLocale();
 
   const productId = Number(id);
   const { product, loading, error } = useProduct(productId);
@@ -74,11 +74,11 @@ export function ProductPage() {
   }, [webApp, navigate]);
 
   if (loading) {
-    return <div className="product-page-loading">Загрузка...</div>;
+    return <div className="product-page-loading">{t("loading")}</div>;
   }
 
   if (error || !product) {
-    return <div className="product-page-error">Не найдено</div>;
+    return <div className="product-page-error">{t("notFound")}</div>;
   }
 
   return (
@@ -102,7 +102,7 @@ export function ProductPage() {
               ) : (
                 <img
                   src={media[activeImage]?.url}
-                  alt={`Фото ${activeImage + 1}`}
+                  alt={t("photoAlt", { n: activeImage + 1 })}
                   className="gallery-media"
                 />
               )}
@@ -120,7 +120,7 @@ export function ProductPage() {
                         <span className="thumb-video-icon">▶</span>
                       </div>
                     ) : (
-                      <img src={item.url} alt={`Превью ${index + 1}`} />
+                      <img src={item.url} alt={t("previewAlt", { n: index + 1 })} />
                     )}
                   </button>
                 ))}
@@ -133,7 +133,7 @@ export function ProductPage() {
 
         {product.price_raw && (
           <div className="product-price-block">
-            <span className="price-label">Цена:</span>
+            <span className="price-label">{t("price")}</span>
             <span className="price-value">{product.price_raw}</span>
           </div>
         )}
@@ -143,7 +143,7 @@ export function ProductPage() {
             className="goto-message-btn"
             onClick={() => openLink(product.messageLink)}
           >
-            Перейти к сообщению
+            {t("goToMessage")}
           </button>
 
           <button
@@ -151,7 +151,7 @@ export function ProductPage() {
             onClick={() => analyze(product.text, product.message_id, product.group_id)}
             disabled={analyzing}
           >
-            {analyzing ? "Анализирую..." : "Анализ цены"}
+            {analyzing ? t("analyzing") : t("priceAnalysis")}
           </button>
         </div>
 
@@ -159,26 +159,26 @@ export function ProductPage() {
           <div className="promotion-section">
             {promoStatus.isPromoted ? (
               <div className="promotion-active">
-                ✅ Продвигается до {new Date(promoStatus.endsAt! * 1000).toLocaleDateString(intlLocale)}
+                {t("promotedUntil", { date: new Date(promoStatus.endsAt! * 1000).toLocaleDateString(intlLocale) })}
               </div>
             ) : promoStatus.canPromote ? (
               <div className="promotion-buttons">
-                <span className="promotion-label">🚀 Продвинуть</span>
+                <span className="promotion-label">{t("promote")}</span>
                 <div className="promotion-options">
                   <button onClick={() => promote(3)} disabled={promoting}>
-                    3 дня — 100⭐
+                    {t("promoDays3")}
                   </button>
                   <button onClick={() => promote(7)} disabled={promoting}>
-                    7 дней — 200⭐
+                    {t("promoDays7")}
                   </button>
                   <button onClick={() => promote(30)} disabled={promoting}>
-                    30 дней — 500⭐
+                    {t("promoDays30")}
                   </button>
                 </div>
               </div>
             ) : (
               <div className="promotion-unavailable">
-                Продвижение доступно только автору поста
+                {t("promotionOwnerOnly")}
               </div>
             )}
           </div>

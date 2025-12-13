@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Subscription } from "../types";
 import { KeywordsDisplay } from "./KeywordsDisplay";
 import { KeywordEditor } from "./KeywordEditor";
+import { useLocale } from "../context/LocaleContext";
 import "./SubscriptionCard.css";
 
 interface SubscriptionCardProps {
@@ -12,13 +13,14 @@ interface SubscriptionCardProps {
 }
 
 export function SubscriptionCard({ subscription, onDelete, onUpdateKeywords, deleting }: SubscriptionCardProps) {
+  const { t } = useLocale();
   const [editing, setEditing] = useState(false);
   const [positive, setPositive] = useState(subscription.positive_keywords);
   const [negative, setNegative] = useState(subscription.negative_keywords);
   const [saving, setSaving] = useState(false);
 
   const handleDelete = () => {
-    if (confirm("Удалить подписку?")) {
+    if (confirm(t("deleteSubscription"))) {
       onDelete(subscription.id);
     }
   };
@@ -83,20 +85,20 @@ export function SubscriptionCard({ subscription, onDelete, onUpdateKeywords, del
       ) : (
         <div className="subscription-edit-section">
           <div className="edit-field">
-            <div className="edit-label">Ключевые слова (+)</div>
+            <div className="edit-label">{t("positiveKeywords")}</div>
             <KeywordEditor keywords={positive} type="positive" onChange={setPositive} />
           </div>
           <div className="edit-field">
-            <div className="edit-label">Исключения (−)</div>
+            <div className="edit-label">{t("negativeKeywords")}</div>
             <KeywordEditor keywords={negative} type="negative" onChange={setNegative} />
           </div>
           {hasChanges && (
             <div className="edit-actions">
               <button className="save-btn" onClick={handleSave} disabled={saving}>
-                {saving ? "..." : "Сохранить"}
+                {saving ? "..." : t("save")}
               </button>
               <button className="cancel-btn" onClick={handleCancel} disabled={saving}>
-                Отмена
+                {t("cancel")}
               </button>
             </div>
           )}

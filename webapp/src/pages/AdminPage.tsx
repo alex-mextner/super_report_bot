@@ -7,6 +7,7 @@ import { useLocale } from "../context/LocaleContext";
 import { KeywordsDisplay } from "../components/KeywordsDisplay";
 import { KeywordEditor } from "../components/KeywordEditor";
 import type { AdminSubscription, SubscriptionGroup } from "../types";
+import type { TranslationKey } from "../i18n";
 import "./AdminPage.css";
 
 function formatDate(dateStr: string, locale: string): string {
@@ -34,9 +35,10 @@ interface GroupEditorProps {
   groups: SubscriptionGroup[];
   availableGroups: AvailableGroup[];
   onChange: (groups: SubscriptionGroup[]) => void;
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
 }
 
-function GroupEditor({ groups, availableGroups, onChange }: GroupEditorProps) {
+function GroupEditor({ groups, availableGroups, onChange, t }: GroupEditorProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   const selectedIds = new Set(groups.map((g) => g.id));
@@ -64,16 +66,16 @@ function GroupEditor({ groups, availableGroups, onChange }: GroupEditorProps) {
             </button>
           </span>
         ))}
-        {groups.length === 0 && <span className="no-groups">Нет групп</span>}
+        {groups.length === 0 && <span className="no-groups">{t("noGroups")}</span>}
       </div>
       <div className="group-selector">
         <button className="group-dropdown-btn" onClick={() => setIsOpen(!isOpen)}>
-          {isOpen ? "Скрыть список" : "Выбрать группы"}
+          {isOpen ? t("hideList") : t("selectGroups")}
         </button>
         {isOpen && (
           <div className="group-dropdown">
             {availableGroups.length === 0 ? (
-              <div className="group-dropdown-empty">Нет доступных групп</div>
+              <div className="group-dropdown-empty">{t("noAvailableGroups")}</div>
             ) : (
               availableGroups.map((g) => (
                 <label key={g.id} className="group-checkbox-item">
@@ -99,9 +101,10 @@ interface SubscriptionRowProps {
   intlLocale: string;
   onUpdateKeywords: (id: number, positive: string[], negative: string[]) => Promise<boolean>;
   onUpdateGroups: (id: number, groups: SubscriptionGroup[]) => Promise<boolean>;
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string;
 }
 
-function SubscriptionRow({ sub, availableGroups, intlLocale, onUpdateKeywords, onUpdateGroups }: SubscriptionRowProps) {
+function SubscriptionRow({ sub, availableGroups, intlLocale, onUpdateKeywords, onUpdateGroups, t }: SubscriptionRowProps) {
   const [expanded, setExpanded] = useState(false);
   const [positive, setPositive] = useState(sub.positive_keywords);
   const [negative, setNegative] = useState(sub.negative_keywords);
@@ -161,27 +164,27 @@ function SubscriptionRow({ sub, availableGroups, intlLocale, onUpdateKeywords, o
       {expanded && (
         <div className="admin-sub-expanded">
           <div className="editor-section">
-            <div className="editor-label">Ключевые слова (+)</div>
+            <div className="editor-label">{t("positiveKeywords")}</div>
             <KeywordEditor keywords={positive} type="positive" onChange={setPositive} />
           </div>
 
           <div className="editor-section">
-            <div className="editor-label">Исключения (−)</div>
+            <div className="editor-label">{t("negativeKeywords")}</div>
             <KeywordEditor keywords={negative} type="negative" onChange={setNegative} />
           </div>
 
           <div className="editor-section">
-            <div className="editor-label">Группы</div>
-            <GroupEditor groups={groups} availableGroups={availableGroups} onChange={setGroups} />
+            <div className="editor-label">{t("groups")}</div>
+            <GroupEditor groups={groups} availableGroups={availableGroups} onChange={setGroups} t={t} />
           </div>
 
           {hasChanges && (
             <div className="editor-actions">
               <button className="save-btn" onClick={handleSave} disabled={saving}>
-                {saving ? "Сохранение..." : "Сохранить"}
+                {saving ? t("saving") : t("save")}
               </button>
               <button className="reset-btn" onClick={handleReset} disabled={saving}>
-                Отменить
+                {t("cancel")}
               </button>
             </div>
           )}
@@ -194,7 +197,7 @@ function SubscriptionRow({ sub, availableGroups, intlLocale, onUpdateKeywords, o
 export function AdminPage() {
   const navigate = useNavigate();
   const { webApp } = useTelegram();
-  const { intlLocale } = useLocale();
+  const { intlLocale, t } = useLocale();
   const { subscriptions, loading, error, updateKeywords, updateGroups } = useAdminSubscriptions();
   const { groups: availableGroups, loading: groupsLoading, error: groupsError } = useAdminGroups();
 
@@ -214,7 +217,7 @@ export function AdminPage() {
   }, [webApp, navigate]);
 
   if (loading || groupsLoading) {
-    return <div className="admin-page loading">Загрузка...</div>;
+    return <div className="admin-page loading">{t("loading")}</div>;
   }
 
   if (error || groupsError) {
@@ -228,13 +231,13 @@ export function AdminPage() {
     <div className="admin-page">
       <div className="admin-header">
         <div className="admin-title-row">
-          <h1>Подписки</h1>
-          <Link to="/admin/users" className="admin-nav-link">Users</Link>
+          <h1>{t("subscriptions")}</h1>
+          <Link to="/admin/users" className="admin-nav-link">{t("users")}</Link>
         </div>
         <div className="admin-stats">
-          <span>{subscriptions.length} всего</span>
-          <span>{activeCount} активных</span>
-          <span>{uniqueUsers} пользователей</span>
+          <span>{t("totalCount", { count: subscriptions.length })}</span>
+          <span>{t("activeCount", { count: activeCount })}</span>
+          <span>{t("usersCount", { count: uniqueUsers })}</span>
         </div>
       </div>
       <div className="admin-list">
@@ -246,6 +249,7 @@ export function AdminPage() {
             intlLocale={intlLocale}
             onUpdateKeywords={updateKeywords}
             onUpdateGroups={updateGroups}
+            t={t}
           />
         ))}
       </div>

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
+import { useLocale } from "../context/LocaleContext";
 import "./SearchBar.css";
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export function SearchBar({ value, onChange, selectedGroupId }: Props) {
+  const { t } = useLocale();
   const [input, setInput] = useState(value);
 
   // Debounce
@@ -25,7 +27,7 @@ export function SearchBar({ value, onChange, selectedGroupId }: Props) {
       <div className="search-input-wrapper">
         <input
           type="text"
-          placeholder="Поиск..."
+          placeholder={t("searchPlaceholder")}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           className="search-input"
@@ -43,7 +45,7 @@ export function SearchBar({ value, onChange, selectedGroupId }: Props) {
         )}
       </div>
       {selectedGroupId && (
-        <Link to={`/analytics/${selectedGroupId}`} className="analytics-btn" title="Аналитика группы">
+        <Link to={`/analytics/${selectedGroupId}`} className="analytics-btn" title={t("groupAnalytics")}>
           📊
         </Link>
       )}

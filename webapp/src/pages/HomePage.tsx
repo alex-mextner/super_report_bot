@@ -6,6 +6,7 @@ import { ProductList } from "../components/ProductList";
 import { useGroups } from "../hooks/useGroups";
 import { useProducts } from "../hooks/useProducts";
 import { useUser } from "../hooks/useUser";
+import { useLocale } from "../context/LocaleContext";
 import "./HomePage.css";
 
 export function HomePage() {
@@ -25,16 +26,17 @@ export function HomePage() {
     search || undefined
   );
   const { isAdmin } = useUser();
+  const { t } = useLocale();
 
   return (
     <div className="home-page">
       <div className="home-header">
         <Link to="/subscriptions" className="subscriptions-link">
-          Мои подписки
+          {t("mySubscriptions")}
         </Link>
         {isAdmin && (
           <Link to="/admin" className="admin-link">
-            Админ
+            {t("admin")}
           </Link>
         )}
       </div>
