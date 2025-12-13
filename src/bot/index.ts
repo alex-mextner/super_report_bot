@@ -111,7 +111,6 @@ function regenerateEmbeddings(subscriptionId: number): void {
     })
     .catch((e) => botLog.error({ err: e, subscriptionId }, "Failed to regenerate embeddings"));
 }
-import { getExamplesForSubscription } from "./examples.ts";
 import { findSimilarWithFallback, toRatingExamples, filterExamplesWithAI } from "./similar.ts";
 import {
   invalidateSubscriptionsCache,
@@ -1907,14 +1906,6 @@ ${code(updatedC.pendingSub?.negativeKeywords.join(", ") || tr("analysis_none"))}
         () => interpretEditCommand(text, currentSnake, conversation, getLLMLanguage(userId))
       );
 
-      // Get examples for new parameters
-      const examples = getExamplesForSubscription(
-        subscriptionId,
-        result.positive_keywords,
-        result.negative_keywords,
-        2
-      );
-
       // Format diff
       const addedPos = result.positive_keywords.filter((k: string) => !currentSnake.positive_keywords.includes(k));
       const removedPos = currentSnake.positive_keywords.filter((k: string) => !result.positive_keywords.includes(k));
@@ -1928,13 +1919,6 @@ ${code(updatedC.pendingSub?.negativeKeywords.join(", ") || tr("analysis_none"))}
       if (removedNeg.length) diffText += tr("diff_removed_exclusions", { list: removedNeg.join(", ") }) + "\n";
       if (currentSnake.llm_description !== result.llm_description) {
         diffText += tr("diff_description", { desc: result.llm_description }) + "\n";
-      }
-
-      // Format examples
-      let examplesText = "";
-      for (const ex of examples) {
-        const source = ex.isFromCache ? `[${ex.groupTitle}]` : ex.groupTitle;
-        examplesText += `${source}\n"${ex.text}"\n\n`;
       }
 
       // Update FSM state with proposed changes
@@ -1953,8 +1937,6 @@ ${code(updatedC.pendingSub?.negativeKeywords.join(", ") || tr("analysis_none"))}
 ${diffText || tr("ai_no_changes")}
 ${bold(tr("ai_comment"))} ${result.summary}
 
-${bold(tr("ai_example_messages"))}
-${examplesText}
 ${tr("ai_continue_or_apply")}`,
         {
           reply_markup: aiEditKeyboard(subscriptionId, tr),
