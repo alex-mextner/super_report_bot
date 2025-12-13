@@ -82,6 +82,19 @@
   color: var(--tg-theme-text-color, #000);
 }
 
+.region-code-preview {
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--tg-theme-hint-color, #999);
+}
+
+.region-code-preview code {
+  background: var(--tg-theme-bg-color, #fff);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
 .presets-list {
   display: flex;
   flex-direction: column;
@@ -208,7 +221,6 @@
   font-weight: 600;
   color: var(--tg-theme-hint-color, #999);
   margin-bottom: 4px;
-  text-transform: uppercase;
 }
 
 .form-field input[type="text"] {

@@ -234,3 +234,74 @@ export const CURRENCIES = [
 export type CountryCode = (typeof COUNTRIES)[number]["code"];
 export type CityCode = (typeof CITIES)[number]["code"];
 export type CurrencyCode = (typeof CURRENCIES)[number]["code"];
+
+// Country to default currency mapping
+export const COUNTRY_CURRENCY_MAP: Record<string, string> = {
+  // Balkans
+  RS: "RSD",
+  ME: "EUR",
+  BA: "BAM",
+  HR: "EUR",
+  MK: "MKD",
+  AL: "ALL",
+  BG: "BGN",
+  RO: "RON",
+  SI: "EUR",
+
+  // CIS / Post-Soviet
+  RU: "RUB",
+  UA: "UAH",
+  BY: "BYN",
+  KZ: "KZT",
+  AM: "AMD",
+  GE: "GEL",
+  AZ: "AZN",
+  UZ: "UZS",
+  MD: "MDL",
+
+  // Middle East / Asia
+  TR: "TRY",
+  AE: "AED",
+  IL: "ILS",
+  CY: "EUR",
+  TH: "THB",
+  ID: "IDR",
+  VN: "VND",
+  MY: "MYR",
+  SG: "SGD",
+
+  // Western Europe (Eurozone)
+  DE: "EUR",
+  FR: "EUR",
+  IT: "EUR",
+  ES: "EUR",
+  PT: "EUR",
+  NL: "EUR",
+  BE: "EUR",
+  AT: "EUR",
+  IE: "EUR",
+
+  // Non-Eurozone Europe
+  GB: "GBP",
+  CH: "CHF",
+  SE: "SEK",
+  NO: "NOK",
+  DK: "DKK",
+  PL: "PLN",
+  CZ: "CZK",
+  SK: "EUR",
+  HU: "HUF",
+  FI: "EUR",
+
+  // Americas
+  US: "USD",
+  CA: "CAD",
+  MX: "MXN",
+  BR: "BRL",
+  AR: "ARS",
+
+  // Other
+  AU: "AUD",
+  NZ: "NZD",
+  EG: "EGP",
+};

@@ -3,6 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { useAdminPresets, type Preset, type AvailableGroup } from "../hooks/useAdminPresets";
 import { useTelegram } from "../hooks/useTelegram";
 import { useLocale } from "../context/LocaleContext";
+import { COUNTRIES, CITIES, CURRENCIES, COUNTRY_CURRENCY_MAP } from "../constants/geo";
 import "./AdminPresetsPage.css";
 
 interface PresetRowProps {
@@ -60,6 +61,15 @@ function PresetRow({ preset, cities, onUpdate, onDelete, onAddGroup, onRemoveGro
   const handleDelete = async () => {
     if (confirm(`Delete preset "${preset.region_name}"?`)) {
       await onDelete(preset.id);
+    }
+  };
+
+  const handleCountryCodeChange = (value: string) => {
+    const upper = value.toUpperCase();
+    setCountryCode(upper);
+    // Auto-fill currency when country changes and currency is empty
+    if (upper && !currency && COUNTRY_CURRENCY_MAP[upper]) {
+      setCurrency(COUNTRY_CURRENCY_MAP[upper]);
     }
   };
 
@@ -138,10 +148,16 @@ function PresetRow({ preset, cities, onUpdate, onDelete, onAddGroup, onRemoveGro
                   <input
                     type="text"
                     value={countryCode}
-                    onChange={(e) => setCountryCode(e.target.value.toUpperCase())}
+                    onChange={(e) => handleCountryCodeChange(e.target.value)}
                     placeholder="RS"
                     maxLength={2}
+                    list="countries-list-edit"
                   />
+                  <datalist id="countries-list-edit">
+                    {COUNTRIES.map((c) => (
+                      <option key={c.code} value={c.code}>{c.label}</option>
+                    ))}
+                  </datalist>
                 </div>
                 <div className="form-field">
                   <label>Currency</label>
@@ -149,9 +165,15 @@ function PresetRow({ preset, cities, onUpdate, onDelete, onAddGroup, onRemoveGro
                     type="text"
                     value={currency}
                     onChange={(e) => setCurrency(e.target.value.toUpperCase())}
-                    placeholder="EUR"
+                    placeholder="RSD"
                     maxLength={3}
+                    list="currencies-list-edit"
                   />
+                  <datalist id="currencies-list-edit">
+                    {CURRENCIES.map((c) => (
+                      <option key={c.code} value={c.code}>{c.label}</option>
+                    ))}
+                  </datalist>
                 </div>
               </div>
               <div className="form-actions">
@@ -225,17 +247,50 @@ function PresetRow({ preset, cities, onUpdate, onDelete, onAddGroup, onRemoveGro
 }
 
 interface CreatePresetFormProps {
-  cities: string[];
   onCreate: (data: { region_code: string; region_name: string; country_code?: string; currency?: string }) => Promise<number | null>;
   onCancel: () => void;
 }
 
-function CreatePresetForm({ cities, onCreate, onCancel }: CreatePresetFormProps) {
-  const [regionCode, setRegionCode] = useState("");
-  const [regionName, setRegionName] = useState("");
+function CreatePresetForm({ onCreate, onCancel }: CreatePresetFormProps) {
   const [countryCode, setCountryCode] = useState("");
+  const [cityCode, setCityCode] = useState("");
+  const [regionName, setRegionName] = useState("");
   const [currency, setCurrency] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Filter cities by selected country
+  const filteredCities = countryCode
+    ? CITIES.filter((c) => c.country === countryCode)
+    : CITIES;
+
+  // Generate region_code: city code or country_all
+  const regionCode = cityCode || (countryCode ? `${countryCode.toLowerCase()}_all` : "");
+
+  const handleCountryChange = (value: string) => {
+    const upper = value.toUpperCase();
+    setCountryCode(upper);
+    // Clear city if country changed
+    if (cityCode && !cityCode.startsWith(upper.toLowerCase())) {
+      setCityCode("");
+    }
+    // Auto-fill currency
+    if (upper && !currency && COUNTRY_CURRENCY_MAP[upper]) {
+      setCurrency(COUNTRY_CURRENCY_MAP[upper]);
+    }
+  };
+
+  const handleCityChange = (value: string) => {
+    const lower = value.toLowerCase().replace(/\s+/g, "_");
+    setCityCode(lower);
+    // Auto-fill country from city
+    const city = CITIES.find((c) => c.code === lower);
+    if (city && !countryCode) {
+      setCountryCode(city.country);
+      if (!currency && COUNTRY_CURRENCY_MAP[city.country]) {
+        setCurrency(COUNTRY_CURRENCY_MAP[city.country]);
+      }
+    }
+  };
 
   const handleSubmit = async () => {
     if (!regionCode || !regionName) return;
@@ -250,25 +305,45 @@ function CreatePresetForm({ cities, onCreate, onCancel }: CreatePresetFormProps)
     onCancel();
   };
 
+  const canSubmit = regionName && (countryCode || cityCode);
+
   return (
     <div className="create-preset-form">
       <h3>Create New Preset</h3>
       <div className="form-row">
         <div className="form-field">
-          <label>Region Code *</label>
+          <label>Country *</label>
           <input
             type="text"
-            value={regionCode}
-            onChange={(e) => setRegionCode(e.target.value.toLowerCase().replace(/\s+/g, "_"))}
-            placeholder="rs_belgrade"
-            list="cities-list"
+            value={countryCode}
+            onChange={(e) => handleCountryChange(e.target.value)}
+            placeholder="RS"
+            maxLength={2}
+            list="countries-list-create"
           />
-          <datalist id="cities-list">
-            {cities.map((city) => (
-              <option key={city} value={city} />
+          <datalist id="countries-list-create">
+            {COUNTRIES.map((c) => (
+              <option key={c.code} value={c.code}>{c.label}</option>
             ))}
           </datalist>
         </div>
+        <div className="form-field">
+          <label>City (optional)</label>
+          <input
+            type="text"
+            value={cityCode}
+            onChange={(e) => handleCityChange(e.target.value)}
+            placeholder="Leave empty for whole country"
+            list="cities-list-create"
+          />
+          <datalist id="cities-list-create">
+            {filteredCities.map((c) => (
+              <option key={c.code} value={c.code}>{c.label}</option>
+            ))}
+          </datalist>
+        </div>
+      </div>
+      <div className="form-row">
         <div className="form-field">
           <label>Region Name *</label>
           <input
@@ -278,31 +353,30 @@ function CreatePresetForm({ cities, onCreate, onCancel }: CreatePresetFormProps)
             placeholder="Барахолки Белграда"
           />
         </div>
-      </div>
-      <div className="form-row">
-        <div className="form-field">
-          <label>Country Code</label>
-          <input
-            type="text"
-            value={countryCode}
-            onChange={(e) => setCountryCode(e.target.value.toUpperCase())}
-            placeholder="RS"
-            maxLength={2}
-          />
-        </div>
         <div className="form-field">
           <label>Currency</label>
           <input
             type="text"
             value={currency}
             onChange={(e) => setCurrency(e.target.value.toUpperCase())}
-            placeholder="EUR"
+            placeholder="RSD"
             maxLength={3}
+            list="currencies-list-create"
           />
+          <datalist id="currencies-list-create">
+            {CURRENCIES.map((c) => (
+              <option key={c.code} value={c.code}>{c.label}</option>
+            ))}
+          </datalist>
         </div>
       </div>
+      {regionCode && (
+        <div className="region-code-preview">
+          Region code: <code>{regionCode}</code>
+        </div>
+      )}
       <div className="form-actions">
-        <button className="save-btn" onClick={handleSubmit} disabled={saving || !regionCode || !regionName}>
+        <button className="save-btn" onClick={handleSubmit} disabled={saving || !canSubmit}>
           {saving ? "Creating..." : "Create"}
         </button>
         <button className="cancel-btn" onClick={onCancel}>Cancel</button>
@@ -371,7 +445,6 @@ export function AdminPresetsPage() {
       <div className="create-preset-section">
         {showCreateForm ? (
           <CreatePresetForm
-            cities={cities}
             onCreate={createPreset}
             onCancel={() => setShowCreateForm(false)}
           />

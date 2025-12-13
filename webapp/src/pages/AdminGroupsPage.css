@@ -94,7 +94,6 @@
   font-weight: 600;
   color: var(--tg-theme-hint-color, #999);
   margin-bottom: 6px;
-  text-transform: uppercase;
 }
 
 .form-field input[type="text"] {
@@ -119,9 +118,6 @@
   gap: 8px;
 }
 
-.form-row .form-field input[type="text"] {
-  text-transform: uppercase;
-}
 
 .checkbox-field label {
   display: flex;
