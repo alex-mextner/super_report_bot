@@ -956,8 +956,17 @@ bot.command("addgroup", async (context) => {
   const addedGroups: Array<{ groupId: number; groupTitle: string }> = [];
 
   for (const link of links) {
-    const result = await addGroupByLink(userId, link);
+    let result = await addGroupByLink(userId, link);
     const displayValue = link.type === "username" ? link.value : link.value;
+
+    // Handle FLOOD_WAIT with auto-retry
+    if (!result.success && "waitSeconds" in result) {
+      const waitSec = result.waitSeconds + 10;
+      await context.send(`⏳ ${displayValue}: ждём ${waitSec} сек...`);
+      await new Promise((resolve) => setTimeout(resolve, waitSec * 1000));
+      result = await addGroupByLink(userId, link);
+    }
+
     if (result.success) {
       results.push(`✅ ${result.title}`);
       addedGroups.push({ groupId: result.groupId!, groupTitle: result.title! });
@@ -1107,13 +1116,21 @@ function parseTelegramLinks(text: string): ParsedLink[] {
 async function addGroupByLink(
   userId: number,
   link: ParsedLink
-): Promise<{ success: true; title: string; groupId: number } | { success: false; error: string }> {
+): Promise<
+  | { success: true; title: string; groupId: number }
+  | { success: false; error: string }
+  | { success: false; error: "FLOOD_WAIT"; waitSeconds: number }
+> {
   // Check for duplicate by trying to resolve the link
   const joinResult = await joinGroupByUserbot(
     link.type === "username" ? link.value : `https://${link.value}`
   );
 
   if (!joinResult.success) {
+    // Pass through FLOOD_WAIT
+    if ("waitSeconds" in joinResult) {
+      return joinResult;
+    }
     return { success: false, error: joinResult.error };
   }
 

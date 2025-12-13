@@ -1531,7 +1531,11 @@ export async function isUserbotMember(chatId: number): Promise<boolean> {
 // Join a chat by username or invite link
 export async function joinGroupByUserbot(
   target: string // @username or t.me/+XXX invite link
-): Promise<{ success: true; chatId: number; title: string; username?: string } | { success: false; error: string }> {
+): Promise<
+  | { success: true; chatId: number; title: string; username?: string }
+  | { success: false; error: string }
+  | { success: false; error: "FLOOD_WAIT"; waitSeconds: number }
+> {
   try {
     const chat = await mtClient.joinChat(target);
     const title = chat.title || "";
@@ -1572,6 +1576,12 @@ export async function joinGroupByUserbot(
 
     if (errMsg.includes("INVITE_HASH_INVALID")) {
       return { success: false, error: "Неверная ссылка" };
+    }
+
+    // Parse FLOOD_WAIT error: "A wait of X seconds is required"
+    const floodMatch = errMsg.match(/wait of (\d+) seconds/i);
+    if (floodMatch?.[1]) {
+      return { success: false, error: "FLOOD_WAIT", waitSeconds: parseInt(floodMatch[1], 10) };
     }
 
     return { success: false, error: errMsg || "Join failed" };
