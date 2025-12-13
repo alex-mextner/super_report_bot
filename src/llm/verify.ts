@@ -1,5 +1,5 @@
 import { llmLog } from "../logger.ts";
-import { verifyMessage, verifyMessageBatch } from "./index.ts";
+import { verifyMessage, verifyMessageBatch, classifyZeroShot } from "./index.ts";
 import { verifyWithVision, matchPhotosToItems } from "./vision.ts";
 import { splitMessageToItems } from "./split.ts";
 import type { Subscription, IncomingMessage, ItemVerificationResult } from "../types.ts";
@@ -16,6 +16,8 @@ export interface VerificationResult {
 const LLM_CONFIDENCE_THRESHOLD = 0.7;
 // Minimum confidence threshold for Vision verification to be decisive
 const VISION_CONFIDENCE_THRESHOLD = 0.75;
+// Threshold for XLM-RoBERTa pre-filter to reject (skip LLM if clearly not a match)
+const XNLI_REJECT_THRESHOLD = 0.65;
 
 /**
  * Verify if a message matches a subscription
@@ -74,7 +76,46 @@ export async function verifyMatch(
     }
   }
 
-  // Text-based verification with LLM
+  // Step 1: XLM-RoBERTa zero-shot pre-filter (free, fast)
+  // Skip this for very short texts where context matters more
+  if (text.length >= 50) {
+    try {
+      const zeroShotResult = await classifyZeroShot(
+        `${description}\n---\n${text.slice(0, 500)}`,
+        ["relevant match", "not relevant"]
+      );
+
+      const notRelevantScore = zeroShotResult.find((r) => r.label === "not relevant")?.score ?? 0;
+
+      if (notRelevantScore >= XNLI_REJECT_THRESHOLD) {
+        llmLog.debug(
+          {
+            subscriptionId: subscription.id,
+            notRelevantScore: notRelevantScore.toFixed(3),
+            textPreview: text.slice(0, 50),
+          },
+          "XLM pre-filter rejected (skipping LLM)"
+        );
+
+        return {
+          isMatch: false,
+          confidence: 1 - notRelevantScore,
+          label: "xnli_reject",
+          reasoning: visionReasoning,
+        };
+      }
+
+      llmLog.debug(
+        { subscriptionId: subscription.id, notRelevantScore: notRelevantScore.toFixed(3) },
+        "XLM pre-filter passed, proceeding to LLM"
+      );
+    } catch (error) {
+      // XLM failed, continue to LLM verification
+      llmLog.warn({ err: error }, "XLM pre-filter failed, continuing to LLM");
+    }
+  }
+
+  // Step 2: Text-based verification with LLM
   // Pass hasPhoto flag so LLM doesn't guess about photo content from emojis
   try {
     const result = await verifyMessage(text, description, hasPhoto, language);

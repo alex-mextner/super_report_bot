@@ -1,7 +1,7 @@
 /**
  * Deep product analysis using:
  * 1. Brave Search API for market prices (with source links)
- * 2. GLM-4.6 (Z.AI) for analysis
+ * 2. Qwen LLM for analysis (via HuggingFace)
  * 3. Deterministic scam risk assessment (not LLM-based where possible)
  * 4. Currency conversion via open.er-api.com
  * 5. Multi-item support with separate searches
@@ -15,7 +15,7 @@ import { analyzeListingImage, type ListingImageAnalysis } from "./vision.ts";
 import { semanticSearch } from "../embeddings/search.ts";
 import type { GroupMetadata } from "../types.ts";
 import { getTranslatorForLocale } from "../i18n/index.ts";
-import { withRetry, callZAI, MODELS, type LLMMessage } from "./index.ts";
+import { llmLight } from "./index.ts";
 
 // Simple English pluralization for items count
 const pluralItems = (n: number): string => {
@@ -290,16 +290,14 @@ async function searchWeb(query: string): Promise<BraveResult[]> {
 // ============= LLM Calls =============
 
 async function callLLM(systemPrompt: string, userPrompt: string, maxTokens = 2000): Promise<string> {
-  const messages: LLMMessage[] = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: userPrompt },
-  ];
-
-  return withRetry(
-    () => callZAI(MODELS.GLM_46, messages, maxTokens, 0.3),
-    3, // 3 retries
-    2000 // 2s base delay
-  );
+  return llmLight({
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    maxTokens,
+    temperature: 0.3,
+  });
 }
 
 // ============= Listing Extraction =============
