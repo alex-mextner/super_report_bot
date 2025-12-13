@@ -12,14 +12,14 @@ export interface VerificationResult {
   reasoning?: string;
 }
 
-// Minimum confidence threshold for DeepSeek verification
-const DEEPSEEK_CONFIDENCE_THRESHOLD = 0.7;
+// Minimum confidence threshold for LLM verification
+const LLM_CONFIDENCE_THRESHOLD = 0.7;
 // Minimum confidence threshold for Vision verification to be decisive
 const VISION_CONFIDENCE_THRESHOLD = 0.75;
 
 /**
  * Verify if a message matches a subscription
- * Uses Vision model first if photo is present, then falls back to text-based DeepSeek
+ * Uses Vision model first if photo is present, then falls back to text-based LLM
  */
 export async function verifyMatch(
   message: IncomingMessage,
@@ -74,12 +74,12 @@ export async function verifyMatch(
     }
   }
 
-  // Text-based verification with DeepSeek
-  // Pass hasPhoto flag so DeepSeek doesn't guess about photo content from emojis
+  // Text-based verification with LLM
+  // Pass hasPhoto flag so LLM doesn't guess about photo content from emojis
   try {
     const result = await verifyMessage(text, description, hasPhoto, language);
 
-    const isMatch = result.isMatch && result.confidence >= DEEPSEEK_CONFIDENCE_THRESHOLD;
+    const isMatch = result.isMatch && result.confidence >= LLM_CONFIDENCE_THRESHOLD;
 
     // Log with appropriate level based on confidence
     const logData = {
@@ -93,12 +93,12 @@ export async function verifyMatch(
     };
 
     if (isMatch) {
-      llmLog.debug(logData, "DeepSeek match");
+      llmLog.debug(logData, "LLM match");
     } else if (result.confidence >= 0.5) {
       // Near-threshold rejection — log at info level for monitoring
-      llmLog.info(logData, "DeepSeek near-threshold rejection");
+      llmLog.info(logData, "LLM near-threshold rejection");
     } else {
-      llmLog.debug(logData, "DeepSeek no match");
+      llmLog.debug(logData, "LLM no match");
     }
 
     // Build reasoning: prefer Vision reasoning if available (even if uncertain)
@@ -107,7 +107,7 @@ export async function verifyMatch(
       // Vision was uncertain — use its reasoning with disclaimer
       finalReasoning = visionReasoning;
     } else if (visionFailed && hasPhoto) {
-      // Vision failed completely — add disclaimer to DeepSeek reasoning
+      // Vision failed completely — add disclaimer to LLM reasoning
       finalReasoning = `📷 Could not analyze photo. ${result.reasoning || ""}`.trim();
     } else {
       // No photo or Vision wasn't attempted
@@ -123,7 +123,7 @@ export async function verifyMatch(
   } catch (error) {
     llmLog.error(
       { subscriptionId: subscription.id, error },
-      "DeepSeek verification failed"
+      "LLM verification failed"
     );
 
     // Return no match on error (safe fallback)
@@ -228,7 +228,7 @@ export async function verifyMatchBatch(
       );
 
       for (const result of batchResults) {
-        const isMatch = result.isMatch && result.confidence >= DEEPSEEK_CONFIDENCE_THRESHOLD;
+        const isMatch = result.isMatch && result.confidence >= LLM_CONFIDENCE_THRESHOLD;
         results.set(result.index, {
           isMatch,
           confidence: result.confidence,
@@ -351,7 +351,7 @@ export async function verifyMatchWithItems(
   const reasonings: string[] = [];
 
   for (const result of batchResults) {
-    const isMatch = result.isMatch && result.confidence >= DEEPSEEK_CONFIDENCE_THRESHOLD;
+    const isMatch = result.isMatch && result.confidence >= LLM_CONFIDENCE_THRESHOLD;
     if (isMatch) {
       matchedItemIndices.push(result.index);
       matchedItems.push(splitResult.items[result.index]!);

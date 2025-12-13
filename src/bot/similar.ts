@@ -236,7 +236,7 @@ export function toRatingExamples(messages: SimilarMessage[]): RatingExample[] {
 }
 
 /**
- * Filter examples using DeepSeek AI verification
+ * Filter examples using LLM verification
  * Returns only examples that match the query with confidence >= threshold
  *
  * @param examples - candidate examples to filter

@@ -1,4 +1,4 @@
-import { hf, MODELS, withRetry } from "./index.ts";
+import { llmThink } from "./index.ts";
 import { llmLog } from "../logger.ts";
 import type { KeywordGenerationResult, ExampleRating, RatingExample } from "../types.ts";
 
@@ -101,7 +101,7 @@ Respond ONLY with JSON, no additional text:
 }`;
 
 /**
- * Generate keywords from user's free-form search request using DeepSeek R1 via Novita
+ * Generate keywords from user's free-form search request using GLM-4.6 via Z.AI
  * @param query - Original user query
  * @param clarificationContext - Optional context from clarification Q&A (formatted string)
  */
@@ -114,22 +114,17 @@ export async function generateKeywords(
   const languageInstruction = `\n\nIMPORTANT: Write the "description" field in ${language}.`;
   const userMessage = (clarificationContext ? `${query}${clarificationContext}` : query) + languageInstruction;
 
-  const response = await withRetry(async () => {
-    const result = await hf.chatCompletion({
-      model: MODELS.DEEPSEEK_R1,
-      provider: "novita",
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userMessage },
-      ],
-      max_tokens: 2500,
-      temperature: 0.6,
-    });
-    return result.choices[0]?.message?.content || "";
+  const response = await llmThink({
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: userMessage },
+    ],
+    maxTokens: 2500,
+    temperature: 0.6,
   });
 
-  // DeepSeek R1 may include <think>...</think> reasoning blocks — strip them
-  const cleanedResponse = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  // llmThink already strips <think>...</think> blocks
+  const cleanedResponse = response.trim();
 
   llmLog.debug({ query, response: cleanedResponse.slice(0, 500) }, "generateKeywords raw response");
 
@@ -195,22 +190,16 @@ Respond ONLY with JSON array of strings, no explanations:
  */
 export async function generateDraftKeywords(query: string): Promise<string[]> {
   try {
-    const response = await withRetry(async () => {
-      const result = await hf.chatCompletion({
-        model: MODELS.DEEPSEEK_R1,
-        provider: "novita",
-        messages: [
-          { role: "system", content: DRAFT_KEYWORDS_PROMPT },
-          { role: "user", content: query },
-        ],
-        max_tokens: 500,
-        temperature: 0.5,
-      });
-      return result.choices[0]?.message?.content || "";
+    const response = await llmThink({
+      messages: [
+        { role: "system", content: DRAFT_KEYWORDS_PROMPT },
+        { role: "user", content: query },
+      ],
+      maxTokens: 500,
+      temperature: 0.5,
     });
 
-    // Strip thinking tags
-    const cleaned = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+    const cleaned = response.trim();
 
     // Parse JSON array
     const match = cleaned.match(/\[[\s\S]*\]/);
@@ -277,22 +266,16 @@ export async function generateExampleMessages(
 ): Promise<GeneratedExample[]> {
   try {
     const languageInstruction = `\n\nIMPORTANT: Write all example texts in ${language}.`;
-    const response = await withRetry(async () => {
-      const result = await hf.chatCompletion({
-        model: MODELS.DEEPSEEK_R1,
-        provider: "novita",
-        messages: [
-          { role: "system", content: EXAMPLE_MESSAGES_PROMPT },
-          { role: "user", content: query + languageInstruction },
-        ],
-        max_tokens: 1000,
-        temperature: 0.7,
-      });
-      return result.choices[0]?.message?.content || "";
+    const response = await llmThink({
+      messages: [
+        { role: "system", content: EXAMPLE_MESSAGES_PROMPT },
+        { role: "user", content: query + languageInstruction },
+      ],
+      maxTokens: 1000,
+      temperature: 0.7,
     });
 
-    // Strip thinking tags
-    const cleaned = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+    const cleaned = response.trim();
 
     // Parse JSON
     const match = cleaned.match(/\{[\s\S]*\}/);
@@ -439,22 +422,16 @@ export async function generateKeywordsWithRatings(
     ? `Query: ${query}${clarificationContext}${feedbackSection}${languageInstruction}`
     : `Query: ${query}${feedbackSection}${languageInstruction}`;
 
-  const response = await withRetry(async () => {
-    const result = await hf.chatCompletion({
-      model: MODELS.DEEPSEEK_R1,
-      provider: "novita",
-      messages: [
-        { role: "system", content: KEYWORDS_WITH_RATINGS_PROMPT },
-        { role: "user", content: userMessage },
-      ],
-      max_tokens: 2500,
-      temperature: 0.6,
-    });
-    return result.choices[0]?.message?.content || "";
+  const response = await llmThink({
+    messages: [
+      { role: "system", content: KEYWORDS_WITH_RATINGS_PROMPT },
+      { role: "user", content: userMessage },
+    ],
+    maxTokens: 2500,
+    temperature: 0.6,
   });
 
-  // Strip thinking tags
-  const cleaned = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  const cleaned = response.trim();
 
   llmLog.debug({
     query,
@@ -554,22 +531,16 @@ Respond ONLY with JSON array of strings:
  */
 export async function extractKeywordsFromText(text: string): Promise<string[]> {
   try {
-    const response = await withRetry(async () => {
-      const result = await hf.chatCompletion({
-        model: MODELS.DEEPSEEK_R1,
-        provider: "novita",
-        messages: [
-          { role: "system", content: EXTRACT_KEYWORDS_PROMPT },
-          { role: "user", content: text.slice(0, 2000) }, // Limit text length
-        ],
-        max_tokens: 500,
-        temperature: 0.4,
-      });
-      return result.choices[0]?.message?.content || "";
+    const response = await llmThink({
+      messages: [
+        { role: "system", content: EXTRACT_KEYWORDS_PROMPT },
+        { role: "user", content: text.slice(0, 2000) }, // Limit text length
+      ],
+      maxTokens: 500,
+      temperature: 0.4,
     });
 
-    // Strip thinking tags
-    const cleaned = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+    const cleaned = response.trim();
 
     // Parse JSON array
     const match = cleaned.match(/\[[\s\S]*\]/);
@@ -605,22 +576,16 @@ What user wants to change: ${userInstruction}
 
 IMPORTANT: Write "description" and "summary" fields in ${language}.`;
 
-  const response = await withRetry(async () => {
-    const result = await hf.chatCompletion({
-      model: MODELS.DEEPSEEK_R1,
-      provider: "novita",
-      messages: [
-        { role: "system", content: CORRECT_DESCRIPTION_PROMPT },
-        { role: "user", content: userMessage },
-      ],
-      max_tokens: 500,
-      temperature: 0.5,
-    });
-    return result.choices[0]?.message?.content || "";
+  const response = await llmThink({
+    messages: [
+      { role: "system", content: CORRECT_DESCRIPTION_PROMPT },
+      { role: "user", content: userMessage },
+    ],
+    maxTokens: 500,
+    temperature: 0.5,
   });
 
-  // Strip thinking tags
-  const cleaned = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  const cleaned = response.trim();
 
   // Parse JSON
   const match = cleaned.match(/\{[\s\S]*\}/);
