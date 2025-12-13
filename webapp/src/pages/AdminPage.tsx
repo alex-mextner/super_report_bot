@@ -3,14 +3,15 @@ import { useNavigate, Link } from "react-router-dom";
 import { useAdminSubscriptions } from "../hooks/useAdminSubscriptions";
 import { useAdminGroups, type AvailableGroup } from "../hooks/useAdminGroups";
 import { useTelegram } from "../hooks/useTelegram";
+import { useLocale } from "../context/LocaleContext";
 import { KeywordsDisplay } from "../components/KeywordsDisplay";
 import { KeywordEditor } from "../components/KeywordEditor";
 import type { AdminSubscription, SubscriptionGroup } from "../types";
 import "./AdminPage.css";
 
-function formatDate(dateStr: string): string {
+function formatDate(dateStr: string, locale: string): string {
   const date = new Date(dateStr);
-  return date.toLocaleDateString("ru-RU", {
+  return date.toLocaleDateString(locale, {
     day: "2-digit",
     month: "2-digit",
     year: "2-digit",
@@ -95,11 +96,12 @@ function GroupEditor({ groups, availableGroups, onChange }: GroupEditorProps) {
 interface SubscriptionRowProps {
   sub: AdminSubscription;
   availableGroups: AvailableGroup[];
+  intlLocale: string;
   onUpdateKeywords: (id: number, positive: string[], negative: string[]) => Promise<boolean>;
   onUpdateGroups: (id: number, groups: SubscriptionGroup[]) => Promise<boolean>;
 }
 
-function SubscriptionRow({ sub, availableGroups, onUpdateKeywords, onUpdateGroups }: SubscriptionRowProps) {
+function SubscriptionRow({ sub, availableGroups, intlLocale, onUpdateKeywords, onUpdateGroups }: SubscriptionRowProps) {
   const [expanded, setExpanded] = useState(false);
   const [positive, setPositive] = useState(sub.positive_keywords);
   const [negative, setNegative] = useState(sub.negative_keywords);
@@ -137,7 +139,7 @@ function SubscriptionRow({ sub, availableGroups, onUpdateKeywords, onUpdateGroup
     <div className={`admin-sub-row ${sub.is_active ? "" : "inactive"}`}>
       <div className="admin-sub-header" onClick={() => setExpanded(!expanded)}>
         <span className="admin-sub-user">{formatUser(sub)}</span>
-        <span className="admin-sub-date">{formatDate(sub.created_at)}</span>
+        <span className="admin-sub-date">{formatDate(sub.created_at, intlLocale)}</span>
         {!sub.is_active && <span className="admin-sub-badge inactive">OFF</span>}
         <span className={`expand-icon ${expanded ? "expanded" : ""}`}>▼</span>
       </div>
@@ -192,6 +194,7 @@ function SubscriptionRow({ sub, availableGroups, onUpdateKeywords, onUpdateGroup
 export function AdminPage() {
   const navigate = useNavigate();
   const { webApp } = useTelegram();
+  const { intlLocale } = useLocale();
   const { subscriptions, loading, error, updateKeywords, updateGroups } = useAdminSubscriptions();
   const { groups: availableGroups, loading: groupsLoading, error: groupsError } = useAdminGroups();
 
@@ -240,6 +243,7 @@ export function AdminPage() {
             key={sub.id}
             sub={sub}
             availableGroups={availableGroups}
+            intlLocale={intlLocale}
             onUpdateKeywords={updateKeywords}
             onUpdateGroups={updateGroups}
           />

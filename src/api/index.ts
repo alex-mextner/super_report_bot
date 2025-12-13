@@ -2,7 +2,8 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { queries } from "../db/index.ts";
-import { validateInitData, parseInitDataUser } from "./auth.ts";
+import { validateInitData, parseInitDataUser, parseInitDataLanguage } from "./auth.ts";
+import { getUserLocale, getIntlLocale, detectLocale, isValidLocale } from "../i18n/index.ts";
 import { apiLog } from "../logger.ts";
 import { getMessages, getAllCachedMessages, getCachedGroups, getCachedMessageById, getTopicsByGroup } from "../cache/messages.ts";
 import { analyzeMessage, analyzeMessagesBatch, type BatchItem } from "../llm/analyze.ts";
@@ -69,6 +70,39 @@ api.get("/me", (c) => {
     userId: c.get("userId"),
     isAdmin: c.get("isAdmin"),
   });
+});
+
+// GET /api/user/locale - get user's locale for formatting
+api.get("/user/locale", (c) => {
+  const userId = c.get("userId");
+  if (!userId) {
+    return c.json({ locale: "en", intlLocale: "en-US" });
+  }
+
+  // 1. Check DB first (explicit choice via /lang command)
+  const dbLocale = queries.getUserLanguage(userId);
+  if (dbLocale && isValidLocale(dbLocale)) {
+    return c.json({
+      locale: dbLocale,
+      intlLocale: getIntlLocale(dbLocale),
+    });
+  }
+
+  // 2. Fallback: language_code from initData
+  const initData = c.req.header("X-Telegram-Init-Data");
+  if (initData) {
+    const langCode = parseInitDataLanguage(initData);
+    if (langCode) {
+      const locale = detectLocale(langCode);
+      return c.json({
+        locale,
+        intlLocale: getIntlLocale(locale),
+      });
+    }
+  }
+
+  // 3. Default
+  return c.json({ locale: "en", intlLocale: "en-US" });
 });
 
 // GET /api/groups - list of groups with cached messages

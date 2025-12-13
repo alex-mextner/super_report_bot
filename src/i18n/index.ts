@@ -147,6 +147,22 @@ export function setUserLanguage(telegramId: number, locale: Locale): Translator 
 
 
 /**
+ * Get BCP 47 locale code for Intl APIs (toLocaleString, Intl.NumberFormat, etc.)
+ */
+export function getIntlLocale(locale: Locale): string {
+  switch (locale) {
+    case "ru":
+      return "ru-RU";
+    case "en":
+      return "en-US";
+    case "rs":
+      return "sr-RS";
+    default:
+      return "en-US";
+  }
+}
+
+/**
  * Get language name for LLM prompts
  * Returns the language name in English for instructing LLMs
  */
@@ -159,7 +175,7 @@ export function getLanguageNameForLLM(locale: Locale): string {
     case "rs":
       return "Serbian";
     default:
-      return "Russian";
+      return "English";
   }
 }
 

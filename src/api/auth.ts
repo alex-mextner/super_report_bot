@@ -56,3 +56,19 @@ export function parseInitDataUser(initData: string): { id: number; first_name: s
     return null;
   }
 }
+
+/**
+ * Parse language_code from initData user object
+ */
+export function parseInitDataLanguage(initData: string): string | null {
+  try {
+    const params = new URLSearchParams(initData);
+    const userJson = params.get("user");
+    if (!userJson) return null;
+
+    const user = JSON.parse(userJson);
+    return user.language_code || null;
+  } catch {
+    return null;
+  }
+}

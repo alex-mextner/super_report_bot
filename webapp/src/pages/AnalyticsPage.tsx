@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useGroupAnalytics } from "../hooks/useGroupAnalytics";
 import { useTelegram } from "../hooks/useTelegram";
 import { useUser } from "../hooks/useUser";
+import { useLocale } from "../context/LocaleContext";
 import { apiClient } from "../api/client";
 import "./AnalyticsPage.css";
 
@@ -11,6 +12,7 @@ export function AnalyticsPage() {
   const navigate = useNavigate();
   const { webApp } = useTelegram();
   const { isAdmin } = useUser();
+  const { intlLocale } = useLocale();
   const { analytics, loading, error, refetch } = useGroupAnalytics(groupId ? Number(groupId) : null);
   const [generating, setGenerating] = useState(false);
 
@@ -75,7 +77,7 @@ export function AnalyticsPage() {
       <div className="analytics-header">
         <h1>{groupTitle}</h1>
         <div className="updated-at">
-          Обновлено: {new Date(computedAt * 1000).toLocaleDateString("ru-RU")}
+          Обновлено: {new Date(computedAt * 1000).toLocaleDateString(intlLocale)}
         </div>
       </div>
 
@@ -166,10 +168,10 @@ export function AnalyticsPage() {
                 <div className="price-category">{price.categoryName}</div>
                 <div className="price-stats">
                   <span className="price-range">
-                    {formatPrice(price.min, price.currency)} – {formatPrice(price.max, price.currency)}
+                    {formatPrice(price.min, price.currency, intlLocale)} – {formatPrice(price.max, price.currency, intlLocale)}
                   </span>
                   <span className="price-avg">
-                    сред: {formatPrice(price.avg, price.currency)}
+                    сред: {formatPrice(price.avg, price.currency, intlLocale)}
                   </span>
                 </div>
               </div>
@@ -181,8 +183,8 @@ export function AnalyticsPage() {
   );
 }
 
-function formatPrice(value: number, currency: string): string {
-  const formatter = new Intl.NumberFormat("ru-RU", {
+function formatPrice(value: number, currency: string, locale: string): string {
+  const formatter = new Intl.NumberFormat(locale, {
     style: "currency",
     currency,
     maximumFractionDigits: 0,
@@ -192,6 +194,6 @@ function formatPrice(value: number, currency: string): string {
     return formatter.format(value);
   } catch {
     // Fallback for unsupported currencies
-    return `${value.toLocaleString()} ${currency}`;
+    return `${value.toLocaleString(locale)} ${currency}`;
   }
 }

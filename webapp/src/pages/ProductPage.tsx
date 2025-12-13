@@ -1,6 +1,7 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useTelegram } from "../hooks/useTelegram";
+import { useLocale } from "../context/LocaleContext";
 import { useProduct, useSimilarProducts } from "../hooks/useProducts";
 import { useDeepAnalyze } from "../hooks/useDeepAnalyze";
 import { usePromotion } from "../hooks/usePromotion";
@@ -18,8 +19,8 @@ interface MediaItem {
   height?: number;
 }
 
-function formatDate(timestamp: number): string {
-  return new Date(timestamp * 1000).toLocaleString("ru-RU", {
+function formatDate(timestamp: number, locale: string): string {
+  return new Date(timestamp * 1000).toLocaleString(locale, {
     day: "numeric",
     month: "long",
     hour: "2-digit",
@@ -31,6 +32,7 @@ export function ProductPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { webApp, openLink } = useTelegram();
+  const { intlLocale } = useLocale();
 
   const productId = Number(id);
   const { product, loading, error } = useProduct(productId);
@@ -84,7 +86,7 @@ export function ProductPage() {
       <div className="product-detail">
         <div className="product-meta">
           <span className="product-group">{product.group_title}</span>
-          <span className="product-date">{formatDate(product.message_date)}</span>
+          <span className="product-date">{formatDate(product.message_date, intlLocale)}</span>
         </div>
 
         {media.length > 0 && (
@@ -157,7 +159,7 @@ export function ProductPage() {
           <div className="promotion-section">
             {promoStatus.isPromoted ? (
               <div className="promotion-active">
-                ✅ Продвигается до {new Date(promoStatus.endsAt! * 1000).toLocaleDateString("ru")}
+                ✅ Продвигается до {new Date(promoStatus.endsAt! * 1000).toLocaleDateString(intlLocale)}
               </div>
             ) : promoStatus.canPromote ? (
               <div className="promotion-buttons">

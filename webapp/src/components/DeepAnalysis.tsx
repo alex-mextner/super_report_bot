@@ -1,4 +1,5 @@
 import type { DeepAnalysisResult } from "../hooks/useDeepAnalyze";
+import { useLocale } from "../context/LocaleContext";
 import "./DeepAnalysis.css";
 
 interface Props {
@@ -12,10 +13,10 @@ const currencySymbols: Record<string, string> = {
   RSD: " дин",
 };
 
-function formatPrice(price: number | null, currency?: string): string {
+function formatPrice(price: number | null, currency: string | undefined, locale: string): string {
   if (price === null) return "—";
   const symbol = currency ? (currencySymbols[currency] || ` ${currency}`) : " ₽";
-  return price.toLocaleString("ru-RU") + symbol;
+  return price.toLocaleString(locale) + symbol;
 }
 
 function getVerdictInfo(verdict: string): { text: string; className: string } {
@@ -50,6 +51,8 @@ const listingTypeLabels: Record<string, string> = {
 };
 
 export function DeepAnalysis({ result }: Props) {
+  const { intlLocale } = useLocale();
+
   if (!result.isListing) {
     return (
       <div className="deep-analysis">
@@ -116,7 +119,7 @@ export function DeepAnalysis({ result }: Props) {
                     {item.extractedPrice || "—"}
                   </span>
                   <span className="col-market">
-                    {item.marketPriceAvg ? `~${formatPrice(item.marketPriceAvg, item.marketCurrency ?? undefined)}` : "—"}
+                    {item.marketPriceAvg ? `~${formatPrice(item.marketPriceAvg, item.marketCurrency ?? undefined, intlLocale)}` : "—"}
                   </span>
                   <span className={`col-verdict ${verdictInfo.className}`}>
                     {verdictInfo.text}
@@ -177,7 +180,7 @@ export function DeepAnalysis({ result }: Props) {
               className="similar-item similar-item-link"
             >
               <span className="similar-text">{item.text}</span>
-              <span className="similar-price">{formatPrice(item.price, item.currency ?? undefined)}</span>
+              <span className="similar-price">{formatPrice(item.price, item.currency ?? undefined, intlLocale)}</span>
             </a>
           ))}
         </div>

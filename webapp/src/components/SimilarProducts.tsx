@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import type { SimilarProduct } from "../types";
+import { useLocale } from "../context/LocaleContext";
 import "./SimilarProducts.css";
 
 interface Props {
@@ -7,15 +8,16 @@ interface Props {
   loading: boolean;
 }
 
-function formatPriceDiff(diff: number | null): string | null {
+function formatPriceDiff(diff: number | null, locale: string): string | null {
   if (diff === null) return null;
   if (diff === 0) return "такая же цена";
-  if (diff > 0) return `+${diff.toLocaleString("ru-RU")} ₽`;
-  return `${diff.toLocaleString("ru-RU")} ₽`;
+  if (diff > 0) return `+${diff.toLocaleString(locale)} ₽`;
+  return `${diff.toLocaleString(locale)} ₽`;
 }
 
 export function SimilarProducts({ products, loading }: Props) {
   const navigate = useNavigate();
+  const { intlLocale } = useLocale();
 
   if (loading) {
     return (
@@ -49,13 +51,13 @@ export function SimilarProducts({ products, loading }: Props) {
               {product.price_raw && (
                 <span className="similar-price">{product.price_raw}</span>
               )}
-              {formatPriceDiff(product.priceDiff) && (
+              {formatPriceDiff(product.priceDiff, intlLocale) && (
                 <span
                   className={`similar-diff ${
                     product.priceDiff! > 0 ? "diff-more" : "diff-less"
                   }`}
                 >
-                  {formatPriceDiff(product.priceDiff)}
+                  {formatPriceDiff(product.priceDiff, intlLocale)}
                 </span>
               )}
             </div>
