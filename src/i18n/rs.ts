@@ -432,7 +432,7 @@ Bot koristi AI, ključne reči i semantičku analizu — pronalazi objave sa gre
 
   // Additional callbacks
   sub_paused_list: "Pretplata pauzirana. /list za nastavak.",
-  sub_disabled_ask_feedback: "Pretplata onemogućena.\n\nDa li si uspeo da kupiš?",
+  sub_disabled_ask_feedback: "Pretplata onemogućena.\n\nDa li je dogovor uspeo?",
   sub_created_no_groups: "Pretplata kreirana! Grupe nisu izabrane, praćenje svih dostupnih.",
   cancel_send_new_query: "Otkazano. Pošalji novi upit kada budeš spreman.",
   unknown_query: "Nepoznat upit",

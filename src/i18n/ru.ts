@@ -432,7 +432,7 @@ const ru = {
 
   // Additional callbacks
   sub_paused_list: "Подписка приостановлена. /list чтобы возобновить.",
-  sub_disabled_ask_feedback: "Подписка отключена.\n\nУдалось ли купить?",
+  sub_disabled_ask_feedback: "Подписка отключена.\n\nСделка состоялась?",
   sub_created_no_groups: "Подписка создана! Группы не выбраны, мониторинг будет по всем доступным.",
   cancel_send_new_query: "Отменено. Отправь новый запрос когда будешь готов.",
   unknown_query: "Неизвестный запрос",

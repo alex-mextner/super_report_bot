@@ -432,7 +432,7 @@ The bot uses AI, keywords and semantic analysis — it finds posts with typos, i
 
   // Additional callbacks
   sub_paused_list: "Subscription paused. /list to resume.",
-  sub_disabled_ask_feedback: "Subscription disabled.\n\nDid you manage to buy?",
+  sub_disabled_ask_feedback: "Subscription disabled.\n\nDid the deal work out?",
   sub_created_no_groups: "Subscription created! No groups selected, monitoring all available.",
   cancel_send_new_query: "Cancelled. Send a new query when ready.",
   unknown_query: "Unknown query",

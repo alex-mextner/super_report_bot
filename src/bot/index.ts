@@ -2199,7 +2199,7 @@ bot.on("callback_query", async (context) => {
     return;
   }
 
-  let data: { action: string; id?: string | number; type?: string; idx?: number; msgId?: number; grpId?: number; kw?: string; lang?: string };
+  let data: { action: string; id?: string | number; type?: string; idx?: number; msgId?: number; grpId?: number; kw?: string; lang?: string; outcome?: string };
   try {
     const raw = JSON.parse(context.data || "{}");
     // Normalize short keys to long keys
@@ -2212,6 +2212,7 @@ bot.on("callback_query", async (context) => {
       grpId: raw.grpId ?? raw.g,
       kw: raw.kw,
       lang: raw.lang ?? raw.l,
+      outcome: raw.outcome,
     };
   } catch {
     return;
