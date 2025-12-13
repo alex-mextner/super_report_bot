@@ -45,7 +45,6 @@ Opiši kao osoba koja objavljuje — kako izgleda post koji ti treba?`,
   kb_done_count: "Gotovo ({n})",
   kb_add: "Dodaj",
   kb_remove: "Obriši",
-  kb_change: "Promeni",
   kb_yes: "Da",
   kb_no: "Ne",
 
@@ -147,6 +146,7 @@ Opiši kao osoba koja objavljuje — kako izgleda post koji ti treba?`,
   analysis_description: "Opis za proveru:",
   analysis_analyzing: "Analiziram upit...",
   analysis_generating_with_ratings: "Generišem ključne reči na osnovu tvojih ocena...",
+  analysis_keywords_stats: "Generisano {positive} ključnih reči i {negative} stop reči",
 
   // Commands extended
   // List command
@@ -175,8 +175,6 @@ Opiši kao osoba koja objavljuje — kako izgleda post koji ti treba?`,
   presets_not_configured: "Preseti regiona još nisu konfigurisani.",
   presets_intro: "Preset je skup svih buvljaka u regionu.\nKupi preset i dodaj sve grupe regiona u pretplatu jednim klikom.\n\nIzaberi region:",
   presets_select_region: "Izaberi region",
-  presets_region_explanation: "Ovo je potrebno za prikaz preseta grupa pri kreiranju pretplate.",
-
   // Catalog
   catalog_open: "Otvori katalog proizvoda:",
   catalog_button: "Otvori katalog",
@@ -227,7 +225,6 @@ Opiši kao osoba koja objavljuje — kako izgleda post koji ti treba?`,
   ai_changes: "Izmene:",
   ai_no_changes: "Bez izmena",
   ai_comment: "AI:",
-  ai_example_messages: "Primeri poruka:",
   ai_error: "Greška obrade. Pokušaj preformulisati.",
   ai_new_description: "Novi opis:",
   ai_edit_mode: "AI režim uređivanja",
@@ -531,7 +528,6 @@ Bot koristi AI, ključne reči i semantičku analizu — pronalazi objave sa gre
   preset_buy_title: "Preset: {name}",
   preset_buy_desc_lifetime: "Doživotni pristup za {count} grupa",
   preset_buy_desc_month: "30-dnevni pristup za {count} grupa",
-  preset_region_saved: "Region sačuvan: {name}",
   preset_region: "Region: {name}",
 
   // Promotion detailed
@@ -651,11 +647,6 @@ Bot koristi AI, ključne reči i semantičku analizu — pronalazi objave sa gre
   referral_info: "Pozovi prijatelje i zaradi 10% od njihovih kupovina!",
   referral_earned: "🎁 Zaradio si {amount}⭐ bonus od kupovine korisnika {name}!",
   bonus_applied: "✅ Iskorišćeno {amount}⭐ bonusa",
-  bonus_offer: "💰 Imaš {balance}⭐ bonusa. Iskoristiti?",
-  bonus_use_full: "Iskoristi {amount}⭐ (besplatno)",
-  bonus_use_partial: "Iskoristi {bonus}⭐ (plati {remaining}⭐)",
-  bonus_skip: "Ne koristi bonus",
-
   // Tips (shown during LLM processing)
   tip_header: "💡 Savet dok čekate:",
   tip_referral: "Pozovi prijatelje i zaradi 10% od njihovih kupovina! /referral",
@@ -670,10 +661,7 @@ Bot koristi AI, ključne reči i semantičku analizu — pronalazi objave sa gre
   region_other: "🌍 Drugi region",
   region_saved_with_presets: "✅ Region sačuvan!\n\nEvo grupa za tvoj region. Koristi /addgroup ako želiš da dodaš grupe koje bot još ne poznaje.",
   region_other_addgroup: "✅ Region sačuvan!\n\nKoristi /addgroup da dodaš grupe za praćenje.",
-  region_mention_addgroup: "💡 Koristi /addgroup ako želiš da dodaš dodatne grupe.",
-
   // Admin webapp
-  adminPresets: "Preseti",
 };
 
 export default rs;

@@ -327,16 +327,26 @@ async function showConfirmation(
   });
 
   if (mode === "normal") {
-    // Simplified view for normal mode - only description
+    // Simplified view for normal mode - only description + stats
     await context.send(
       format`${bold(tr("analysis_result"))}
 
 ${bold(tr("analysis_what_looking"))}
 ${result.llm_description}
 
+${tr("analysis_keywords_stats", {
+  positive: result.positive_keywords.length,
+  negative: result.negative_keywords.length,
+})}
+
 ${tr("sub_confirm_or_cancel")}`,
       {
-        reply_markup: confirmKeyboard(queryId, tr),
+        reply_markup: confirmKeyboard(
+          queryId,
+          tr,
+          result.positive_keywords.length,
+          result.negative_keywords.length
+        ),
       }
     );
   } else {
@@ -2678,6 +2688,25 @@ ${bold(tr("list_query"))} ${sub.original_query}
       let text = `+ ${sub.positive_keywords.join(", ")}`;
       if (sub.negative_keywords.length > 0) {
         text += `\n− ${sub.negative_keywords.join(", ")}`;
+      }
+
+      await context.answer();
+      await bot.api.sendMessage({ chat_id: userId, text });
+      break;
+    }
+
+    case "show_pending_keywords": {
+      const fsmCtx = ctx(userId);
+      const pendingSub = fsmCtx.pendingSub;
+
+      if (!pendingSub) {
+        await context.answer({ text: tr("sub_not_found") });
+        return;
+      }
+
+      let text = `+ ${pendingSub.positiveKeywords.join(", ")}`;
+      if (pendingSub.negativeKeywords.length > 0) {
+        text += `\n− ${pendingSub.negativeKeywords.join(", ")}`;
       }
 
       await context.answer();

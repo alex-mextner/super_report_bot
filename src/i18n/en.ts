@@ -45,7 +45,6 @@ Describe as the person posting — what does the post you need look like?`,
   kb_done_count: "Done ({n})",
   kb_add: "Add",
   kb_remove: "Remove",
-  kb_change: "Change",
   kb_yes: "Yes",
   kb_no: "No",
 
@@ -147,6 +146,7 @@ Describe as the person posting — what does the post you need look like?`,
   analysis_description: "Description for verification:",
   analysis_analyzing: "Analyzing query...",
   analysis_generating_with_ratings: "Generating keywords based on your ratings...",
+  analysis_keywords_stats: "Generated {positive} keywords and {negative} stop words",
 
   // Commands extended
   // List command
@@ -175,8 +175,6 @@ Describe as the person posting — what does the post you need look like?`,
   presets_not_configured: "Region presets are not configured yet.",
   presets_intro: "A preset is a collection of all marketplace groups in a region.\nBuy a preset and add all groups from a region to your subscription with one click.\n\nSelect a region:",
   presets_select_region: "Select region",
-  presets_region_explanation: "This is needed to show group presets when creating a subscription.",
-
   // Catalog
   catalog_open: "Open the product catalog:",
   catalog_button: "Open catalog",
@@ -227,7 +225,6 @@ Describe as the person posting — what does the post you need look like?`,
   ai_changes: "Changes:",
   ai_no_changes: "No changes",
   ai_comment: "AI:",
-  ai_example_messages: "Example messages:",
   ai_error: "Processing error. Try rephrasing.",
   ai_new_description: "New description:",
   ai_edit_mode: "AI Editing Mode",
@@ -531,7 +528,6 @@ The bot uses AI, keywords and semantic analysis — it finds posts with typos, i
   preset_buy_title: "Preset: {name}",
   preset_buy_desc_lifetime: "Lifetime access to {count} groups",
   preset_buy_desc_month: "30-day access to {count} groups",
-  preset_region_saved: "Region saved: {name}",
   preset_region: "Region: {name}",
 
   // Promotion detailed
@@ -651,9 +647,6 @@ The bot uses AI, keywords and semantic analysis — it finds posts with typos, i
   referral_info: "Invite friends and earn 10% from their purchases!",
   referral_earned: "🎁 You earned {amount}⭐ bonus from {name}'s purchase!",
   bonus_applied: "✅ Used {amount}⭐ bonus",
-  bonus_offer: "💰 You have {balance}⭐ bonus. Use it?",
-  bonus_use_full: "Use {amount}⭐ (free)",
-  bonus_use_partial: "Use {bonus}⭐ (pay {remaining}⭐)",
   bonus_skip: "Don't use bonus",
 
   // Tips (shown during LLM processing)
@@ -670,10 +663,7 @@ The bot uses AI, keywords and semantic analysis — it finds posts with typos, i
   region_other: "🌍 Other region",
   region_saved_with_presets: "✅ Region saved!\n\nHere are groups for your region. Use /addgroup if you want to add groups the bot doesn't know yet.",
   region_other_addgroup: "✅ Region saved!\n\nUse /addgroup to add groups for monitoring.",
-  region_mention_addgroup: "💡 Use /addgroup if you want to add more groups.",
-
   // Admin webapp
-  adminPresets: "Presets",
 };
 
 export default en;

@@ -65,12 +65,28 @@ export function pendingGroupsKeyboard(groups: PendingGroup[]): InlineKeyboard {
 }
 
 // Basic confirmation keyboard for subscription creation
-export const confirmKeyboard = (queryId: string, t: Translator) => {
-  return new InlineKeyboard()
-    .text(t("kb_confirm"), JSON.stringify({ action: "confirm", id: queryId }))
+export const confirmKeyboard = (
+  queryId: string,
+  t: Translator,
+  positiveCount?: number,
+  negativeCount?: number
+) => {
+  const kb = new InlineKeyboard();
+
+  // Add show keywords button if counts provided (normal mode)
+  if (positiveCount !== undefined) {
+    const label = negativeCount
+      ? `${t("kb_show_keywords")} (${positiveCount}+${negativeCount})`
+      : `${t("kb_show_keywords")} (${positiveCount})`;
+    kb.text(label, JSON.stringify({ action: "show_pending_keywords" })).row();
+  }
+
+  kb.text(t("kb_confirm"), JSON.stringify({ action: "confirm", id: queryId }))
     .text(t("kb_adjust_ai"), JSON.stringify({ action: "correct_pending", id: queryId }))
     .row()
     .text(t("kb_cancel"), JSON.stringify({ action: "cancel", id: queryId }));
+
+  return kb;
 };
 
 // Confirmation keyboard with keyword editing buttons (for advanced mode)
